@@ -85,17 +85,18 @@ setup_test_journal >/dev/null
 make_fixture_projects_tree_from multi-project/projects-tree
 export CLAST_NOW_EPOCH; CLAST_NOW_EPOCH="$(date -d "2026-05-30T05:00:00Z" +%s)"
 export CLAST_DAY_CUTOFF=04:00
+# Freeze TZ so the cutoff math (local-date format) is deterministic across
+# developer / CI timezones.
+export TZ=UTC
 out="$("$CLAST_BIN" --json snapshot 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "1" "$rc" "multi: partial-failure exit (notes.jsonl errors)"
-# uuid-2's first-line timestamp is 2026-05-30T01:30:00Z which (with 04:00
-# cutoff applied LOCAL) should bucket into the prior day. The local bucket
-# depends on TZ; assert that we got at least one capture under a 2026-05-29
-# day_bucket to prove the cutoff math fires.
-buckets="$(jq -r '.captured[].day_bucket' <<<"$out" | sort -u)"
-case "$buckets" in
-  *2026-05-29*) _clast_test_pass "multi: at least one capture in 2026-05-29 bucket" ;;
-  *) _clast_test_fail "multi: at least one capture in 2026-05-29 bucket"; printf '%s\n' "$buckets" >&2 ;;
-esac
+# With TZ=UTC and 04:00 cutoff: uuid-2's 2026-05-30T01:30Z first-line
+# timestamp shifts back into the 2026-05-29 bucket; uuid-3's 10:00Z lands
+# in 2026-05-30. uuid-2's exact path is the strongest assertion.
+uuid2_day="$(jq -r '.captured[] | select(.session_id == "22222222-2222-4222-8222-222222222222") | .day_bucket' <<<"$out")"
+assert_eq "2026-05-29" "$uuid2_day" "multi: uuid-2 cutoff-shifted into 2026-05-29 bucket"
+uuid3_day="$(jq -r '.captured[] | select(.session_id == "33333333-3333-4333-8333-333333333333") | .day_bucket' <<<"$out")"
+assert_eq "2026-05-30" "$uuid3_day" "multi: uuid-3 stays in 2026-05-30 bucket"
 assert_eq "3" "$(jq '.captured | length' <<<"$out")" "multi: 3 valid captures"
 assert_eq "1" "$(jq '.errors | length' <<<"$out")" "multi: 1 error (notes.jsonl)"
 err_reason="$(jq -r '.errors[0].reason' <<<"$out")"
@@ -103,7 +104,7 @@ case "$err_reason" in
   *uuid*) _clast_test_pass "multi: error reason mentions uuid" ;;
   *) _clast_test_fail "multi: error reason mentions uuid (got: $err_reason)" ;;
 esac
-unset CLAST_NOW_EPOCH CLAST_DAY_CUTOFF
+unset CLAST_NOW_EPOCH CLAST_DAY_CUTOFF TZ
 teardown_test_journal
 
 # --- multi-project: --include-segment limits scope ---------------------------
