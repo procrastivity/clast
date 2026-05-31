@@ -57,36 +57,30 @@ assert_eq "$PWD" "$(jq -r .pwd <<<"$json_out")" "whereami --json: pwd equals \$P
 # --- non-git directory: git_root is null/em-dash ------------------------
 
 tmp_nongit="$(mktemp -d -t clast.whereami.nongit.XXXXXX)"
-(
-  cd "$tmp_nongit" || exit 1
-  ng_json="$("$CLAST_BIN" whereami --json)"
-  gr="$(jq -r .git_root <<<"$ng_json")"
-  if [[ "$gr" == "null" ]]; then
-    _clast_test_pass "non-git dir: git_root is null in JSON"
-  else
-    _clast_test_fail "non-git dir: git_root is null in JSON (got: $gr)"
-  fi
+ng_json="$(cd "$tmp_nongit" && "$CLAST_BIN" whereami --json)"
+gr="$(jq -r .git_root <<<"$ng_json")"
+if [[ "$gr" == "null" ]]; then
+  _clast_test_pass "non-git dir: git_root is null in JSON"
+else
+  _clast_test_fail "non-git dir: git_root is null in JSON (got: $gr)"
+fi
 
-  ng_human="$("$CLAST_BIN" whereami)"
-  case "$ng_human" in
-    *"git_root:"*"—"*) _clast_test_pass "non-git dir: git_root rendered as em-dash" ;;
-    *) _clast_test_fail "non-git dir: git_root rendered as em-dash"
-       printf '%s\n' "$ng_human" >&2 ;;
-  esac
-)
+ng_human="$(cd "$tmp_nongit" && "$CLAST_BIN" whereami)"
+case "$ng_human" in
+  *"git_root:"*"—"*) _clast_test_pass "non-git dir: git_root rendered as em-dash" ;;
+  *) _clast_test_fail "non-git dir: git_root rendered as em-dash"
+     printf '%s\n' "$ng_human" >&2 ;;
+esac
 rm -rf "$tmp_nongit"
 
 # --- git directory: git_root reports the repo root ----------------------
 
 tmp_git="$(mktemp -d -t clast.whereami.git.XXXXXX)"
-(
-  cd "$tmp_git" || exit 1
-  git init -q
-  expected_root="$(git rev-parse --show-toplevel)"
-  g_json="$("$CLAST_BIN" whereami --json)"
-  assert_eq "$expected_root" "$(jq -r .git_root <<<"$g_json")" \
-    "git dir: git_root equals git rev-parse --show-toplevel"
-)
+(cd "$tmp_git" && git init -q)
+expected_root="$(cd "$tmp_git" && git rev-parse --show-toplevel)"
+g_json="$(cd "$tmp_git" && "$CLAST_BIN" whereami --json)"
+assert_eq "$expected_root" "$(jq -r .git_root <<<"$g_json")" \
+  "git dir: git_root equals git rev-parse --show-toplevel"
 rm -rf "$tmp_git"
 
 # --- --quiet does not suppress whereami output --------------------------
