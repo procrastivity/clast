@@ -60,12 +60,18 @@ _seed_journal
 out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json projects --day 2026-05-30 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "projects --day 2026-05-30 --json: exits 0"
 assert_eq "2" "$(jq 'length' <<<"$out")" "projects --day 2026-05-30 --json: length 2"
-# Each row has the eight documented keys.
-keys="$(jq -r '.[0] | keys_unsorted | join(",")' <<<"$out")"
-case "$keys" in
-  *slug*|*path*) _clast_test_pass "projects --json: row has documented keys" ;;
-  *) _clast_test_fail "projects --json: row has documented keys (got: $keys)" ;;
-esac
+# Each row has all eight documented keys (slug, path, segment, remote,
+# session_count, msg_count_approx, last_active, registered).
+if jq -e '
+  .[0] as $r
+  | ["slug","path","segment","remote","session_count","msg_count_approx","last_active","registered"]
+  | all(. as $k | $r | has($k))
+' <<<"$out" >/dev/null; then
+  _clast_test_pass "projects --json: row has all eight documented keys"
+else
+  _clast_test_fail "projects --json: row has all eight documented keys"
+  jq -r '.[0] | keys_unsorted | join(",")' <<<"$out" >&2
+fi
 # last_active is full ISO Z
 la="$(jq -r '.[0].last_active' <<<"$out")"
 case "$la" in

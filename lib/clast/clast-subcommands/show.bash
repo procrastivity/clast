@@ -81,7 +81,7 @@ clast_cmd_show() {
   journal_dir="$(clast_journal_dir)"
   abs_path="$journal_dir/$snapshot"
 
-  if [[ ! -f "$abs_path" ]]; then
+  if [[ ! -r "$abs_path" ]]; then
     _clast_show_err "snapshot file missing on disk (run 'clast doctor')" 1
     return 1
   fi
@@ -103,9 +103,14 @@ clast_cmd_show() {
   end_ts="${last_ts:-$source_mtime}"
 
   # first_prompt / last_prompt — best-effort scan of user messages.
-  local first_prompt last_prompt
-  first_prompt="$(_clast_show_user_messages "$abs_path" | head -n1)"
-  last_prompt="$(_clast_show_user_messages "$abs_path" | tail -n1)"
+  # These pipelines must never abort the command: malformed JSONL lines are
+  # routine, and the fields are explicitly documented as best-effort.
+  local first_prompt last_prompt user_msgs=""
+  user_msgs="$(_clast_show_user_messages "$abs_path" 2>/dev/null || true)"
+  first_prompt="$(printf '%s\n' "$user_msgs" | head -n1)"
+  last_prompt="$(printf '%s\n' "$user_msgs" | tail -n1)"
+  # If the stream was empty the head/tail of '\n' is empty — keep as ''.
+  [[ -z "$user_msgs" ]] && first_prompt="" && last_prompt=""
   first_prompt="$(_clast_show_truncate "$first_prompt")"
   last_prompt="$(_clast_show_truncate "$last_prompt")"
 
@@ -131,9 +136,12 @@ clast_cmd_show() {
   # TODO(step-10): branch field is best-effort; revisit when stats command lands.
   local branch=""
 
-  # --- Build first_turns / last_turns for --full and --json ---------------
+  # --- Build first_turns / last_turns only when --full is set ------------
+  # Collecting turns slurps the entire JSONL into jq; skip the cost when
+  # --full wasn't requested (the JSON object never emits these arrays
+  # without --full).
   local turns_json='[]' first_turns_json='[]' last_turns_json='[]'
-  if (( include_turns == 1 )) || [[ -n "${CLAST_JSON:-}" ]]; then
+  if (( include_turns == 1 )); then
     turns_json="$(_clast_show_collect_turns "$abs_path")"
     first_turns_json="$(jq -c --argjson n "$turn_count" '.[0:$n]' <<<"$turns_json")"
     last_turns_json="$(jq -c --argjson n "$turn_count" '.[-$n:]' <<<"$turns_json")"

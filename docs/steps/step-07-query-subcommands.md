@@ -138,7 +138,7 @@ Read before starting:
 20. **Write `test/test-query.sh`.** Subprocess-style suite modeled on `test/test-snapshot.sh`. `cd` to repo root, `source test/helpers.sh`, set `_CLAST_TEST_NAME=test-query`. Each scenario calls `setup_test_journal`, seeds via the new helper from task 19, runs `bin/clast projects|sessions|show ...`, asserts on stdout/stderr/exit code, then `teardown_test_journal`. Cover at minimum:
     - **`clast projects` defaults to today**: with `CLAST_NOW_EPOCH` frozen to `2026-05-30T12:00:00Z`, no flags, lists exactly the projects with `day_bucket=2026-05-30` activity (two projects in the seed).
     - **`clast projects --day 2026-05-29`**: returns only the xesapps row, with `session_count=1` and `last_active` rendering as `HH:MM`.
-    - **`clast projects --since 2026-05-22 --until 2026-05-30`**: returns all three projects across the window; `last_active` renders as `YYYY-MM-DD HH:MM` (multi-day window).
+    - **`clast projects --since 2026-05-22 --until 2026-05-30`**: returns both distinct projects (xesapps + scratch) across the window; `last_active` renders as `YYYY-MM-DD HH:MM` (multi-day window).
     - **`clast projects --day 2026-05-30 --json`**: stdout is valid JSON, array of length 2, each object has the eight documented fields, `last_active` is full ISO 8601 with `Z`.
     - **`clast projects --unregistered`**: returns only the `-tmp-proj-scratch` row (no registry hit).
     - **`clast projects --day` combined with `--since`**: exits 2, stderr mentions mutual exclusion.

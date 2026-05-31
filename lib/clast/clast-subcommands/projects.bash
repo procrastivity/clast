@@ -98,6 +98,12 @@ clast_cmd_projects() {
     day_filter="$(clast_today)"
   fi
 
+  # `--until` defaults to `today` per docs/cli-contract.md#clast-projects when
+  # `--since` is supplied without an explicit upper bound.
+  if [[ -n "$since_date" && -z "$until_date" ]]; then
+    until_date="$(clast_today)"
+  fi
+
   # Single-day window when --day is set, or --since == --until.
   local single_day=""
   if [[ -n "$day_filter" ]]; then
@@ -144,7 +150,9 @@ clast_cmd_projects() {
       msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
       [[ -z "$msgs" ]] && msgs=0
     else
-      clast_log_warn "projects: snapshot missing or unreadable: $abs_path"
+      if [[ -n "${CLAST_VERBOSE:-}" ]]; then
+        clast_log_warn "projects: snapshot missing or unreadable: $abs_path"
+      fi
       msgs=0
     fi
     seg_msg_count["$seg"]=$(( ${seg_msg_count["$seg"]:-0} + msgs ))

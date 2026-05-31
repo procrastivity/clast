@@ -101,6 +101,12 @@ clast_cmd_sessions() {
     day_filter="$(clast_today)"
   fi
 
+  # `--until` defaults to `today` per docs/cli-contract.md#clast-sessions
+  # when `--since` is supplied without an explicit upper bound.
+  if [[ -n "$since_date" && -z "$until_date" ]]; then
+    until_date="$(clast_today)"
+  fi
+
   local filter
   filter="$(_clast_sessions_window_filter "$day_filter" "$since_date" "$until_date")"
 
@@ -157,7 +163,9 @@ clast_cmd_sessions() {
       first_ts="$(head -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
       last_ts="$(tail -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
     else
-      clast_log_warn "sessions: snapshot missing or unreadable: $abs_path"
+      if [[ -n "${CLAST_VERBOSE:-}" ]]; then
+        clast_log_warn "sessions: snapshot missing or unreadable: $abs_path"
+      fi
       msgs=0
       first_ts=""
       last_ts=""
