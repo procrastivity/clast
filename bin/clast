@@ -117,7 +117,13 @@ case "$cmd" in
     source "$CLAST_LIB/clast-subcommands/whereami.bash"
     clast_cmd_whereami "$@"
     ;;
-  snapshot)   _clast_stub snapshot   06 ;;
+  snapshot)
+    # shellcheck source=lib/clast/clast-subcommands/snapshot.bash
+    source "$CLAST_LIB/clast-subcommands/snapshot.bash"
+    # shellcheck source=lib/clast/clast-manifest-lib.bash
+    source "$CLAST_LIB/clast-manifest-lib.bash"
+    clast_cmd_snapshot "$@"
+    ;;
   projects)   _clast_stub projects   07 ;;
   sessions)   _clast_stub sessions   08 ;;
   show)       _clast_stub show       09 ;;

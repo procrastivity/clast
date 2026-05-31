@@ -211,7 +211,7 @@ Usage:
 
 Subcommands:
   whereami      Show current path, registry, and journal state
-  snapshot      Capture new transcripts into the journal (planned)
+  snapshot      Capture new transcripts into the journal
   projects      List projects with activity in a window  (planned)
   sessions      List sessions in a window                (planned)
   show          Dump session metadata                    (planned)
