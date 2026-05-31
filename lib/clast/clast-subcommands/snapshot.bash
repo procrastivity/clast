@@ -77,6 +77,10 @@ clast_cmd_snapshot() {
           clast_log_error "snapshot: --include-segment value must start with '-' (got '$_v')"; return 2
         fi
         include_segments+=("$_v"); shift ;;
+      --json)
+        # Accept the global flag positionally as well, mirroring registry.
+        # Lets `clast snapshot --json` work alongside `clast --json snapshot`.
+        export CLAST_JSON=1; shift ;;
       -h|--help)
         _clast_snapshot_usage; return 0 ;;
       *)
@@ -152,7 +156,10 @@ clast_cmd_snapshot() {
       if [[ -n "$first_ts" ]] && ts_epoch="$(date -d "$first_ts" +%s 2>/dev/null)" && [[ -n "$ts_epoch" ]]; then
         day_bucket="$(_clast_snapshot_bucket_for_epoch "$ts_epoch")"
       else
-        clast_log_warn "snapshot: '$source' missing first-line timestamp; falling back to mtime"
+        # --verbose only: a malformed first line shouldn't spam cron/hook logs.
+        if [[ -n "${CLAST_VERBOSE:-}" ]]; then
+          clast_log_warn "snapshot: '$source' missing first-line timestamp; falling back to mtime"
+        fi
         day_bucket="$(_clast_snapshot_bucket_for_epoch "$mtime_epoch")"
       fi
 
