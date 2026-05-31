@@ -1,0 +1,4 @@
+{"type":"summary","cwd":"/tmp/proj-xesapps","timestamp":"2026-05-29T09:15:00Z","session_id":"11111111-1111-4111-8111-111111111111"}
+{"type":"message","role":"user","timestamp":"2026-05-29T09:15:05Z","content":"investigate vw_Consumer_Fields_All"}
+{"type":"message","role":"assistant","timestamp":"2026-05-29T09:16:00Z","content":"looking at the EXPLAIN plan"}
+{"type":"message","role":"user","timestamp":"2026-05-29T11:48:00Z","content":"benchmark the new query plan?"}

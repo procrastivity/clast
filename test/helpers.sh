@@ -122,6 +122,24 @@ make_fixture_projects_tree_from() {
   cp -R "$src"/. "$CLAST_PROJECTS_DIR"/
 }
 
+# make_fixture_journal_seed_from <fixture-name>/<subpath>
+#   Copies test/fixtures/<name>/<subpath>/ into $CLAST_JOURNAL_DIR. Mirrors
+#   make_fixture_projects_tree_from; lets a single fixture host a
+#   pre-populated journal (e.g. multi-project/journal-seed/).
+make_fixture_journal_seed_from() {
+  local rel="$1"
+  local src="test/fixtures/$rel"
+  if [[ ! -d "$src" ]]; then
+    printf 'make_fixture_journal_seed_from: missing fixture %q\n' "$src" >&2
+    return 1
+  fi
+  if [[ -z "${CLAST_JOURNAL_DIR:-}" ]]; then
+    printf 'make_fixture_journal_seed_from: setup_test_journal not called\n' >&2
+    return 1
+  fi
+  cp -R "$src"/. "$CLAST_JOURNAL_DIR"/
+}
+
 # make_fixture_journal_tree <fixture-name>
 #   Copies test/fixtures/<name>/ into $CLAST_JOURNAL_DIR. The fixture
 #   directory must exist; setup_test_journal must have been called first.

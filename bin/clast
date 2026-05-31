@@ -15,6 +15,8 @@ source "$CLAST_LIB/clast-lib.bash"
 source "$CLAST_LIB/clast-decode-lib.bash"
 # shellcheck source=lib/clast/clast-registry-lib.bash
 source "$CLAST_LIB/clast-registry-lib.bash"
+# shellcheck source=lib/clast/clast-manifest-lib.bash
+source "$CLAST_LIB/clast-manifest-lib.bash"
 
 # --- Global flag parsing -------------------------------------------------
 #
@@ -120,13 +122,23 @@ case "$cmd" in
   snapshot)
     # shellcheck source=lib/clast/clast-subcommands/snapshot.bash
     source "$CLAST_LIB/clast-subcommands/snapshot.bash"
-    # shellcheck source=lib/clast/clast-manifest-lib.bash
-    source "$CLAST_LIB/clast-manifest-lib.bash"
     clast_cmd_snapshot "$@"
     ;;
-  projects)   _clast_stub projects   07 ;;
-  sessions)   _clast_stub sessions   08 ;;
-  show)       _clast_stub show       09 ;;
+  projects)
+    # shellcheck source=lib/clast/clast-subcommands/projects.bash
+    source "$CLAST_LIB/clast-subcommands/projects.bash"
+    clast_cmd_projects "$@"
+    ;;
+  sessions)
+    # shellcheck source=lib/clast/clast-subcommands/sessions.bash
+    source "$CLAST_LIB/clast-subcommands/sessions.bash"
+    clast_cmd_sessions "$@"
+    ;;
+  show)
+    # shellcheck source=lib/clast/clast-subcommands/show.bash
+    source "$CLAST_LIB/clast-subcommands/show.bash"
+    clast_cmd_show "$@"
+    ;;
   entries)    _clast_stub entries    10 ;;
   breadcrumb) _clast_stub breadcrumb 11 ;;
   registry)
