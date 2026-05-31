@@ -39,10 +39,13 @@ EOF
     remote="$(git -C "$git_root" config --get remote.origin.url 2>/dev/null || true)"
   fi
 
-  # TODO(step-05): consult the registry lib to resolve slug from git_root
-  # (or pwd) and set registered=yes when found.
-  registered="no"
-  slug=""
+  local _lookup="${git_root:-$PWD}"
+  if slug="$(clast_registry_resolve "$_lookup" 2>/dev/null)" && [[ -n "$slug" ]]; then
+    registered="yes"
+  else
+    registered="no"
+    slug=""
+  fi
 
   # TODO(step-04): look up the most recent manifest entry for the
   # resolved project and report its captured_at timestamp.

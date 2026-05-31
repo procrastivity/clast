@@ -103,4 +103,25 @@ cutoff_json="$(CLAST_DAY_CUTOFF=06:00 "$CLAST_BIN" whereami --json)"
 assert_eq "06:00" "$(jq -r .day_cutoff <<<"$cutoff_json")" \
   "CLAST_DAY_CUTOFF=06:00 reflected in day_cutoff field"
 
+# --- registry integration: registered path -----------------------------
+
+reg_journal="$(mktemp -d -t clast.whereami.reg.XXXXXX)"
+reg_workdir="$(mktemp -d -t clast.whereami.work.XXXXXX)"
+reg_canon="$(realpath -m "$reg_workdir")"
+jq -cn --arg p "$reg_canon" \
+  '{path:$p,slug:"mywork",first_seen:"2026-01-01",aliases:[]}' \
+  >"$reg_journal/projects.json"
+
+reg_json="$(cd "$reg_workdir" && CLAST_JOURNAL_DIR="$reg_journal" "$CLAST_BIN" whereami --json)"
+assert_eq "yes" "$(jq -r .registered <<<"$reg_json")" "registered path: registered=yes"
+assert_eq "mywork" "$(jq -r .slug <<<"$reg_json")" "registered path: slug resolved"
+
+# --- registry integration: unregistered path ---------------------------
+
+unreg_json="$(cd "$reg_workdir" && CLAST_JOURNAL_DIR="$(mktemp -d)" "$CLAST_BIN" whereami --json)"
+assert_eq "no" "$(jq -r .registered <<<"$unreg_json")" "unregistered path: registered=no"
+assert_eq "null" "$(jq -r .slug <<<"$unreg_json")" "unregistered path: slug is null"
+
+rm -rf "$reg_journal" "$reg_workdir"
+
 clast_test_summary
