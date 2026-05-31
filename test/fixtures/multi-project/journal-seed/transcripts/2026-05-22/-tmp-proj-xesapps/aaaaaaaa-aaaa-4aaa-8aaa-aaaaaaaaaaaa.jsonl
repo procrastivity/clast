@@ -1,0 +1,4 @@
+{"type":"summary","cwd":"/tmp/proj-xesapps","timestamp":"2026-05-22T14:00:00Z","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"message","role":"user","timestamp":"2026-05-22T14:00:05Z","content":"hello from may 22"}
+{"type":"message","role":"assistant","timestamp":"2026-05-22T14:00:10Z","content":"hi back may 22"}
+{"type":"message","role":"user","timestamp":"2026-05-22T14:30:00Z","content":"final may 22"}

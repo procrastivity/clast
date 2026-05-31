@@ -14,6 +14,7 @@ declare -a suites=(
   test/test-registry.sh
   test/test-registry-cmd.sh
   test/test-snapshot.sh
+  test/test-query.sh
 )
 
 fail=0

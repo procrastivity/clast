@@ -21,6 +21,21 @@ clast snapshot --dry-run --json | jq # preview what would be captured
 a SessionStart hook. See [`docs/cli-contract.md#clast-snapshot`](./docs/cli-contract.md#clast-snapshot)
 for the full flag reference.
 
+## Read your sessions
+
+```sh
+clast projects                        # which projects had activity today
+clast sessions --since -7d            # sessions captured in the last week
+clast show <session-uuid> --full      # metadata + first/last turns
+```
+
+Window flags (`--day`, `--since`, `--until`) accept ISO dates and
+relative keywords. See
+[`docs/cli-contract.md#clast-projects`](./docs/cli-contract.md#clast-projects),
+[`docs/cli-contract.md#clast-sessions`](./docs/cli-contract.md#clast-sessions),
+and [`docs/cli-contract.md#clast-show`](./docs/cli-contract.md#clast-show)
+for the full flag and output schemas.
+
 ## Development
 
 **With Nix (recommended).** Run `direnv allow` (or `nix develop`) at the repo root. The dev shell provides `bash`, `jq`, `git`, `shellcheck`, and `pre-commit` — everything `clast` needs at runtime plus the dev tooling.
