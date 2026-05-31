@@ -104,6 +104,23 @@ make_fixture_projects_tree() {
   cp -R "$src"/. "$CLAST_PROJECTS_DIR"/
 }
 
+# make_fixture_journal_tree <fixture-name>
+#   Copies test/fixtures/<name>/ into $CLAST_JOURNAL_DIR. The fixture
+#   directory must exist; setup_test_journal must have been called first.
+make_fixture_journal_tree() {
+  local name="$1"
+  local src="test/fixtures/$name"
+  if [[ ! -d "$src" ]]; then
+    printf 'make_fixture_journal_tree: missing fixture %q\n' "$src" >&2
+    return 1
+  fi
+  if [[ -z "${CLAST_JOURNAL_DIR:-}" ]]; then
+    printf 'make_fixture_journal_tree: setup_test_journal not called\n' >&2
+    return 1
+  fi
+  cp -R "$src"/. "$CLAST_JOURNAL_DIR"/
+}
+
 # clast_test_summary — print pass/fail count and return non-zero on any fail.
 clast_test_summary() {
   printf '%s: %d passed, %d failed\n' \
