@@ -200,7 +200,34 @@ clast_version() {
   printf '%s\n' "$_CLAST_VERSION_CACHE"
 }
 
-# clast_usage — placeholder; populated by the dispatcher in step 03.
+# clast_usage — print top-level usage to stdout. The dispatcher redirects
+# to stderr for usage errors.
 clast_usage() {
-  printf '%s\n' "clast — Claude Code session journal (usage TBD)"
+  cat <<'EOF'
+clast — Claude Code session journal
+
+Usage:
+  clast [GLOBAL FLAGS] <subcommand> [ARGS...]
+
+Subcommands:
+  whereami      Show current path, registry, and journal state
+  snapshot      Capture new transcripts into the journal (planned)
+  projects      List projects with activity in a window  (planned)
+  sessions      List sessions in a window                (planned)
+  show          Dump session metadata                    (planned)
+  entries       List or read curated journal entries     (planned)
+  breadcrumb    Append a one-line in-flight hint         (planned)
+  registry      Manage the project registry              (planned)
+  stats         Token/duration/session-count stats       (planned)
+  doctor        Sanity-check the journal                 (planned)
+
+Global flags:
+  -h, --help            Print this usage and exit
+      --version         Print version and exit
+      --json            Machine-readable JSON output
+  -v, --verbose         Extra diagnostic output to stderr
+  -q, --quiet           Suppress informational stdout output
+      --journal-dir P   Override ~/.claude/journal/ (env: CLAST_JOURNAL_DIR)
+      --projects-dir P  Override ~/.claude/projects/ (env: CLAST_PROJECTS_DIR)
+EOF
 }

@@ -14,17 +14,12 @@ jobs:
       - uses: cachix/install-nix-action@v25
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-      - name: Shellcheck
-        run: |
-          if ls bin/clast lib/clast/**/*.bash test/*.sh >/dev/null 2>&1; then
-            nix develop -c shellcheck bin/clast lib/clast/**/*.bash test/*.sh
-          else
-            echo "no shell sources yet — skipping shellcheck"
-          fi
+      - name: Lint
+        run: nix develop -c make lint
       - name: Tests
         run: |
           if [ ! -f test/test-clast.sh ]; then
             echo "no tests yet — skipping"
             exit 0
           fi
-          nix develop -c test/test-clast.sh
+          nix develop -c make test

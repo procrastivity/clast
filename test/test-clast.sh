@@ -8,6 +8,8 @@ cd "$(dirname "$0")/.." || exit 1
 declare -a suites=(
   test/test-lib.sh
   test/test-decode.sh
+  test/test-dispatcher.sh
+  test/test-whereami.sh
 )
 
 fail=0

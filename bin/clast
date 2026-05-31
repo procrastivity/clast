@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# clast — main dispatcher.
+#
+# Parses global flags, sources libs, dispatches to a subcommand.
+# Subcommand files live in $CLAST_LIB/clast-subcommands/<name>.bash and
+# each defines a single function `clast_cmd_<name>`.
+set -euo pipefail
+
+CLAST_LIB="${CLAST_LIB:-$(dirname "$(realpath "$0")")/../lib/clast}"
+export CLAST_LIB
+
+# shellcheck source=lib/clast/clast-lib.bash
+source "$CLAST_LIB/clast-lib.bash"
+# shellcheck source=lib/clast/clast-decode-lib.bash
+source "$CLAST_LIB/clast-decode-lib.bash"
+
+# --- Global flag parsing -------------------------------------------------
+#
+# Walk argv before the subcommand name, peeling off any recognized global
+# flag and setting the corresponding env var. Stop at the first non-flag
+# arg (the subcommand) or at `--`. Remaining argv is passed to the
+# subcommand untouched.
+#
+# `--json` and `--journal-dir`/`--projects-dir` are forwarded to the lib
+# via env so subcommands can also accept them locally without re-parsing.
+
+declare -a _CLAST_REMAINING=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help|help)
+      clast_usage
+      exit 0
+      ;;
+    --version)
+      echo "clast $(clast_version)"
+      exit 0
+      ;;
+    --json)
+      export CLAST_JSON=1
+      shift
+      ;;
+    -v|--verbose)
+      export CLAST_VERBOSE=1
+      shift
+      ;;
+    -q|--quiet)
+      export CLAST_QUIET=1
+      shift
+      ;;
+    --journal-dir)
+      if [[ $# -lt 2 ]]; then
+        clast_log_error "--journal-dir requires a value"
+        exit 2
+      fi
+      export CLAST_JOURNAL_DIR="$2"
+      shift 2
+      ;;
+    --journal-dir=*)
+      export CLAST_JOURNAL_DIR="${1#*=}"
+      shift
+      ;;
+    --projects-dir)
+      if [[ $# -lt 2 ]]; then
+        clast_log_error "--projects-dir requires a value"
+        exit 2
+      fi
+      export CLAST_PROJECTS_DIR="$2"
+      shift 2
+      ;;
+    --projects-dir=*)
+      export CLAST_PROJECTS_DIR="${1#*=}"
+      shift
+      ;;
+    --)
+      shift
+      _CLAST_REMAINING+=("$@")
+      break
+      ;;
+    -*)
+      clast_log_error "unknown global flag: $1"
+      clast_usage >&2
+      exit 2
+      ;;
+    *)
+      # First non-flag arg is the subcommand; stop parsing.
+      _CLAST_REMAINING+=("$@")
+      break
+      ;;
+  esac
+done
+
+if [[ ${#_CLAST_REMAINING[@]} -eq 0 ]]; then
+  clast_usage
+  exit 0
+fi
+
+set -- "${_CLAST_REMAINING[@]}"
+
+cmd="$1"; shift
+
+# --- Subcommand dispatch -------------------------------------------------
+
+# Map of stubbed subcommands → step number that will implement them.
+# Future steps replace each stub with a real `source` + dispatch below.
+_clast_stub() {
+  local name="$1" step="$2"
+  clast_log_error "$name is not yet implemented (planned for step $step)"
+  exit 2
+}
+
+case "$cmd" in
+  whereami)
+    # shellcheck source=lib/clast/clast-subcommands/whereami.bash
+    source "$CLAST_LIB/clast-subcommands/whereami.bash"
+    clast_cmd_whereami "$@"
+    ;;
+  snapshot)   _clast_stub snapshot   06 ;;
+  projects)   _clast_stub projects   07 ;;
+  sessions)   _clast_stub sessions   08 ;;
+  show)       _clast_stub show       09 ;;
+  entries)    _clast_stub entries    10 ;;
+  breadcrumb) _clast_stub breadcrumb 11 ;;
+  registry)   _clast_stub registry   05 ;;
+  stats)      _clast_stub stats      12 ;;
+  doctor)     _clast_stub doctor     13 ;;
+  *)
+    clast_log_error "unknown subcommand '$cmd'"
+    clast_usage >&2
+    exit 2
+    ;;
+esac
