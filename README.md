@@ -36,6 +36,23 @@ relative keywords. See
 and [`docs/cli-contract.md#clast-show`](./docs/cli-contract.md#clast-show)
 for the full flag and output schemas.
 
+## Curate an entry
+
+```sh
+clast entries                                            # list curated entries
+clast entries read 2026-05-30-1430-xesapps-foo.md        # cat a single entry
+printf 'Notes...\n' | clast entries write \
+  --session <session-uuid> --slug short-slug --body-stdin # write a new entry
+```
+
+`clast entries write` looks up the session in the manifest, composes the
+documented frontmatter from the captured snapshot + registry, and writes
+`entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md` atomically. See
+[`docs/cli-contract.md#entry-frontmatter`](./docs/cli-contract.md#entry-frontmatter)
+for the full frontmatter schema and
+[`docs/cli-contract.md#clast-entries`](./docs/cli-contract.md#clast-entries)
+for the flag reference.
+
 ## Development
 
 **With Nix (recommended).** Run `direnv allow` (or `nix develop`) at the repo root. The dev shell provides `bash`, `jq`, `git`, `shellcheck`, and `pre-commit` — everything `clast` needs at runtime plus the dev tooling.
