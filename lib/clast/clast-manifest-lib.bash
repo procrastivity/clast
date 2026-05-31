@@ -71,7 +71,12 @@ clast_manifest_append() {
   # docs/overview.md#cross-machine-considerations. Do NOT use
   # clast_atomic_write here: it rewrites the whole file and would clobber
   # concurrent appends from another machine.
-  printf '%s\n' "$line" >>"$(clast_manifest_path)"
+  local manifest_path
+  manifest_path="$(clast_manifest_path)"
+  if ! printf '%s\n' "$line" >>"$manifest_path" 2>/dev/null; then
+    clast_log_error "clast_manifest_append: failed to append to '$manifest_path'"
+    return 1
+  fi
 }
 
 # clast_manifest_lookup <session-id>
@@ -170,8 +175,16 @@ clast_manifest_rebuild_from_disk() {
       [[ -z "$snapshot" ]] && continue
       session_id="$(basename "$snapshot" .jsonl)"
       day="$(basename "$(dirname "$(dirname "$snapshot")")")"
-      mtime_epoch="$(stat -c %Y "$snapshot" 2>/dev/null || stat -f %m "$snapshot")"
-      mtime_iso="$(date -u -d "@$mtime_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+      if ! mtime_epoch="$(stat -c %Y "$snapshot" 2>/dev/null || stat -f %m "$snapshot" 2>/dev/null)" || [[ -z "$mtime_epoch" ]]; then
+        clast_log_error "clast_manifest_rebuild_from_disk: stat failed for '$snapshot'"
+        rm -f "$tmp_file"
+        return 1
+      fi
+      if ! mtime_iso="$(date -u -d "@$mtime_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" || [[ -z "$mtime_iso" ]]; then
+        clast_log_error "clast_manifest_rebuild_from_disk: date conversion failed for '$snapshot' (epoch '$mtime_epoch')"
+        rm -f "$tmp_file"
+        return 1
+      fi
       line="$(jq -c -n \
         --arg session_id "$session_id" \
         --arg snapshot "${snapshot#"$journal_dir/"}" \
@@ -183,7 +196,11 @@ clast_manifest_rebuild_from_disk() {
         rm -f "$tmp_file"
         return 1
       }
-      printf '%s\n' "$line" >>"$tmp_file"
+      if ! printf '%s\n' "$line" >>"$tmp_file" 2>/dev/null; then
+        clast_log_error "clast_manifest_rebuild_from_disk: failed to write to '$tmp_file'"
+        rm -f "$tmp_file"
+        return 1
+      fi
       count=$((count + 1))
     done < <(find "$transcripts_root" -mindepth 3 -maxdepth 3 -type f -name '*.jsonl' | sort)
 
@@ -196,7 +213,11 @@ clast_manifest_rebuild_from_disk() {
         rm -f "$tmp_file"
         return 1
       }
-      printf '%s\n' "$sorted" >"$tmp_file"
+      if ! printf '%s\n' "$sorted" >"$tmp_file" 2>/dev/null; then
+        clast_log_error "clast_manifest_rebuild_from_disk: failed to write sorted manifest to '$tmp_file'"
+        rm -f "$tmp_file"
+        return 1
+      fi
     fi
   fi
 
