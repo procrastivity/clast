@@ -45,12 +45,12 @@ assert_exit_code 2 "$CLAST_BIN" bogus-cmd
 
 # --- stubbed subcommand -------------------------------------------------
 
-snap_stderr="$("$CLAST_BIN" snapshot 2>&1 1>/dev/null)"
-case "$snap_stderr" in
-  *"snapshot is not yet implemented"*) _clast_test_pass "stub: snapshot reports not yet implemented" ;;
-  *) _clast_test_fail "stub: snapshot reports not yet implemented"; printf '%s\n' "$snap_stderr" >&2 ;;
+stub_stderr="$("$CLAST_BIN" projects 2>&1 1>/dev/null)"
+case "$stub_stderr" in
+  *"projects is not yet implemented"*) _clast_test_pass "stub: projects reports not yet implemented" ;;
+  *) _clast_test_fail "stub: projects reports not yet implemented"; printf '%s\n' "$stub_stderr" >&2 ;;
 esac
-assert_exit_code 2 "$CLAST_BIN" snapshot
+assert_exit_code 2 "$CLAST_BIN" projects
 
 # --- global-flag forwarding into the lib --------------------------------
 

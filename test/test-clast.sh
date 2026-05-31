@@ -13,6 +13,7 @@ declare -a suites=(
   test/test-manifest.sh
   test/test-registry.sh
   test/test-registry-cmd.sh
+  test/test-snapshot.sh
 )
 
 fail=0

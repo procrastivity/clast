@@ -104,6 +104,24 @@ make_fixture_projects_tree() {
   cp -R "$src"/. "$CLAST_PROJECTS_DIR"/
 }
 
+# make_fixture_projects_tree_from <fixture-name>/<subpath>
+#   Copies test/fixtures/<name>/<subpath>/ into $CLAST_PROJECTS_DIR. Lets a
+#   single fixture directory host multiple roots (e.g. multi-project hosts
+#   both projects.json and projects-tree/).
+make_fixture_projects_tree_from() {
+  local rel="$1"
+  local src="test/fixtures/$rel"
+  if [[ ! -d "$src" ]]; then
+    printf 'make_fixture_projects_tree_from: missing fixture %q\n' "$src" >&2
+    return 1
+  fi
+  if [[ -z "${CLAST_PROJECTS_DIR:-}" ]]; then
+    printf 'make_fixture_projects_tree_from: setup_test_journal not called\n' >&2
+    return 1
+  fi
+  cp -R "$src"/. "$CLAST_PROJECTS_DIR"/
+}
+
 # make_fixture_journal_tree <fixture-name>
 #   Copies test/fixtures/<name>/ into $CLAST_JOURNAL_DIR. The fixture
 #   directory must exist; setup_test_journal must have been called first.
