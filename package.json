@@ -1,0 +1,31 @@
+{
+  "name": "@procrastivity/clast",
+  "version": "0.1.0",
+  "description": "Capture, curate, and surface Claude Code session history across all your projects.",
+  "bin": {
+    "clast": "bin/clast"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    ".claude-plugin/",
+    "hooks/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "test/test-clast.sh",
+    "lint": "shellcheck bin/clast lib/clast/**/*.bash test/*.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/procrastivity/clast.git"
+  },
+  "keywords": ["claude-code", "session", "journal", "history", "cli"],
+  "author": "Beau",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

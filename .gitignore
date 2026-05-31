@@ -1,0 +1,14 @@
+# Local config / runtime
+.test-tmp/
+result
+result-*
+.direnv/
+
+# Editor
+*.swp
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
