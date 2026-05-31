@@ -1,0 +1,2 @@
+{"type":"summary","cwd":"/tmp/clast/test/fixtures/simple/proj/b","timestamp":"2026-05-29T16:30:00Z","session_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
+{"type":"message","role":"user","timestamp":"2026-05-29T16:30:10Z","content":"hello from proj-b"}

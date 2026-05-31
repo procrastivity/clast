@@ -4,7 +4,8 @@ test:
 	./test/test-clast.sh
 
 lint:
-	shellcheck bin/clast lib/clast/**/*.bash test/*.sh
+	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast); \
+	shellcheck -x $$files
 
 install:
 	./install.sh
