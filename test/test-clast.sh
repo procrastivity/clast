@@ -11,6 +11,8 @@ declare -a suites=(
   test/test-dispatcher.sh
   test/test-whereami.sh
   test/test-manifest.sh
+  test/test-registry.sh
+  test/test-registry-cmd.sh
 )
 
 fail=0

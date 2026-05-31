@@ -13,6 +13,8 @@ export CLAST_LIB
 source "$CLAST_LIB/clast-lib.bash"
 # shellcheck source=lib/clast/clast-decode-lib.bash
 source "$CLAST_LIB/clast-decode-lib.bash"
+# shellcheck source=lib/clast/clast-registry-lib.bash
+source "$CLAST_LIB/clast-registry-lib.bash"
 
 # --- Global flag parsing -------------------------------------------------
 #
@@ -121,7 +123,11 @@ case "$cmd" in
   show)       _clast_stub show       09 ;;
   entries)    _clast_stub entries    10 ;;
   breadcrumb) _clast_stub breadcrumb 11 ;;
-  registry)   _clast_stub registry   05 ;;
+  registry)
+    # shellcheck source=lib/clast/clast-subcommands/registry.bash
+    source "$CLAST_LIB/clast-subcommands/registry.bash"
+    clast_cmd_registry "$@"
+    ;;
   stats)      _clast_stub stats      12 ;;
   doctor)     _clast_stub doctor     13 ;;
   *)
