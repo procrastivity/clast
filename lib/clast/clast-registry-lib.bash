@@ -112,9 +112,19 @@ clast_registry_add() {
   local path="" slug="" remote="" remote_explicit=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --slug)    slug="${2:-}"; shift 2 ;;
+      --slug)
+        if [[ $# -lt 2 ]]; then
+          clast_log_error "clast_registry_add: --slug requires a value"
+          return 2
+        fi
+        slug="$2"; shift 2 ;;
       --slug=*)  slug="${1#*=}"; shift ;;
-      --remote)  remote="${2:-}"; remote_explicit=1; shift 2 ;;
+      --remote)
+        if [[ $# -lt 2 ]]; then
+          clast_log_error "clast_registry_add: --remote requires a value"
+          return 2
+        fi
+        remote="$2"; remote_explicit=1; shift 2 ;;
       --remote=*) remote="${1#*=}"; remote_explicit=1; shift ;;
       -*)
         clast_log_error "clast_registry_add: unknown flag '$1'"

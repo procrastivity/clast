@@ -152,6 +152,22 @@ assert_eq "yes" "$has_remote" "add without git: no remote field"
 rm -rf "$nogit"
 teardown_test_journal
 
+# --- add: --slug / --remote without a value exit 2 (not shell error) --------
+setup_test_journal >/dev/null
+err="$(clast_registry_add /tmp/x --slug 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --slug without value exits 2"
+case "$err" in
+  *--slug*requires*) _clast_test_pass "add --slug missing value: error message" ;;
+  *) _clast_test_fail "add --slug missing value: error message (got: $err)" ;;
+esac
+err="$(clast_registry_add /tmp/x --remote 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --remote without value exits 2"
+case "$err" in
+  *--remote*requires*) _clast_test_pass "add --remote missing value: error message" ;;
+  *) _clast_test_fail "add --remote missing value: error message (got: $err)" ;;
+esac
+teardown_test_journal
+
 # --- remove: by slug ---------------------------------------------------------
 setup_test_journal >/dev/null
 clast_registry_add /tmp/proj-a --slug foo --remote R >/dev/null

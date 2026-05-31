@@ -91,6 +91,22 @@ assert_eq "1" "$(jq 'length' <<<"$arr")" "remove: only scratch remains"
 assert_eq "scratch" "$(jq -r '.[0].slug' <<<"$arr")" "remove: leftover is scratch"
 teardown_test_journal
 
+# --- registry add: --slug / --remote without value exit 2 -------------------
+setup_test_journal >/dev/null
+stderr="$("$CLAST_BIN" registry add /tmp/x --slug 2>&1 1>/dev/null)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --slug missing value: exits 2"
+case "$stderr" in
+  *--slug*requires*) _clast_test_pass "add --slug missing value: stderr" ;;
+  *) _clast_test_fail "add --slug missing value: stderr (got: $stderr)" ;;
+esac
+stderr="$("$CLAST_BIN" registry add /tmp/x --remote 2>&1 1>/dev/null)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --remote missing value: exits 2"
+case "$stderr" in
+  *--remote*requires*) _clast_test_pass "add --remote missing value: stderr" ;;
+  *) _clast_test_fail "add --remote missing value: stderr (got: $stderr)" ;;
+esac
+teardown_test_journal
+
 # --- registry with no args ---------------------------------------------------
 stderr="$("$CLAST_BIN" registry 2>&1 1>/dev/null)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "no-op: exits 2"

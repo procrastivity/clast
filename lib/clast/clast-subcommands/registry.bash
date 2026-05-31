@@ -89,7 +89,11 @@ EOF
         ;;
       # TODO(v1.1): interactive --slug prompt when stdin is a TTY.
       --slug|--remote)
-        passthrough+=("$1" "${2:-}"); shift 2 ;;
+        if [[ $# -lt 2 ]]; then
+          clast_log_error "registry add: $1 requires a value"
+          return 2
+        fi
+        passthrough+=("$1" "$2"); shift 2 ;;
       --slug=*|--remote=*)
         passthrough+=("$1"); shift ;;
       *)
