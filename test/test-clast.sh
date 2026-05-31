@@ -10,6 +10,7 @@ declare -a suites=(
   test/test-decode.sh
   test/test-dispatcher.sh
   test/test-whereami.sh
+  test/test-manifest.sh
 )
 
 fail=0
