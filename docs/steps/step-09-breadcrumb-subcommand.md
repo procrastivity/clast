@@ -102,7 +102,7 @@ Read before starting:
 
 10. **Wire the subcommand into the dispatcher.** In `bin/clast`, replace the single `_clast_stub` case for `breadcrumb` with `source ...; clast_cmd_breadcrumb "$@" ;;` (mirrors the pattern used by `whereami` / `snapshot` / `projects` / `sessions` / `show` / `registry`). Leave every other stub (`entries`, `stats`, `doctor`) untouched — `entries` belongs to step 08, the others to step 10. The `_clast_stub` helper itself stays; only the `breadcrumb)` case branch changes.
 
-11. **Write `test/test-breadcrumb.sh`.** Subprocess-style suite modeled on `test/test-snapshot.sh` and `test/test-query.sh`. `cd` to repo root, `source test/helpers.sh`, set `_CLAST_TEST_NAME=test-breadcrumb`. Each scenario calls `setup_test_journal`, optionally seeds the registry via `make_fixture_projects_tree_from multi-project/projects-tree` and a stub `projects.json` (or `make_fixture_journal_seed_from multi-project/journal-seed` if the `projects.json` already exists there is what you want — re-use, do not duplicate), exports `CLAST_NOW_EPOCH=$(date -d '2026-05-30T14:23:00Z' +%s)` for deterministic `HH:MM`, runs `bin/clast breadcrumb …`, asserts on stdout / stderr / exit code / file bytes, then `teardown_test_journal`. Cover at minimum:
+11. **Write `test/test-breadcrumb.sh`.** Subprocess-style suite modeled on `test/test-snapshot.sh` and `test/test-query.sh`. `cd` to repo root, `source test/helpers.sh`, set `_CLAST_TEST_NAME=test-breadcrumb`, set `CLAST_BIN="$PWD/bin/clast"` (mirror the existing suites — every invocation goes through `"$CLAST_BIN"`, never `bin/clast` directly), and `export TZ=UTC` at the top of the file (matches `test/test-snapshot.sh:90` — `HH:MM` is derived from `CLAST_NOW_EPOCH` formatted in local time, so without `TZ=UTC` the timestamp assertions flake on any developer/CI host whose local zone is not UTC). Each scenario calls `setup_test_journal`, optionally seeds the registry via `make_fixture_projects_tree_from multi-project/projects-tree` and a stub `projects.json` (or `make_fixture_journal_seed_from multi-project/journal-seed` if the `projects.json` already exists there is what you want — re-use, do not duplicate), exports `CLAST_NOW_EPOCH=$(date -u -d '2026-05-30T14:23:00Z' +%s)` for deterministic `HH:MM` (always `-u` so the epoch math is timezone-free even before `TZ=UTC` takes effect on the CLI side), runs `"$CLAST_BIN" breadcrumb …`, asserts on stdout / stderr / exit code / file bytes, then `teardown_test_journal`. Cover at minimum:
     - **First write, scoped via `--project`**: `bin/clast breadcrumb --project xesapps 'check migration before deploy'` exits 0, silent stdout, file `breadcrumbs/2026-05-30-xesapps.md` exists with a 4-line frontmatter (`---` / `date: 2026-05-30` / `project: xesapps` / `---`), one blank line, then `- 14:23 — check migration before deploy`.
     - **Append, scoped**: a second invocation with the same `--project` and a new text (advance `CLAST_NOW_EPOCH` by 1h44m so the second timestamp is `16:07`) leaves the frontmatter untouched and appends `- 16:07 — figure out why EXPLAIN differs in CI` on its own line. File ends in `\n`. Total of two `- ` lines in the body.
     - **First write, `--global`**: file is `breadcrumbs/2026-05-30-_global.md`; frontmatter has `project: _global`.
@@ -169,6 +169,7 @@ make lint
 make test
 
 # Manual smoke
+export TZ=UTC                    # the append-line HH:MM is formatted in local time; pin to UTC so the smoke output matches the comments below regardless of your shell's zone
 export CLAST_JOURNAL_DIR="$(mktemp -d)"
 export CLAST_PROJECTS_DIR="$PWD/test/fixtures/multi-project/projects-tree"
 cp test/fixtures/multi-project/journal-seed/projects.json "$CLAST_JOURNAL_DIR/projects.json"
@@ -203,7 +204,7 @@ bin/clast breadcrumb --read --list                                    ; echo "ex
 bin/clast breadcrumb --global --date not-a-date 'x'                   ; echo "exit=$?"  # 2
 
 rm -rf "$CLAST_JOURNAL_DIR"
-unset CLAST_JOURNAL_DIR CLAST_PROJECTS_DIR CLAST_NOW_EPOCH
+unset CLAST_JOURNAL_DIR CLAST_PROJECTS_DIR CLAST_NOW_EPOCH TZ
 ```
 
 ## Notes for the implementer
