@@ -68,6 +68,22 @@ and [`docs/cli-contract.md#clast-doctor`](./docs/cli-contract.md#clast-doctor)
 for the contract reference, and `clast stats --help` / `clast doctor --help`
 for the current set of flags.
 
+## Install as a Claude Code plugin
+
+For a local checkout, install the plugin with:
+
+```sh
+claude plugin install <path-to-clast-checkout>
+```
+
+(The marketplace install flow is wired up in a future step.) Today the plugin
+ships a single `SessionStart` hook: every time a Claude Code session starts it
+backgrounds `clast snapshot`, so your journal stays current with zero manual
+effort. The hook is best-effort and silent — if the `clast` CLI isn't on your
+`PATH` yet, sessions still start cleanly. See
+[`docs/skill-prompts.md#hook-sessionstart`](./docs/skill-prompts.md#hook-sessionstart)
+for the hook's design rationale.
+
 ## Development
 
 **With Nix (recommended).** Run `direnv allow` (or `nix develop`) at the repo root. The dev shell provides `bash`, `jq`, `git`, `shellcheck`, and `pre-commit` — everything `clast` needs at runtime plus the dev tooling.
