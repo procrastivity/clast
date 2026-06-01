@@ -122,6 +122,18 @@ assert_eq "_global" "$(jq -r '.slug' <<<"$out")" "json write: slug"
 assert_eq "2026-05-30" "$(jq -r '.date' <<<"$out")" "json write: date"
 assert_eq "2" "$(jq -r '.line_count' <<<"$out")" "json write: post-write line count"
 
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" breadcrumb --json --global 'subcommand json' 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "subcommand --json write: exits 0"
+assert_eq "_global" "$(jq -r '.slug' <<<"$out")" "subcommand --json write: slug"
+assert_eq "3" "$(jq -r '.line_count' <<<"$out")" "subcommand --json write: line count"
+
+escape_target="/tmp/clast-escaped.md"
+rm -f "$escape_target"
+err="$("$CLAST_BIN" breadcrumb --project '../../../../../tmp/clast-escaped' 'x' 2>&1 >/dev/null)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "unsafe slug: exits 2"
+_assert_contains "$err" "invalid project slug" "unsafe slug: message"
+assert_file_not_exists "$escape_target" "unsafe slug: no escaped file"
+
 err="$("$CLAST_BIN" breadcrumb --bogus foo 2>&1 >/dev/null)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "unknown flag: exits 2"
 _assert_contains "$err" "unknown flag '--bogus'" "unknown flag: message"
@@ -139,6 +151,9 @@ out="$("$CLAST_BIN" --json breadcrumb --read --project xesapps --day 2026-05-30 
 assert_eq "0" "$rc" "read existing --json: exits 0"
 assert_eq "true" "$(jq -r '.exists' <<<"$out")" "read existing --json: exists"
 assert_eq "$(cat "$file")" "$(jq -r '.content' <<<"$out")" "read existing --json: content"
+out="$("$CLAST_BIN" breadcrumb --read --json --project xesapps --day 2026-05-30 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "read existing subcommand --json: exits 0"
+assert_eq "true" "$(jq -r '.exists' <<<"$out")" "read existing subcommand --json: exists"
 
 out="$("$CLAST_BIN" breadcrumb --read --project xesapps --day 2026-05-22 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "read missing: exits 0"
@@ -157,6 +172,9 @@ assert_eq "1" "$(wc -l <<<"$out" | tr -d ' ')" "list empty: header only"
 out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json breadcrumb --list 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "list empty --json: exits 0"
 assert_eq "[]" "$(jq -c . <<<"$out")" "list empty --json: []"
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" breadcrumb --list --json 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "list empty subcommand --json: exits 0"
+assert_eq "[]" "$(jq -c . <<<"$out")" "list empty subcommand --json: []"
 teardown_test_journal
 
 setup_test_journal >/dev/null

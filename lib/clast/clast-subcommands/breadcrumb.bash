@@ -11,6 +11,9 @@
 clast_cmd_breadcrumb() {
   local arg saw_read=0 saw_list=0 before_double_dash=1
 
+  _clast_breadcrumb_strip_json "$@"
+  set -- "${_CLAST_BREADCRUMB_JSON_STRIPPED[@]}"
+
   for arg in "$@"; do
     case "$arg" in
       -h|--help)
@@ -48,6 +51,23 @@ clast_cmd_breadcrumb() {
   else
     _clast_breadcrumb_write "$@"
   fi
+}
+
+_clast_breadcrumb_strip_json() {
+  local arg before_double_dash=1
+  _CLAST_BREADCRUMB_JSON_STRIPPED=()
+  for arg in "$@"; do
+    if (( before_double_dash )) && [[ "$arg" == "--" ]]; then
+      before_double_dash=0
+      _CLAST_BREADCRUMB_JSON_STRIPPED+=("$arg")
+      continue
+    fi
+    if (( before_double_dash )) && [[ "$arg" == "--json" ]]; then
+      export CLAST_JSON=1
+      continue
+    fi
+    _CLAST_BREADCRUMB_JSON_STRIPPED+=("$arg")
+  done
 }
 
 _clast_breadcrumb_usage() {
@@ -126,6 +146,14 @@ _clast_breadcrumb_path() {
   local day="$1" slug="$2" journal_dir
   journal_dir="$(realpath -m "$(clast_journal_dir)")"
   printf '%s\n' "$journal_dir/breadcrumbs/$day-$slug.md"
+}
+
+_clast_breadcrumb_validate_slug() {
+  local slug="$1"
+  if [[ -z "$slug" || "$slug" == "." || "$slug" == ".." || "$slug" == *"/"* || "$slug" == *$'\n'* || "$slug" == *$'\r'* ]]; then
+    _clast_breadcrumb_err "invalid project slug '$slug'" 2
+    return 2
+  fi
 }
 
 _clast_breadcrumb_line_count() {
@@ -230,6 +258,7 @@ _clast_breadcrumb_write() {
     _clast_breadcrumb_err "pwd does not resolve to a registered project (pass --project SLUG or --global)" 1
     return 1
   fi
+  _clast_breadcrumb_validate_slug "$slug" || return $?
   path="$(_clast_breadcrumb_path "$resolved_date" "$slug")"
   mkdir -p "$(dirname "$path")" || { _clast_breadcrumb_err "failed to create breadcrumbs directory" 1; return 1; }
 
@@ -327,6 +356,7 @@ _clast_breadcrumb_read() {
     _clast_breadcrumb_err "pwd does not resolve to a registered project (pass --project SLUG or --global)" 1
     return 1
   fi
+  _clast_breadcrumb_validate_slug "$slug" || return $?
   path="$(_clast_breadcrumb_path "$resolved_day" "$slug")"
 
   if [[ -f "$path" ]]; then
