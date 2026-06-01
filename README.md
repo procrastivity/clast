@@ -100,9 +100,10 @@ for the hook's design rationale.
 
 ### `/day-wakeup`
 
-At the start of each day, run `/day-wakeup` inside any Claude Code session to curate
-yesterday's sessions into durable journal entries. The skill walks through each uncurated
-session, proposes a draft, and prompts you to accept, edit, or skip. See
+At the start of each day, run `/day-wakeup` inside any Claude Code session after
+the plugin is installed. It performs once-per-day cross-project curation of
+yesterday's sessions into durable journal entries, walking each uncurated session
+through a draft you can accept, edit, skip, or mark for in-entry promotion. See
 [`docs/skill-prompts.md#skill-1-day-wakeup`](./docs/skill-prompts.md#skill-1-day-wakeup).
 
 ### `/wakeup`
