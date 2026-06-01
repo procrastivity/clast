@@ -82,6 +82,19 @@ and [`docs/cli-contract.md#clast-doctor`](./docs/cli-contract.md#clast-doctor)
 for the contract reference, and `clast stats --help` / `clast doctor --help`
 for the current set of flags.
 
+## Install to a prefix
+
+`./install.sh` installs to `/usr/local` by default; for a non-root local install, run:
+
+```sh
+./install.sh ~/.local
+```
+
+`make install` wraps the same script. Use `./uninstall.sh ~/.local` (or
+`make uninstall` for the default prefix) to remove the installed files. See
+[`docs/repo-bootstrap.md#installsh--uninstallsh`](./docs/repo-bootstrap.md#installsh--uninstallsh)
+for the rationale.
+
 ## Install as a Claude Code plugin
 
 For a local checkout, install the plugin with:
