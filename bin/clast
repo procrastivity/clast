@@ -150,8 +150,16 @@ case "$cmd" in
     source "$CLAST_LIB/clast-subcommands/registry.bash"
     clast_cmd_registry "$@"
     ;;
-  stats)      _clast_stub stats      12 ;;
-  doctor)     _clast_stub doctor     13 ;;
+  stats)
+    # shellcheck source=lib/clast/clast-subcommands/stats.bash
+    source "$CLAST_LIB/clast-subcommands/stats.bash"
+    clast_cmd_stats "$@"
+    ;;
+  doctor)
+    # shellcheck source=lib/clast/clast-subcommands/doctor.bash
+    source "$CLAST_LIB/clast-subcommands/doctor.bash"
+    clast_cmd_doctor "$@"
+    ;;
   *)
     clast_log_error "unknown subcommand '$cmd'"
     clast_usage >&2
