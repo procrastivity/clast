@@ -64,10 +64,10 @@ Read before starting:
 4. **Resolve the project for write.** Priority order (matches `cli-contract.md#clast-breadcrumb`):
    1. If `--project SLUG` was given, use that slug verbatim. Do not require the slug to exist in the registry (a user may write a breadcrumb for a slug they intend to register later); emit a `clast_log_warn` "slug not in registry" so `--verbose` users notice, but proceed.
    2. Else if `--global` was given, set `slug=_global` and skip registry resolution.
-   3. Else attempt `clast_registry_resolve "$PWD"`. On hit, use the resolved slug. On miss, exit 1 with `clast: breadcrumb: pwd does not resolve to a registered project (pass --project SLUG or --global)`. Under `--json`, emit `{"error":"...","code":1}` on stdout. Do NOT prompt — the CLI is non-interactive (the spec's "prompt to register" lives in the future `/breadcrumb` skill, not here).
+   3. Else attempt `clast_registry_resolve "$PWD"`. On hit, use the resolved slug. On miss, exit 1 with `clast: breadcrumb: pwd does not resolve to a registered project (pass --project SLUG or --global)`. Under `--json`, emit `{"error":"...","code":1}` on stdout. Do NOT prompt — the CLI is non-interactive. **Note**: `docs/cli-contract.md#clast-breadcrumb` currently says "prompt to register or accept `--global`" — that wording is stale (it predates the CLI / skill split) and describes the future `/breadcrumb` skill's behavior, not the CLI's. This step's exit-1-with-hint behavior is the authoritative one; a follow-up docs pass should reword the contract section to match (out of scope here — do not edit `cli-contract.md` as part of this step).
 
 5. **Compose the breadcrumb file path and the append line.** Path: `$(clast_journal_dir)/breadcrumbs/<resolved_date>-<slug>.md`. For the global scope, the literal filename is `<resolved_date>-_global.md` (single leading underscore on the slug component, matching `docs/overview.md#filesystem-reference`). Create the parent directory with `mkdir -p` (no error if it exists). The append line is `- HH:MM — <TEXT>` where:
-   - `HH:MM` is the local time derived from `_clast_now_epoch` formatted as `%H:%M` (so `CLAST_NOW_EPOCH` driven tests are deterministic). Do NOT use `date +%H:%M` directly — go through the same epoch hook step 02 established.
+   - `HH:MM` is the local time derived from the public `CLAST_NOW_EPOCH` test hook, with a `date +%s` fallback when unset: `local epoch="${CLAST_NOW_EPOCH:-$(date +%s)}"; date -d "@$epoch" +%H:%M`. Do NOT call `_clast_now_epoch` from the subcommand — it is an internal `_`-prefixed helper inside `clast-lib.bash` and this step does not modify libs. Do NOT use `date +%H:%M` directly without the env hook either — that would defeat the test-determinism path. (If a public `clast_now_epoch` accessor lands later, swap to it; for now the env-hook pattern is the minimum-coupling option.)
    - `—` is the literal U+2014 EM DASH, surrounded by single ASCII spaces on each side. Use a `$'—'`-equivalent bash literal (the bytes `\xe2\x80\x94` written directly in the source file) — `printf '—'` is not portable across bash builds.
    - `<TEXT>` is the cleaned positional text from task 3, untouched (no shell quoting transformation).
 
@@ -103,25 +103,25 @@ Read before starting:
 10. **Wire the subcommand into the dispatcher.** In `bin/clast`, replace the single `_clast_stub` case for `breadcrumb` with `source ...; clast_cmd_breadcrumb "$@" ;;` (mirrors the pattern used by `whereami` / `snapshot` / `projects` / `sessions` / `show` / `registry`). Leave every other stub (`entries`, `stats`, `doctor`) untouched — `entries` belongs to step 08, the others to step 10. The `_clast_stub` helper itself stays; only the `breadcrumb)` case branch changes.
 
 11. **Write `test/test-breadcrumb.sh`.** Subprocess-style suite modeled on `test/test-snapshot.sh` and `test/test-query.sh`. `cd` to repo root, `source test/helpers.sh`, set `_CLAST_TEST_NAME=test-breadcrumb`, set `CLAST_BIN="$PWD/bin/clast"` (mirror the existing suites — every invocation goes through `"$CLAST_BIN"`, never `bin/clast` directly), and `export TZ=UTC` at the top of the file (matches `test/test-snapshot.sh:90` — `HH:MM` is derived from `CLAST_NOW_EPOCH` formatted in local time, so without `TZ=UTC` the timestamp assertions flake on any developer/CI host whose local zone is not UTC). Each scenario calls `setup_test_journal`, optionally seeds the registry via `make_fixture_projects_tree_from multi-project/projects-tree` and a stub `projects.json` (or `make_fixture_journal_seed_from multi-project/journal-seed` if the `projects.json` already exists there is what you want — re-use, do not duplicate), exports `CLAST_NOW_EPOCH=$(date -u -d '2026-05-30T14:23:00Z' +%s)` for deterministic `HH:MM` (always `-u` so the epoch math is timezone-free even before `TZ=UTC` takes effect on the CLI side), runs `"$CLAST_BIN" breadcrumb …`, asserts on stdout / stderr / exit code / file bytes, then `teardown_test_journal`. Cover at minimum:
-    - **First write, scoped via `--project`**: `bin/clast breadcrumb --project xesapps 'check migration before deploy'` exits 0, silent stdout, file `breadcrumbs/2026-05-30-xesapps.md` exists with a 4-line frontmatter (`---` / `date: 2026-05-30` / `project: xesapps` / `---`), one blank line, then `- 14:23 — check migration before deploy`.
+    - **First write, scoped via `--project`**: `"$CLAST_BIN" breadcrumb --project xesapps 'check migration before deploy'` exits 0, silent stdout, file `breadcrumbs/2026-05-30-xesapps.md` exists with a 4-line frontmatter (`---` / `date: 2026-05-30` / `project: xesapps` / `---`), one blank line, then `- 14:23 — check migration before deploy`.
     - **Append, scoped**: a second invocation with the same `--project` and a new text (advance `CLAST_NOW_EPOCH` by 1h44m so the second timestamp is `16:07`) leaves the frontmatter untouched and appends `- 16:07 — figure out why EXPLAIN differs in CI` on its own line. File ends in `\n`. Total of two `- ` lines in the body.
     - **First write, `--global`**: file is `breadcrumbs/2026-05-30-_global.md`; frontmatter has `project: _global`.
-    - **First write, resolved from `pwd`**: `pushd "$CLAST_PROJECTS_DIR/-home-beau-code-xesapps"` (or whatever segment the fixture exposes) with the registry pointing at it, then `bin/clast breadcrumb 'no flag'` resolves to the `xesapps` slug.
-    - **Unresolved pwd, no `--project`, no `--global`**: exit 1, stderr mentions `--project SLUG or --global`. Default mode AND `--json` form both assert.
+    - **First write, resolved from `pwd`**: `pushd "$CLAST_PROJECTS_DIR/-home-beau-code-xesapps"` (or whatever segment the fixture exposes) with the registry pointing at it, then `"$CLAST_BIN" breadcrumb 'no flag'` resolves to the `xesapps` slug.
+    - **Unresolved pwd, no `--project`, no `--global`**: exit 1, stderr mentions `--project SLUG or --global`. Default mode AND `--json` form (`"$CLAST_BIN" --json breadcrumb 'x'`) both assert.
     - **`--project` and `--global` together**: exit 2, stderr mentions mutual exclusion.
-    - **Empty text**: `bin/clast breadcrumb --global ''` (or no positional) exits 2 with the missing-`<TEXT>` message.
-    - **Multi-word text**: `bin/clast breadcrumb --global remember to bump the cache version` joins positionals with single spaces into one breadcrumb line.
-    - **Text with embedded newline**: `bin/clast breadcrumb --global $'line1\nline2'` exits 2 with the single-line message; no file is created.
-    - **`--date` override**: `bin/clast breadcrumb --global --date 2026-05-22 'historic note'` writes `breadcrumbs/2026-05-22-_global.md`, not the `today` file. Invalid `--date foo` exits 2.
-    - **`--verbose` write**: stderr includes `wrote breadcrumbs/2026-05-30-xesapps.md (1 lines)` (or whatever the chosen literal wording is — assert on the path and line count substrings, not on exact prose).
-    - **`--json` write**: stdout is a valid JSON object with `path`, `slug`, `date`, `line_count`; `line_count` reflects the post-write total.
-    - **`--read` of an existing file**: `bin/clast breadcrumb --read --project xesapps --day 2026-05-30` cats the file to stdout. With `--json`, `exists` is `true` and `content` equals the file body byte-for-byte.
-    - **`--read` of a missing file**: exit 0, empty stdout (default mode); `--json` returns `exists: false`, `content: ""`.
-    - **`--list` empty**: no `breadcrumbs/` directory at all → exit 0, default mode prints just the header row, `--json` prints `[]`.
-    - **`--list` with two files**: after writing one xesapps file (2 entries) and one global file (1 entry) on `2026-05-30`, `bin/clast breadcrumb --list --day 2026-05-30 --json` returns an array of length 2 with the correct `line_count` per row; default mode renders `_global` as `(global)` and `xesapps` as `xesapps`, line counts in the right column.
-    - **`--list` ignores other days**: writing one file on `2026-05-22` and one on `2026-05-30`, then `bin/clast breadcrumb --list --day 2026-05-30` returns only the `2026-05-30` row.
-    - **`--read` and `--list` mutually exclusive**: `bin/clast breadcrumb --read --list` exits 2.
-    - **`--help` and unknown subcommand-level flag**: `bin/clast breadcrumb --help` exits 0 with usage; `bin/clast breadcrumb --bogus foo` exits 2.
+    - **Empty text**: `"$CLAST_BIN" breadcrumb --global ''` (or no positional) exits 2 with the missing-`<TEXT>` message.
+    - **Multi-word text**: `"$CLAST_BIN" breadcrumb --global remember to bump the cache version` joins positionals with single spaces into one breadcrumb line.
+    - **Text with embedded newline**: `"$CLAST_BIN" breadcrumb --global $'line1\nline2'` exits 2 with the single-line message; no file is created.
+    - **`--date` override**: `"$CLAST_BIN" breadcrumb --global --date 2026-05-22 'historic note'` writes `breadcrumbs/2026-05-22-_global.md`, not the `today` file. Invalid `--date foo` exits 2.
+    - **`--verbose` write**: `"$CLAST_BIN" --verbose breadcrumb --global 'x'`; stderr includes `wrote breadcrumbs/2026-05-30-_global.md (1 lines)` (or whatever the chosen literal wording is — assert on the path and line count substrings, not on exact prose).
+    - **`--json` write**: `"$CLAST_BIN" --json breadcrumb --global 'x'`; stdout is a valid JSON object with `path`, `slug`, `date`, `line_count`; `line_count` reflects the post-write total.
+    - **`--read` of an existing file**: `"$CLAST_BIN" breadcrumb --read --project xesapps --day 2026-05-30` cats the file to stdout. With the JSON form `"$CLAST_BIN" --json breadcrumb --read --project xesapps --day 2026-05-30`, `exists` is `true` and `content` equals the file body byte-for-byte. (Global `--json` precedes the subcommand name — the dispatcher only parses global flags before the subcommand; subcommands read `CLAST_JSON` from env, they do not re-parse `--json`.)
+    - **`--read` of a missing file**: exit 0, empty stdout (default mode); `"$CLAST_BIN" --json breadcrumb --read ...` returns `exists: false`, `content: ""`.
+    - **`--list` empty**: no `breadcrumbs/` directory at all → exit 0, default mode prints just the header row, `"$CLAST_BIN" --json breadcrumb --list` prints `[]`.
+    - **`--list` with two files**: after writing one xesapps file (2 entries) and one global file (1 entry) on `2026-05-30`, `"$CLAST_BIN" --json breadcrumb --list --day 2026-05-30` returns an array of length 2 with the correct `line_count` per row; default mode renders `_global` as `(global)` and `xesapps` as `xesapps`, line counts in the right column.
+    - **`--list` ignores other days**: writing one file on `2026-05-22` and one on `2026-05-30`, then `"$CLAST_BIN" breadcrumb --list --day 2026-05-30` returns only the `2026-05-30` row.
+    - **`--read` and `--list` mutually exclusive**: `"$CLAST_BIN" breadcrumb --read --list` exits 2.
+    - **`--help` and unknown subcommand-level flag**: `"$CLAST_BIN" breadcrumb --help` exits 0 with usage; `"$CLAST_BIN" breadcrumb --bogus foo` exits 2.
 
 12. **Wire `test/test-breadcrumb.sh` into `test/test-clast.sh`.** Append it to the `suites` array after `test/test-query.sh` (and after `test/test-entries.sh` if that suite has already landed via step 08 — the relative order between entries and breadcrumb does not matter; alphabetize by suite name to keep the list stable). New order (assuming step 08 has merged first): lib → decode → dispatcher → whereami → manifest → registry → registry-cmd → snapshot → query → entries → breadcrumb. If step 08 has not yet merged when this step executes, append after `query` and leave the entries-suite insertion for whoever merges last (a one-line conflict either way).
 
@@ -188,13 +188,15 @@ cat "$CLAST_JOURNAL_DIR/breadcrumbs/2026-05-30-xesapps.md"
 bin/clast breadcrumb --global 'remember to bump the cache version'
 cat "$CLAST_JOURNAL_DIR/breadcrumbs/2026-05-30-_global.md"
 
-# Read
+# Read  (global --json precedes the subcommand; the dispatcher only parses
+# global flags before the subcommand name — subcommands read CLAST_JSON
+# from env rather than re-parsing --json)
 bin/clast breadcrumb --read --project xesapps --day 2026-05-30
-bin/clast breadcrumb --read --global --day 2026-05-30 --json | jq
+bin/clast --json breadcrumb --read --global --day 2026-05-30 | jq
 
 # List
 bin/clast breadcrumb --list --day 2026-05-30
-bin/clast breadcrumb --list --day 2026-05-30 --json | jq
+bin/clast --json breadcrumb --list --day 2026-05-30 | jq
 
 # Negative paths
 bin/clast breadcrumb                                                  ; echo "exit=$?"  # 1 (no pwd resolution, no flag)
