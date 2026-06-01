@@ -204,7 +204,6 @@ clast_cmd_stats() {
   n="$(jq 'length' <<<"$rows_json")"
 
   # Resolve project slug per row, apply --project filter.
-  local -a kept_rows=()
   local -A slug_counts=()
   local i row source snapshot seg slug bytes_sum=0 msgs_sum=0
   local n_sessions=0
@@ -235,7 +234,6 @@ clast_cmd_stats() {
       fi
     fi
 
-    kept_rows+=("$row")
     n_sessions=$((n_sessions + 1))
     if [[ -n "$slug" ]]; then
       slug_counts["$slug"]=1

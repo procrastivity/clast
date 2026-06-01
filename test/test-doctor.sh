@@ -171,6 +171,27 @@ case "$out" in
 esac
 teardown_test_journal
 
+# --- --fix skips orphan removal when a non-manifest critical persists ------
+setup_test_journal >/dev/null
+# Valid manifest with one orphan-able transcript.
+cat > "$CLAST_JOURNAL_DIR/.manifest.jsonl" <<'EOF'
+{"session_id":"77777777-7777-4777-8777-777777777777","source":"/tmp/p/7777.jsonl","snapshot":"transcripts/2026-05-30/-tmp-p/77777777-7777-4777-8777-777777777777.jsonl","captured_at":"2026-05-30T15:00:00Z","source_mtime":"2026-05-30T14:30:00Z","source_size":100,"day_bucket":"2026-05-30"}
+EOF
+# Unparseable registry → registry_validity critical.
+printf 'not valid json at all\n' > "$CLAST_JOURNAL_DIR/projects.json"
+# Stray orphan that would normally be removed under --fix --yes.
+orphan_path="$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-proj-orphan/ffffffff-ffff-4fff-8fff-ffffffffffff.jsonl"
+mkdir -p "$(dirname "$orphan_path")"
+: > "$orphan_path"
+out="$("$CLAST_BIN" doctor --fix --yes 2>&1)" && rc=$? || rc=$?
+assert_eq "4" "$rc" "doctor non-manifest critical + --fix: exit 4 (still critical)"
+assert_file_exists "$orphan_path" "doctor non-manifest critical: orphan preserved"
+case "$out" in
+  *"removed"*"orphan"*) _clast_test_fail "doctor non-manifest critical: no removal summary" ;;
+  *) _clast_test_pass "doctor non-manifest critical: no removal summary" ;;
+esac
+teardown_test_journal
+
 # --- --json --fix without --yes errors (no stdout prompt) -------------------
 _seed_full
 mkdir -p "$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-proj-orphan"

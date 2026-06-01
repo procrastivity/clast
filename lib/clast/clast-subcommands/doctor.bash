@@ -450,12 +450,17 @@ clast_cmd_doctor() {
       fi
     fi
 
-    # Orphan removal — gather post-rebuild orphan list, if any.
+    # Orphan removal — gather post-rebuild orphan list, if any. Skip when a
+    # non-manifest critical finding remains (e.g. unparseable projects.json):
+    # destructive cleanup should not run while unresolved corruption may
+    # affect the analysis.
     local of orphan_items orphan_count=0
-    of="$(_clast_doctor_finding_for orphan_snapshots || true)"
-    if [[ -n "$of" && "$(jq -r '.severity' <<<"$of")" == "warn" ]]; then
-      orphan_items="$(jq -r '.items[]?' <<<"$of")"
-      orphan_count="$(jq '.items | length' <<<"$of")"
+    if [[ "$overall" != "critical" ]]; then
+      of="$(_clast_doctor_finding_for orphan_snapshots || true)"
+      if [[ -n "$of" && "$(jq -r '.severity' <<<"$of")" == "warn" ]]; then
+        orphan_items="$(jq -r '.items[]?' <<<"$of")"
+        orphan_count="$(jq '.items | length' <<<"$of")"
+      fi
     fi
     if (( orphan_count > 0 )); then
       local proceed=0

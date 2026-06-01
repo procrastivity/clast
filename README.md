@@ -65,7 +65,8 @@ clast doctor --fix                   # rebuild a broken manifest, prune orphans
 
 See [`docs/cli-contract.md#clast-stats`](./docs/cli-contract.md#clast-stats)
 and [`docs/cli-contract.md#clast-doctor`](./docs/cli-contract.md#clast-doctor)
-for the full flag and output schemas.
+for the contract reference, and `clast stats --help` / `clast doctor --help`
+for the current set of flags.
 
 ## Development
 
