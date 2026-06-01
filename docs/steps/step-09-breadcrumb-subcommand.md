@@ -21,7 +21,7 @@ references:
 
 Steps 02–05 produced every lib `breadcrumb` needs. `lib/clast/clast-lib.bash` exposes `clast_journal_dir`, `clast_today`, `clast_parse_date` (ISO / `today` / `yesterday` / `-Nd` / `-Nw`), `clast_log_*`, `clast_atomic_write`, and the `CLAST_NOW_EPOCH` / `CLAST_DAY_CUTOFF` test hooks. `lib/clast/clast-registry-lib.bash` exposes `clast_registry_resolve` (path-or-segment → slug) and `clast_registry_list_json`. `bin/clast` already sources every lib at the top, parses global flags (`--json`, `--quiet`, `--verbose`, `--journal-dir`, `--projects-dir`), and dispatches `whereami`, `registry`, `snapshot`, `projects`, `sessions`, `show` to real subcommand files. The literal token `breadcrumb` is still routed through `_clast_stub` (currently labeled "planned for step 11" in the dispatcher map — that label is an out-of-date forecast that this step corrects). Step 08 (`entries`) is in flight on its own branch; this step does not depend on it and does not touch `entries/`.
 
-A breadcrumb is a one-line in-flight hint written mid-session. It lives at `$(clast_journal_dir)/breadcrumbs/YYYY-MM-DD-<slug>.md` (or `-_global.md` when unscoped) and the file is a tiny YAML-frontmatter Markdown document whose body is an append-only `- HH:MM — <TEXT>` log. `/wakeup` reads the day's breadcrumbs for a project; `/day-wakeup` lists them across projects. The CLI surface this step ships is the substrate those skills will call into; no skill work happens here.
+A breadcrumb is a one-line in-flight hint written mid-session. It lives at `$(clast_journal_dir)/breadcrumbs/YYYY-MM-DD-<slug>.md` (or `$(clast_journal_dir)/breadcrumbs/YYYY-MM-DD-_global.md` when unscoped — the slug component is the literal string `_global`, with a leading underscore that prevents collision with a real project slugged `global`) and the file is a tiny YAML-frontmatter Markdown document whose body is an append-only `- HH:MM — <TEXT>` log. `/wakeup` reads the day's breadcrumbs for a project; `/day-wakeup` lists them across projects. The CLI surface this step ships is the substrate those skills will call into; no skill work happens here.
 
 **Run `direnv allow` (or `nix develop`) before starting** so `jq`, `shellcheck`, and GNU coreutils (`date -d`, `realpath -m`, `stat -c`) are on PATH.
 
@@ -62,7 +62,7 @@ Read before starting:
    - One or more positional words make up the `<TEXT>` argument. Join surviving positionals (after flag parsing) with a single space. Reject embedded newlines or carriage returns inside any positional (exit 2 with `clast: breadcrumb: text must be a single line`). An empty `<TEXT>` (no positionals, or all whitespace after trim) → exit 2 with `clast: breadcrumb: missing required argument <TEXT>`.
 
 4. **Resolve the project for write.** Priority order (matches `cli-contract.md#clast-breadcrumb`):
-   1. If `--project SLUG` was given, use that slug verbatim. Do not require the slug to exist in the registry (a user may write a breadcrumb for a slug they intend to register later); emit a `clast_log_warn` "slug not in registry" so `--verbose` users notice, but proceed.
+   1. If `--project SLUG` was given, use that slug verbatim. Do not require the slug to exist in the registry (a user may write a breadcrumb for a slug they intend to register later); emit a `clast_log_warn "slug '<slug>' not in registry"` (which writes unconditionally to stderr — `clast_log_warn` is not gated on `CLAST_VERBOSE`) so the user sees the typo case, but proceed with the write.
    2. Else if `--global` was given, set `slug=_global` and skip registry resolution.
    3. Else attempt `clast_registry_resolve "$PWD"`. On hit, use the resolved slug. On miss, exit 1 with `clast: breadcrumb: pwd does not resolve to a registered project (pass --project SLUG or --global)`. Under `--json`, emit `{"error":"...","code":1}` on stdout. Do NOT prompt — the CLI is non-interactive. **Note**: `docs/cli-contract.md#clast-breadcrumb` currently says "prompt to register or accept `--global`" — that wording is stale (it predates the CLI / skill split) and describes the future `/breadcrumb` skill's behavior, not the CLI's. This step's exit-1-with-hint behavior is the authoritative one; a follow-up docs pass should reword the contract section to match (out of scope here — do not edit `cli-contract.md` as part of this step).
 
@@ -115,7 +115,7 @@ Read before starting:
     - **`--date` override**: `"$CLAST_BIN" breadcrumb --global --date 2026-05-22 'historic note'` writes `breadcrumbs/2026-05-22-_global.md`, not the `today` file. Invalid `--date foo` exits 2.
     - **`--verbose` write**: `"$CLAST_BIN" --verbose breadcrumb --global 'x'`; stderr includes `wrote breadcrumbs/2026-05-30-_global.md (1 lines)` (or whatever the chosen literal wording is — assert on the path and line count substrings, not on exact prose).
     - **`--json` write**: `"$CLAST_BIN" --json breadcrumb --global 'x'`; stdout is a valid JSON object with `path`, `slug`, `date`, `line_count`; `line_count` reflects the post-write total.
-    - **`--read` of an existing file**: `"$CLAST_BIN" breadcrumb --read --project xesapps --day 2026-05-30` cats the file to stdout. With the JSON form `"$CLAST_BIN" --json breadcrumb --read --project xesapps --day 2026-05-30`, `exists` is `true` and `content` equals the file body byte-for-byte. (Global `--json` precedes the subcommand name — the dispatcher only parses global flags before the subcommand; subcommands read `CLAST_JSON` from env, they do not re-parse `--json`.)
+    - **`--read` of an existing file**: `"$CLAST_BIN" breadcrumb --read --project xesapps --day 2026-05-30` cats the file to stdout. With the JSON form `"$CLAST_BIN" --json breadcrumb --read --project xesapps --day 2026-05-30`, `exists` is `true` and `content` equals the file body byte-for-byte. (Global `--json` precedes the subcommand name — the dispatcher only parses global flags before the subcommand. Breadcrumb specifically reads `CLAST_JSON` from env and does NOT accept a subcommand-level `--json`; some other subcommands like `whereami` do re-parse `--json` locally for ergonomics, but breadcrumb intentionally does not — keep the global-flag-first invocation in every test.)
     - **`--read` of a missing file**: exit 0, empty stdout (default mode); `"$CLAST_BIN" --json breadcrumb --read ...` returns `exists: false`, `content: ""`.
     - **`--list` empty**: no `breadcrumbs/` directory at all → exit 0, default mode prints just the header row, `"$CLAST_BIN" --json breadcrumb --list` prints `[]`.
     - **`--list` with two files**: after writing one xesapps file (2 entries) and one global file (1 entry) on `2026-05-30`, `"$CLAST_BIN" --json breadcrumb --list --day 2026-05-30` returns an array of length 2 with the correct `line_count` per row; default mode renders `_global` as `(global)` and `xesapps` as `xesapps`, line counts in the right column.
@@ -188,9 +188,11 @@ cat "$CLAST_JOURNAL_DIR/breadcrumbs/2026-05-30-xesapps.md"
 bin/clast breadcrumb --global 'remember to bump the cache version'
 cat "$CLAST_JOURNAL_DIR/breadcrumbs/2026-05-30-_global.md"
 
-# Read  (global --json precedes the subcommand; the dispatcher only parses
-# global flags before the subcommand name — subcommands read CLAST_JSON
-# from env rather than re-parsing --json)
+# Read  (global --json precedes the subcommand name; the dispatcher only
+# parses global flags before the subcommand. Breadcrumb reads CLAST_JSON
+# from env and does NOT accept a subcommand-level --json; some other
+# subcommands like whereami do re-parse --json locally, but breadcrumb
+# intentionally does not.)
 bin/clast breadcrumb --read --project xesapps --day 2026-05-30
 bin/clast --json breadcrumb --read --global --day 2026-05-30 | jq
 
