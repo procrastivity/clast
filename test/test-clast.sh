@@ -18,6 +18,7 @@ declare -a suites=(
   test/test-entries.sh
   test/test-doctor.sh
   test/test-stats.sh
+  test/test-plugin-hook.sh
 )
 
 fail=0
