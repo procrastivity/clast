@@ -28,13 +28,13 @@ In parallel:
 
 ```bash
 # Recent curated entries for this project (newest first)
-clast entries --project <slug> --limit 5 --json
+clast --json entries --project <slug> --limit 5
 
 # Today's breadcrumbs for this project
 clast breadcrumb --read --project <slug> --day today
 
 # Today's session activity (if any — user might have started already)
-clast sessions --day today --project <slug> --json
+clast --json sessions --day today --project <slug>
 ```
 
 For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):

@@ -61,8 +61,8 @@ _assert_skill_wakeup_triggers() {
 _assert_skill_wakeup_cli_commands() {
   local skill=.claude-plugin/skills/wakeup/SKILL.md
   local ok=0
-  for cmd in 'clast registry resolve' 'clast entries --project' 'clast entries read' \
-             'clast breadcrumb --read' 'clast sessions --day today'; do
+  for cmd in 'clast registry resolve' 'entries --project' 'clast entries read' \
+             'clast breadcrumb --read' 'sessions --day today'; do
     if ! grep -q "$cmd" "$skill"; then
       printf 'wakeup SKILL.md: missing CLI command: %s\n' "$cmd" >&2
       ok=1
