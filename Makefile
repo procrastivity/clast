@@ -4,7 +4,7 @@ test:
 	./test/test-clast.sh
 
 lint:
-	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast); \
+	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast; [ -f hooks/snapshot.sh ] && echo hooks/snapshot.sh); \
 	shellcheck -x $$files
 
 install:

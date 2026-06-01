@@ -1,0 +1,11 @@
+{
+  "name": "clast",
+  "version": "0.1.0",
+  "description": "Capture, curate, and surface Claude Code session history across all your projects.",
+  "homepage": "https://github.com/procrastivity/clast",
+  "author": {
+    "name": "Beau",
+    "url": "https://github.com/procrastivity"
+  },
+  "license": "MIT"
+}

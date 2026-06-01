@@ -16,7 +16,7 @@
   ],
   "scripts": {
     "test": "test/test-clast.sh",
-    "lint": "shellcheck bin/clast lib/clast/**/*.bash test/*.sh"
+    "lint": "shellcheck bin/clast lib/clast/**/*.bash test/*.sh hooks/snapshot.sh"
   },
   "repository": {
     "type": "git",
