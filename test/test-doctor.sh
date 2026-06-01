@@ -104,6 +104,13 @@ teardown_test_journal
 # --- critical manifest with --fix → rebuild → exit 0 -----------------------
 setup_test_journal >/dev/null
 make_fixture_journal_tree "corrupt-manifest"
+# Pin snapshot mtimes to the suite's frozen clock so the rebuilt manifest's
+# captured_at is deterministic and well clear of the 04:00 day-cutoff window
+# (FROZEN_EPOCH is noon UTC). The rebuild derives captured_at from each
+# snapshot's file mtime, which is "now" for a freshly-copied fixture — without
+# this, day_cutoff_sanity warns (and doctor exits 1) whenever the suite happens
+# to run near 04:00 UTC.
+find "$CLAST_JOURNAL_DIR/transcripts" -type f -name '*.jsonl' -exec touch -d "@${CLAST_NOW_EPOCH}" {} +
 out="$("$CLAST_BIN" doctor --fix 2>&1)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "doctor corrupt --fix: exit 0"
 nlines="$(wc -l <"$CLAST_JOURNAL_DIR/.manifest.jsonl" | tr -d ' ')"
