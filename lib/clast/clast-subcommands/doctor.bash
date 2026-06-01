@@ -167,12 +167,25 @@ _clast_doctor_check_registry_validity() {
   local collisions
   collisions="$(jq -r '
     . as $arr
-    | [ range(0; length) as $i
-        | range(0; length) as $j
-        | select($i != $j)
-        | ($arr[$i].aliases // []) as $aliases
-        | select($aliases | index($arr[$j].slug) != null)
-        | "alias collision: " + $arr[$i].slug + " aliases " + $arr[$j].slug
+    | [
+        # alias collides with another entry'"'"'s slug
+        ( range(0; length) as $i
+          | range(0; length) as $j
+          | select($i != $j)
+          | ($arr[$i].aliases // []) as $aliases
+          | select($aliases | index($arr[$j].slug) != null)
+          | "alias collision: " + $arr[$i].slug + " aliases slug " + $arr[$j].slug
+        ),
+        # alias collides with another entry'"'"'s alias (shared alias across two slugs)
+        ( range(0; length) as $i
+          | range(0; length) as $j
+          | select($i < $j)
+          | ($arr[$i].aliases // []) as $ai
+          | ($arr[$j].aliases // []) as $aj
+          | ($ai | map(select(. as $x | $aj | index($x) != null))) as $shared
+          | select($shared | length > 0)
+          | "alias collision: " + $arr[$i].slug + " and " + $arr[$j].slug + " share alias " + ($shared[0])
+        )
       ]
     | unique[]?
   ' <<<"$entries_json")"
@@ -216,12 +229,17 @@ _clast_doctor_check_orphan_snapshots() {
   fi
 
   # Collect every known session_id from the manifest (full set, not deduped —
-  # orphan check only cares whether the sid appears anywhere).
-  local known
-  known="$(jq -cR 'fromjson? | .session_id' "$(clast_manifest_path)" 2>/dev/null \
-    | jq -Rs 'split("\n") | map(select(length > 0) | fromjson? // .)
-              | map(select(type == "string")) | unique')"
-  [[ -z "$known" ]] && known='[]'
+  # orphan check only cares whether the sid appears anywhere). Tolerate a
+  # missing manifest file: a fresh-or-partially-synced journal with stray
+  # transcripts on disk should still report orphans, not abort.
+  local manifest_path known='[]'
+  manifest_path="$(clast_manifest_path)"
+  if [[ -f "$manifest_path" ]]; then
+    known="$(jq -cR 'fromjson? | .session_id' "$manifest_path" 2>/dev/null \
+      | jq -Rs 'split("\n") | map(select(length > 0) | fromjson? // .)
+                | map(select(type == "string")) | unique')"
+    [[ -z "$known" ]] && known='[]'
+  fi
 
   local -a orphans=()
   local snapshot sid rel found
@@ -444,6 +462,12 @@ clast_cmd_doctor() {
       if (( assume_yes == 1 )); then
         proceed=1
       else
+        # Interactive prompts would corrupt --json output. Force --yes when
+        # JSON mode is requested.
+        if [[ -n "${CLAST_JSON:-}" ]]; then
+          _clast_doctor_err "--fix needs --yes when --json is set"
+          return 2
+        fi
         if ! { exec 3</dev/tty; } 2>/dev/null; then
           _clast_doctor_err "--fix needs --yes when stdin is not a TTY"
           return 2

@@ -145,6 +145,47 @@ case "$out" in
 esac
 teardown_test_journal
 
+# --- registry alias-alias collision (two slugs share the same alias) -------
+setup_test_journal >/dev/null
+cat > "$CLAST_JOURNAL_DIR/projects.json" <<'EOF'
+{"path":"/tmp/a","slug":"alpha","first_seen":"2026-05-01","aliases":["shared-alias"]}
+{"path":"/tmp/b","slug":"gamma","first_seen":"2026-05-02","aliases":["shared-alias"]}
+EOF
+out="$("$CLAST_BIN" doctor 2>&1)" && rc=$? || rc=$?
+assert_eq "1" "$rc" "doctor alias-alias collision: exit 1"
+case "$out" in
+  *"share alias shared-alias"*) _clast_test_pass "doctor alias-alias collision: finding present" ;;
+  *) _clast_test_fail "doctor alias-alias collision: finding present"; printf '%s\n' "$out" >&2 ;;
+esac
+teardown_test_journal
+
+# --- orphan check tolerates missing manifest -------------------------------
+setup_test_journal >/dev/null
+mkdir -p "$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-x"
+: > "$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-x/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl"
+out="$("$CLAST_BIN" doctor 2>&1)" && rc=$? || rc=$?
+assert_eq "1" "$rc" "doctor no-manifest+orphans: exit 1"
+case "$out" in
+  *"! Orphan snapshots: 1"*"aaaaaaaa"*) _clast_test_pass "doctor no-manifest+orphans: orphan reported" ;;
+  *) _clast_test_fail "doctor no-manifest+orphans: orphan reported"; printf '%s\n' "$out" >&2 ;;
+esac
+teardown_test_journal
+
+# --- --json --fix without --yes errors (no stdout prompt) -------------------
+_seed_full
+mkdir -p "$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-proj-orphan"
+: > "$CLAST_JOURNAL_DIR/transcripts/2026-05-30/-tmp-proj-orphan/ffffffff-ffff-4fff-8fff-ffffffffffff.jsonl"
+( "$CLAST_BIN" --json doctor --fix </dev/null ) >/tmp/clast-json-fix-out 2>&1; rc=$?
+assert_eq "2" "$rc" "doctor --json --fix no --yes: exit 2"
+# Whatever lands on stdout/stderr should NOT include the interactive prompt.
+if grep -q 'Remove these' /tmp/clast-json-fix-out; then
+  _clast_test_fail "doctor --json --fix no --yes: no prompt leaked"
+else
+  _clast_test_pass "doctor --json --fix no --yes: no prompt leaked"
+fi
+rm -f /tmp/clast-json-fix-out
+teardown_test_journal
+
 # --- day-bucket mismatch ----------------------------------------------------
 setup_test_journal >/dev/null
 cat > "$CLAST_JOURNAL_DIR/.manifest.jsonl" <<'EOF'

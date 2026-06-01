@@ -216,8 +216,16 @@ clast_cmd_stats() {
 
     slug=""
     if [[ "$source" != "null" && -n "$source" ]]; then
-      if ! slug="$(clast_registry_resolve "$seg" 2>/dev/null)" || [[ -z "$slug" ]]; then
-        slug="$seg"
+      # Prefer the manifest source (authoritative under path moves) — try
+      # dirname(source) since the registry stores project directories while
+      # source carries the .jsonl filename. Fall back to the snapshot
+      # segment when the source path is not registered.
+      local source_dir
+      source_dir="$(dirname "$source")"
+      if ! slug="$(clast_registry_resolve "$source_dir" 2>/dev/null)" || [[ -z "$slug" ]]; then
+        if ! slug="$(clast_registry_resolve "$seg" 2>/dev/null)" || [[ -z "$slug" ]]; then
+          slug="$seg"
+        fi
       fi
     fi
 
