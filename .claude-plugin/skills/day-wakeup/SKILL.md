@@ -26,7 +26,7 @@ Errors here are non-fatal — proceed even if it fails, just warn the user.
 ## Step 2: Enumerate uncurated sessions from yesterday
 
 ```bash
-clast sessions --day yesterday --json
+clast --json sessions --day yesterday
 ```
 
 Filter to sessions with `curated: false`. If everything from yesterday is already curated, print "Nothing to curate from yesterday — already done." and stop.
@@ -39,7 +39,7 @@ For each session in the list:
 
 1. Read session details:
    ```bash
-   clast show <session-id> --full --turns 8 --json
+   clast --json show <session-id> --full --turns 8
    ```
    This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
 
