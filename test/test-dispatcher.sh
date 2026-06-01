@@ -45,12 +45,12 @@ assert_exit_code 2 "$CLAST_BIN" bogus-cmd
 
 # --- stubbed subcommand -------------------------------------------------
 
-stub_stderr="$("$CLAST_BIN" entries 2>&1 1>/dev/null)"
+stub_stderr="$("$CLAST_BIN" breadcrumb 2>&1 1>/dev/null)"
 case "$stub_stderr" in
-  *"entries is not yet implemented"*) _clast_test_pass "stub: entries reports not yet implemented" ;;
-  *) _clast_test_fail "stub: entries reports not yet implemented"; printf '%s\n' "$stub_stderr" >&2 ;;
+  *"breadcrumb is not yet implemented"*) _clast_test_pass "stub: breadcrumb reports not yet implemented" ;;
+  *) _clast_test_fail "stub: breadcrumb reports not yet implemented"; printf '%s\n' "$stub_stderr" >&2 ;;
 esac
-assert_exit_code 2 "$CLAST_BIN" entries
+assert_exit_code 2 "$CLAST_BIN" breadcrumb
 
 # --- global-flag forwarding into the lib --------------------------------
 
