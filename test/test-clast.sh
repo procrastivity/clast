@@ -8,6 +8,87 @@ cd "$(dirname "$0")/.." || exit 1
 # Static checks on the Claude Code plugin assets. The plugin layer has no
 # behavioral surface to integration-test — there's nothing to invoke and
 # nothing to assert beyond "files exist and are well-formed."
+_assert_skill_wakeup_frontmatter() {
+  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local ok=0
+  if [[ ! -f "$skill" ]]; then
+    printf 'wakeup SKILL.md: file not found\n' >&2
+    return 1
+  fi
+  # Must start with ---
+  if [[ "$(head -1 "$skill")" != '---' ]]; then
+    printf 'wakeup SKILL.md: must begin with ---\n' >&2
+    ok=1
+  fi
+  # Second --- must appear within first 50 lines
+  if ! awk '/^---$/{n++; if(n==2){found=1; exit}} END{exit !found}' \
+       <(head -50 "$skill"); then
+    printf 'wakeup SKILL.md: closing --- not found within first 50 lines\n' >&2
+    ok=1
+  fi
+  if ! grep -q 'name: wakeup' "$skill"; then
+    printf 'wakeup SKILL.md: missing name: wakeup\n' >&2
+    ok=1
+  fi
+  local desc_line
+  desc_line=$(grep -c 'description:' "$skill" || true)
+  if [[ "$desc_line" -lt 1 ]]; then
+    printf 'wakeup SKILL.md: missing description field\n' >&2
+    ok=1
+  fi
+  # description value must be substantial (>100 chars across the block)
+  local desc_len
+  desc_len=$(awk '/^description:/{p=1} p{s=s $0} /^---$/ && NR>1{p=0} END{print length(s)}' "$skill")
+  if [[ "$desc_len" -lt 100 ]]; then
+    printf 'wakeup SKILL.md: description field too short (%d chars)\n' "$desc_len" >&2
+    ok=1
+  fi
+  return "$ok"
+}
+
+_assert_skill_wakeup_triggers() {
+  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local ok=0
+  for phrase in '/wakeup' 'wake up' 'where was I' 'resume'; do
+    if ! grep -q "$phrase" "$skill"; then
+      printf 'wakeup SKILL.md: missing trigger phrase: %s\n' "$phrase" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+
+_assert_skill_wakeup_cli_commands() {
+  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local ok=0
+  for cmd in 'clast registry resolve' 'entries --project' 'clast entries read' \
+             'clast breadcrumb --read' 'sessions --day today'; do
+    if ! grep -q "$cmd" "$skill"; then
+      printf 'wakeup SKILL.md: missing CLI command: %s\n' "$cmd" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+
+_assert_skill_wakeup_readonly() {
+  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local ok=0
+  if grep -qE 'clast entries write' "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found "clast entries write"\n' >&2
+    ok=1
+  fi
+  if grep -qE "clast breadcrumb [^-]" "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found write-form "clast breadcrumb"\n' >&2
+    ok=1
+  fi
+  if grep -qE 'clast snapshot' "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found "clast snapshot"\n' >&2
+    ok=1
+  fi
+  return "$ok"
+}
+
 _assert_plugin_assets() {
   local ok=0
   if ! jq -e . .claude-plugin/plugin.json >/dev/null; then
@@ -22,6 +103,14 @@ _assert_plugin_assets() {
     printf 'plugin asset check: hooks/snapshot.sh failed shellcheck\n' >&2
     ok=1
   fi
+  printf 'plugin asset check: wakeup/SKILL.md frontmatter\n'
+  if ! _assert_skill_wakeup_frontmatter; then ok=1; fi
+  printf 'plugin asset check: wakeup/SKILL.md trigger phrases\n'
+  if ! _assert_skill_wakeup_triggers; then ok=1; fi
+  printf 'plugin asset check: wakeup/SKILL.md CLI commands\n'
+  if ! _assert_skill_wakeup_cli_commands; then ok=1; fi
+  printf 'plugin asset check: wakeup/SKILL.md read-only invariant\n'
+  if ! _assert_skill_wakeup_readonly; then ok=1; fi
   return "$ok"
 }
 

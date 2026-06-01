@@ -84,6 +84,21 @@ effort. The hook is best-effort and silent — if the `clast` CLI isn't on your
 [`docs/skill-prompts.md#hook-sessionstart`](./docs/skill-prompts.md#hook-sessionstart)
 for the hook's design rationale.
 
+### `/day-wakeup`
+
+At the start of each day, run `/day-wakeup` inside any Claude Code session to curate
+yesterday's sessions into durable journal entries. The skill walks through each uncurated
+session, proposes a draft, and prompts you to accept, edit, or skip. See
+[`docs/skill-prompts.md#skill-1-day-wakeup`](./docs/skill-prompts.md#skill-1-day-wakeup).
+
+### `/wakeup`
+
+When starting work on a specific project, run `/wakeup` (or `/wakeup <slug>` from
+anywhere) to get a per-project read-only briefing synthesized from recent curated entries,
+today's breadcrumbs, and any sessions already started today. `/wakeup` never writes — it
+only reads. See
+[`docs/skill-prompts.md#skill-2-wakeup`](./docs/skill-prompts.md#skill-2-wakeup).
+
 ## Development
 
 **With Nix (recommended).** Run `direnv allow` (or `nix develop`) at the repo root. The dev shell provides `bash`, `jq`, `git`, `shellcheck`, and `pre-commit` — everything `clast` needs at runtime plus the dev tooling.
