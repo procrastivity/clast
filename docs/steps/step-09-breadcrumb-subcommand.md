@@ -1,7 +1,7 @@
 ---
 step: 09
 title: breadcrumb-subcommand
-depends_on: [02, 03, 05]
+depends_on: [02, 03, 05, 06, 07]
 size: small
 references:
   - docs/overview.md#filesystem-reference
@@ -19,7 +19,7 @@ references:
 
 ## Context
 
-Steps 02–05 produced every lib `breadcrumb` needs. `lib/clast/clast-lib.bash` exposes `clast_journal_dir`, `clast_today`, `clast_parse_date` (ISO / `today` / `yesterday` / `-Nd` / `-Nw`), `clast_log_*`, `clast_atomic_write`, and the `CLAST_NOW_EPOCH` / `CLAST_DAY_CUTOFF` test hooks. `lib/clast/clast-registry-lib.bash` exposes `clast_registry_resolve` (path-or-segment → slug) and `clast_registry_list_json`. `bin/clast` already sources every lib at the top, parses global flags (`--json`, `--quiet`, `--verbose`, `--journal-dir`, `--projects-dir`), and dispatches `whereami`, `registry`, `snapshot`, `projects`, `sessions`, `show` to real subcommand files. The literal token `breadcrumb` is still routed through `_clast_stub` (currently labeled "planned for step 11" in the dispatcher map — that label is an out-of-date forecast that this step corrects). Step 08 (`entries`) is in flight on its own branch; this step does not depend on it and does not touch `entries/`.
+Steps 02, 03, and 05 produced every lib `breadcrumb` needs at runtime; steps 06 and 07 are listed in `depends_on` because the plan reuses the `multi-project/projects-tree/` fixture (added in step 06) and the `multi-project/journal-seed/projects.json` (added in step 07), and because the dispatcher state described below assumes the post-step-07 wiring. `lib/clast/clast-lib.bash` exposes `clast_journal_dir`, `clast_today`, `clast_parse_date` (ISO / `today` / `yesterday` / `-Nd` / `-Nw`), `clast_log_*`, `clast_atomic_write`, and the `CLAST_NOW_EPOCH` / `CLAST_DAY_CUTOFF` test hooks. `lib/clast/clast-registry-lib.bash` exposes `clast_registry_resolve` (path-or-segment → slug) and `clast_registry_list_json`. `bin/clast` already sources every lib at the top, parses global flags (`--json`, `--quiet`, `--verbose`, `--journal-dir`, `--projects-dir`), and dispatches `whereami`, `registry`, `snapshot`, `projects`, `sessions`, `show` to real subcommand files. The literal token `breadcrumb` is still routed through `_clast_stub` (currently labeled "planned for step 11" in the dispatcher map — that label is an out-of-date forecast that this step corrects). Step 08 (`entries`) is in flight on its own branch; this step does not depend on it and does not touch `entries/`.
 
 A breadcrumb is a one-line in-flight hint written mid-session. It lives at `$(clast_journal_dir)/breadcrumbs/YYYY-MM-DD-<slug>.md` (or `$(clast_journal_dir)/breadcrumbs/YYYY-MM-DD-_global.md` when unscoped — the slug component is the literal string `_global`, with a leading underscore that prevents collision with a real project slugged `global`) and the file is a tiny YAML-frontmatter Markdown document whose body is an append-only `- HH:MM — <TEXT>` log. `/wakeup` reads the day's breadcrumbs for a project; `/day-wakeup` lists them across projects. The CLI surface this step ships is the substrate those skills will call into; no skill work happens here.
 
