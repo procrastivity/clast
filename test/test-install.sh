@@ -37,19 +37,22 @@ else
 fi
 assert_file_exists "$PREFIX/share/clast/README.md" "installed README"
 assert_file_exists "$PREFIX/share/clast/LICENSE" "installed LICENSE"
+assert_file_exists "$PREFIX/lib/clast/package.json" "installed package metadata"
 
 unset CLAST_LIB
-out="$("$PREFIX/bin/clast" --version)" && rc=$? || rc=$?
+expected_version="$(jq -r '.version' package.json)"
+version_err="$PREFIX/version.err"
+out="$("$PREFIX/bin/clast" --version 2>"$version_err")" && rc=$? || rc=$?
 assert_eq "0" "$rc" "installed clast --version exits 0"
-case "$out" in
-  clast\ *) _clast_test_pass "installed clast --version prints version" ;;
-  *) _clast_test_fail "installed clast --version prints version"; printf '%s\n' "$out" >&2 ;;
-esac
+assert_eq "clast $expected_version" "$out" "installed clast --version prints package version"
+assert_eq "" "$(cat "$version_err")" "installed clast --version has empty stderr"
 
 out="$(./install.sh "$PREFIX")" && rc=$? || rc=$?
 assert_eq "0" "$rc" "second install exits 0"
-out="$("$PREFIX/bin/clast" --version)" && rc=$? || rc=$?
+out="$("$PREFIX/bin/clast" --version 2>"$version_err")" && rc=$? || rc=$?
 assert_eq "0" "$rc" "second install clast --version exits 0"
+assert_eq "clast $expected_version" "$out" "second install clast --version prints package version"
+assert_eq "" "$(cat "$version_err")" "second install clast --version has empty stderr"
 
 obsolete="$PREFIX/lib/clast/clast-subcommands/_obsolete.bash"
 printf 'stale\n' >"$obsolete"

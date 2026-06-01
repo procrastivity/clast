@@ -26,6 +26,7 @@ cp -R "$SRC/examples" "$PREFIX/share/clast/"
 
 install -m644 "$SRC/README.md" "$PREFIX/share/clast/README.md"
 install -m644 "$SRC/LICENSE" "$PREFIX/share/clast/LICENSE"
+install -m644 "$SRC/package.json" "$PREFIX/lib/clast/package.json"
 
 echo "Installed clast to $PREFIX"
 echo "  Binary: $PREFIX/bin/clast"
