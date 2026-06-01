@@ -218,8 +218,8 @@ Subcommands:
   entries       List or read curated journal entries     (planned)
   breadcrumb    Append a one-line in-flight hint         (planned)
   registry      Manage the project registry              (planned)
-  stats         Token/duration/session-count stats       (planned)
-  doctor        Sanity-check the journal                 (planned)
+  stats         Token/duration/session-count stats
+  doctor        Sanity-check the journal
 
 Global flags:
   -h, --help            Print this usage and exit

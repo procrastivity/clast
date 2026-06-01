@@ -53,6 +53,21 @@ for the full frontmatter schema and
 [`docs/cli-contract.md#clast-entries`](./docs/cli-contract.md#clast-entries)
 for the flag reference.
 
+## Inspect and audit the journal
+
+```sh
+clast stats                          # one-line activity summary for today
+clast stats --since -7d              # rollup over the last week
+
+clast doctor                         # check manifest, registry, snapshots
+clast doctor --fix                   # rebuild a broken manifest, prune orphans
+```
+
+See [`docs/cli-contract.md#clast-stats`](./docs/cli-contract.md#clast-stats)
+and [`docs/cli-contract.md#clast-doctor`](./docs/cli-contract.md#clast-doctor)
+for the contract reference, and `clast stats --help` / `clast doctor --help`
+for the current set of flags.
+
 ## Development
 
 **With Nix (recommended).** Run `direnv allow` (or `nix develop`) at the repo root. The dev shell provides `bash`, `jq`, `git`, `shellcheck`, and `pre-commit` — everything `clast` needs at runtime plus the dev tooling.
