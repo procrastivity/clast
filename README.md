@@ -53,6 +53,20 @@ for the full frontmatter schema and
 [`docs/cli-contract.md#clast-entries`](./docs/cli-contract.md#clast-entries)
 for the flag reference.
 
+## Leave a breadcrumb
+
+```sh
+clast breadcrumb --project xesapps 'check migration before deploy'
+clast breadcrumb --global 'remember to bump the cache version'
+
+clast breadcrumb --read --project xesapps
+clast breadcrumb --read --global
+```
+
+Breadcrumbs are append-only one-line notes for `/wakeup` and `/day-wakeup`.
+See [`docs/cli-contract.md#clast-breadcrumb`](./docs/cli-contract.md#clast-breadcrumb)
+for the full command contract.
+
 ## Inspect and audit the journal
 
 ```sh

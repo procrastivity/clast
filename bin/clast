@@ -144,7 +144,11 @@ case "$cmd" in
     source "$CLAST_LIB/clast-subcommands/entries.bash"
     clast_cmd_entries "$@"
     ;;
-  breadcrumb) _clast_stub breadcrumb 11 ;;
+  breadcrumb)
+    # shellcheck source=lib/clast/clast-subcommands/breadcrumb.bash
+    source "$CLAST_LIB/clast-subcommands/breadcrumb.bash"
+    clast_cmd_breadcrumb "$@"
+    ;;
   registry)
     # shellcheck source=lib/clast/clast-subcommands/registry.bash
     source "$CLAST_LIB/clast-subcommands/registry.bash"

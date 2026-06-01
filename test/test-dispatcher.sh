@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-dispatcher.sh — `bin/clast` dispatcher behavior:
-# version, help, unknown subcommand, stubbed subcommand, global-flag
+# version, help, unknown subcommand, real subcommand dispatch, global-flag
 # forwarding into the lib.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -43,12 +43,12 @@ case "$bogus_stderr" in
 esac
 assert_exit_code 2 "$CLAST_BIN" bogus-cmd
 
-# --- stubbed subcommand -------------------------------------------------
+# --- real subcommand dispatch ------------------------------------------
 
 stub_stderr="$("$CLAST_BIN" breadcrumb 2>&1 1>/dev/null)"
 case "$stub_stderr" in
-  *"breadcrumb is not yet implemented"*) _clast_test_pass "stub: breadcrumb reports not yet implemented" ;;
-  *) _clast_test_fail "stub: breadcrumb reports not yet implemented"; printf '%s\n' "$stub_stderr" >&2 ;;
+  *"missing required argument <TEXT>"*) _clast_test_pass "dispatch: breadcrumb reaches real subcommand" ;;
+  *) _clast_test_fail "dispatch: breadcrumb reaches real subcommand"; printf '%s\n' "$stub_stderr" >&2 ;;
 esac
 assert_exit_code 2 "$CLAST_BIN" breadcrumb
 
