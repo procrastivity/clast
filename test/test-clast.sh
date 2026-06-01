@@ -200,6 +200,7 @@ declare -a suites=(
   test/test-breadcrumb.sh
   test/test-doctor.sh
   test/test-stats.sh
+  test/test-install.sh
 )
 
 fail=0
