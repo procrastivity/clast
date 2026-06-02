@@ -212,12 +212,12 @@ Usage:
 Subcommands:
   whereami      Show current path, registry, and journal state
   snapshot      Capture new transcripts into the journal
-  projects      List projects with activity in a window  (planned)
-  sessions      List sessions in a window                (planned)
-  show          Dump session metadata                    (planned)
-  entries       List or read curated journal entries     (planned)
-  breadcrumb    Append a one-line in-flight hint         (planned)
-  registry      Manage the project registry              (planned)
+  projects      List projects with activity in a window
+  sessions      List sessions in a window
+  show          Dump session metadata
+  entries       List or read curated journal entries
+  breadcrumb    Append a one-line in-flight hint
+  registry      Manage the project registry
   stats         Token/duration/session-count stats
   doctor        Sanity-check the journal
 
