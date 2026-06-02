@@ -1,7 +1,7 @@
 ---
 step: 20
 title: stale-help-fix
-depends_on: [03, 05, 07, 08, 09]
+depends_on: [03, 05, 07, 08, 09, 15, 16, 19]
 size: small
 references:
   - lib/clast/clast-lib.bash
