@@ -32,6 +32,28 @@ esac
 echo "==> $result/bin/clast whereami --help (with CLAST_LIB unset, minimal PATH)"
 env -u CLAST_LIB PATH=/usr/bin:/bin "$result/bin/clast" whereami --help >/dev/null
 
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+mkdir -p "$tmpdir/journal/entries"
+cat >"$tmpdir/journal/entries/2026-05-30-1430-fixture-smoke.md" <<'EOF'
+---
+session_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+---
+
+# Session: fixture smoke
+EOF
+
+echo "==> snapshot/show fixture smoke (with CLAST_LIB unset, minimal PATH)"
+env -u CLAST_LIB \
+    PATH=/usr/bin:/bin \
+    CLAST_PROJECTS_DIR="$PWD/test/fixtures/simple" \
+    CLAST_JOURNAL_DIR="$tmpdir/journal" \
+    "$result/bin/clast" snapshot >/dev/null
+env -u CLAST_LIB \
+    PATH=/usr/bin:/bin \
+    CLAST_JOURNAL_DIR="$tmpdir/journal" \
+    "$result/bin/clast" show aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa --full >/dev/null
+
 echo "==> layout assertions"
 for path in \
     bin/clast \

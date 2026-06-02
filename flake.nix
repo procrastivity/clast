@@ -16,7 +16,16 @@
           src = ./.;
 
           nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = [ pkgs.bash pkgs.jq pkgs.coreutils pkgs.git ];
+          buildInputs = [
+            pkgs.bash
+            pkgs.jq
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gawk
+            pkgs.git
+            pkgs.gnugrep
+            pkgs.inetutils
+          ];
           dontBuild = true;
 
           installPhase = ''
@@ -39,7 +48,15 @@
             install -m755 bin/clast $out/bin/clast
             wrapProgram $out/bin/clast \
               --set CLAST_LIB "$out/lib/clast" \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.jq pkgs.coreutils pkgs.git ]}
+              --prefix PATH : ${pkgs.lib.makeBinPath [
+                pkgs.jq
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gawk
+                pkgs.git
+                pkgs.gnugrep
+                pkgs.inetutils
+              ]}
           '';
         };
 
