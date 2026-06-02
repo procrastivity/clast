@@ -7,7 +7,7 @@ and `infra-tools` checked a flaky shell lint issue.
 ```bash
 # User: /day-wakeup
 clast snapshot
-clast sessions --day yesterday --json
+clast --json sessions --day yesterday
 ```
 
 It filters to `curated: false`, groups by project, and shows:
@@ -23,7 +23,7 @@ xesapps      09:12  feature/field-normalize  58 messages
 The skill reads session details and breadcrumbs:
 
 ```bash
-clast show 33333333-3333-4333-8333-333333333333 --full --turns 8 --json
+clast --json show 33333333-3333-4333-8333-333333333333 --full --turns 8
 clast breadcrumb --read --project infra-tools --day yesterday
 ```
 
@@ -50,7 +50,7 @@ uncurated and can be revisited in a later `/day-wakeup`.
 The skill reads the next transcript:
 
 ```bash
-clast show 22222222-2222-4222-8222-222222222222 --full --turns 8 --json
+clast --json show 22222222-2222-4222-8222-222222222222 --full --turns 8
 clast breadcrumb --read --project notes --day yesterday
 ```
 
@@ -89,7 +89,7 @@ clast entries write \
 The skill reads the session and breadcrumbs:
 
 ```bash
-clast show 11111111-1111-4111-8111-111111111111 --full --turns 8 --json
+clast --json show 11111111-1111-4111-8111-111111111111 --full --turns 8
 clast breadcrumb --read --project xesapps --day yesterday
 ```
 

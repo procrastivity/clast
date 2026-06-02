@@ -33,7 +33,7 @@ What is already on `main` that this step finishes:
   distribution channel without further plumbing.
 - `CHANGELOG.md` — header + `[Unreleased]` placeholder. No entries.
   `cliff.toml` is wired up but no release has been cut, so
-  `git cliff` has nothing to do yet; the bootstrap entry for v0.1.0
+  `git cliff` has nothing to do yet; the bootstrap entry for v1.0.0
   is the human curation step here.
 - `README.md` — already covers snapshot/read/curate/breadcrumb/audit
   CLI usage (steps 06–10), all three install channels (manual / Nix /
@@ -73,7 +73,7 @@ Land the `examples/` content (`cron/crontab.sample`,
 `config/config.toml.sample`, `workflows/morning-briefing.md`), write
 `docs/releasing.md` describing the tag → release-workflow → npm + GH
 release procedure, curate `CHANGELOG.md`'s `[Unreleased]` section into
-a real v0.1.0 entry summarizing what steps 01–17 built, and do a
+a real v1.0.0 entry summarizing what steps 01–17 built, and do a
 final README pass that fixes any stale claims and ensures every
 relative link resolves. Replace every `examples/*/.gitkeep` with a
 real file (or remove the `.gitkeep` once a sibling file exists, since
@@ -103,15 +103,16 @@ Read before starting:
   directory layout is the planned shape. The `releasing.md` file is
   also called out in the layout tree; this step writes it.
 - `docs/repo-bootstrap.md#cliff.toml` — `git-cliff` is the changelog
-  tool. For v0.1.0 the entries are hand-curated (no prior release to
+  tool. For v1.0.0 the entries are hand-curated (no prior release to
   diff from); step 19 forward will use `git cliff` against the
-  v0.1.0 tag.
+  v1.0.0 tag.
 - `.github/workflows/release.yml` — the release procedure
   `docs/releasing.md` documents. Read fully before writing the
   runbook so you describe what the workflow actually does, not what
   it ought to do.
 - `package.json`, `flake.nix` — both at `version = "0.1.0"`. The
-  `[0.1.0]` changelog entry below is the marker for this version.
+  `[1.0.0]` changelog entry below is the marker for the public release that
+  step 19 tags after bumping those files.
 - Existing examples patterns in adjacent projects (skim only) —
   `xcind` and `solofiber` ship `examples/cron/` and
   `examples/workflows/`; their shape is the de facto reference for
@@ -224,9 +225,9 @@ Read before starting:
      to `main`. Optional.
    2–4 pages. Cross-link from `repo-bootstrap.md#ci`.
 
-6. **Curate `CHANGELOG.md`'s `[0.1.0]` entry.** Replace
-   `## [Unreleased]` with a `## [0.1.0]` heading (date undecided —
-   leave as `## [0.1.0] - YYYY-MM-DD` placeholder for step 19 to
+6. **Curate `CHANGELOG.md`'s `[1.0.0]` entry.** Replace
+   `## [Unreleased]` with a `## [1.0.0]` heading (date undecided —
+   leave as `## [1.0.0] - YYYY-MM-DD` placeholder for step 19 to
    stamp), then add a real `### Added` section enumerating what
    shipped (one bullet per major capability — not per step). Target
    shape:
@@ -234,7 +235,7 @@ Read before starting:
    ```markdown
    ## [Unreleased]
 
-   ## [0.1.0] - YYYY-MM-DD
+   ## [1.0.0] - YYYY-MM-DD
 
    First public release.
 
@@ -254,7 +255,7 @@ Read before starting:
      + GitHub Release.
    ```
 
-   Keep the `[Unreleased]` heading above `[0.1.0]` as the next-entry
+   Keep the `[Unreleased]` heading above `[1.0.0]` as the next-entry
    landing pad (empty body). Date placeholder is intentional;
    step 19 stamps it.
 
@@ -339,7 +340,7 @@ Read before starting:
   `cli-contract.md` and `skill-prompts.md` (no invented surface).
 - `docs/releasing.md` exists and walks through the tag-driven release
   flow that `.github/workflows/release.yml` implements.
-- `CHANGELOG.md` has a curated `## [0.1.0] - YYYY-MM-DD` entry above
+- `CHANGELOG.md` has a curated `## [1.0.0] - YYYY-MM-DD` entry above
   the `## [Unreleased]` placeholder, with bullet-list `### Added`
   enumerating the v1.0 capability set.
 - `README.md`:
@@ -429,8 +430,8 @@ test ! -e examples/cron/.gitkeep
 test ! -e examples/config/.gitkeep
 test ! -e examples/workflows/.gitkeep
 
-# Confirm the changelog has the v0.1.0 entry
-grep -q '^## \[0.1.0\]' CHANGELOG.md
+# Confirm the changelog has the v1.0.0 entry
+grep -q '^## \[1.0.0\]' CHANGELOG.md
 ```
 
 ## Notes for the implementer
