@@ -95,6 +95,20 @@ for the current set of flags.
 [`docs/repo-bootstrap.md#installsh--uninstallsh`](./docs/repo-bootstrap.md#installsh--uninstallsh)
 for the rationale.
 
+## Install with Nix
+
+With Nix flakes enabled, you can use `clast` directly from the public flake:
+
+```sh
+nix run github:procrastivity/clast -- whereami
+nix profile install github:procrastivity/clast
+nix build .#default && ./result/bin/clast --version
+```
+
+For Home Manager or nix-darwin users, `overlays.default` exposes `pkgs.clast`.
+See [`docs/repo-bootstrap.md#nix-flake`](./docs/repo-bootstrap.md#nix-flake)
+for the full overlay wiring.
+
 ## Install as a Claude Code plugin
 
 For a local checkout, install the plugin with:

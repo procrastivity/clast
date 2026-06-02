@@ -1,11 +1,18 @@
-.PHONY: test lint install uninstall release clean deps-check
+.PHONY: test lint nix-smoke install uninstall release clean deps-check
 
 test:
 	./test/test-clast.sh
 
 lint:
-	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast; [ -f hooks/snapshot.sh ] && echo hooks/snapshot.sh; [ -f install.sh ] && echo install.sh; [ -f uninstall.sh ] && echo uninstall.sh); \
+	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast; [ -f hooks/snapshot.sh ] && echo hooks/snapshot.sh; [ -f install.sh ] && echo install.sh; [ -f uninstall.sh ] && echo uninstall.sh; [ -f contrib/nix-smoke.sh ] && echo contrib/nix-smoke.sh); \
 	shellcheck -x $$files
+
+nix-smoke:
+	@if ! command -v nix >/dev/null 2>&1; then \
+		echo "nix-smoke: skipping (nix not on PATH)" ; \
+		exit 0 ; \
+	fi
+	./contrib/nix-smoke.sh
 
 install:
 	./install.sh
