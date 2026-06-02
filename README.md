@@ -166,7 +166,7 @@ only reads. See
 Pull requests run lint, tests, version sync, npm pack shape, Nix smoke, flake check, and Nix build automatically.
 Releases trigger on `v*` tags, and the tag version must match `package.json` exactly.
 The release workflow publishes to npm with provenance and creates a GitHub Release with the npm tarball attached.
-Configure the `NPM_TOKEN` repo secret before the first release tag.
+Publishing to npm uses Trusted Publishing (OIDC) — no `NPM_TOKEN` secret. Configure the trusted publisher for `@procrastivity/clast` on npmjs.com before the first release tag; see [`docs/releasing.md`](./docs/releasing.md#trusted-publishing-setup).
 
 ## Documentation
 
