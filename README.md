@@ -2,7 +2,7 @@
 
 Capture, curate, and surface Claude Code session history across all your projects.
 
-> 🚧 Pre-release. APIs may change before v1.0.
+> v1.0: CLI contract is stable. Configuration TOML loading is planned for v1.x.
 
 ## What it does
 
@@ -129,11 +129,13 @@ For a local checkout, install the plugin with:
 claude plugin install <path-to-clast-checkout>
 ```
 
-(The marketplace install flow is wired up in a future step.) Today the plugin
-ships a single `SessionStart` hook: every time a Claude Code session starts it
-backgrounds `clast snapshot`, so your journal stays current with zero manual
-effort. The hook is best-effort and silent — if the `clast` CLI isn't on your
-`PATH` yet, sessions still start cleanly. See
+The plugin can be installed from any local checkout, or via `npm install -g`
+(which puts `.claude-plugin/` under `npm root -g`); a centralized marketplace
+listing is a separate distribution channel deliberately not pursued for v1.
+Today the plugin ships a single `SessionStart` hook: every time a Claude Code
+session starts it backgrounds `clast snapshot`, so your journal stays current
+with zero manual effort. The hook is best-effort and silent: if the `clast` CLI
+isn't on your `PATH` yet, sessions still start cleanly. See
 [`docs/skill-prompts.md#hook-sessionstart`](./docs/skill-prompts.md#hook-sessionstart)
 for the hook's design rationale.
 
@@ -172,6 +174,8 @@ Configure the `NPM_TOKEN` repo secret before the first release tag.
 - [`docs/cli-contract.md`](./docs/cli-contract.md) — CLI reference.
 - [`docs/skill-prompts.md`](./docs/skill-prompts.md) — plugin reference.
 - [`docs/repo-bootstrap.md`](./docs/repo-bootstrap.md) — repo layout and packaging.
+- [`docs/releasing.md`](./docs/releasing.md) — release runbook.
+- [`examples/`](./examples/) — cron, systemd-timer, and workflow samples.
 
 ## License
 

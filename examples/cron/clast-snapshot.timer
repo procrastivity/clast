@@ -1,0 +1,15 @@
+# clast hourly snapshot timer.
+# Copy to ~/.config/systemd/user/clast-snapshot.timer, then run:
+# systemctl --user enable --now clast-snapshot.timer
+
+[Unit]
+Description=Run clast snapshot hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=clast-snapshot.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+# examples/config/config.toml.sample
+#
+# NOTE: TOML config loading is planned for v1.x; v1.0 reads only
+# the equivalent environment variables. Set these in your shell
+# profile to get the same effect today.
+#
+# Uncommenting values in this file is a no-op in v1.0 because the
+# loader does not exist yet. Treat this file as documentation for
+# the planned config surface.
+#
+# ~/.config/clast/config.toml
+
+[paths]
+# Override where clast reads JSONL transcripts from.
+# Env equivalent: CLAST_PROJECTS_DIR
+# projects_dir = "/Users/you/.claude/projects"
+
+# Override where clast writes the journal.
+# Env equivalent: CLAST_JOURNAL_DIR
+# journal_dir = "/Users/you/.claude/journal"
+
+[time]
+# The "day" cutoff used by `clast stats`, `clast sessions`, and
+# the /day-wakeup window. Sessions started before this time on
+# date D count as belonging to date D-1.
+# Env equivalent: CLAST_DAY_CUTOFF
+# day_cutoff = "04:00"
+
+[logging]
+# Silence info logs (matches the global --quiet flag).
+# Env equivalent: CLAST_QUIET=1
+# quiet = false

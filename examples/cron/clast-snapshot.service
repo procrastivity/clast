@@ -1,0 +1,10 @@
+# clast hourly snapshot service.
+# Copy to ~/.config/systemd/user/clast-snapshot.service, edit ExecStart if needed,
+# then enable the timer with: systemctl --user enable --now clast-snapshot.timer
+
+[Unit]
+Description=Capture Claude Code transcripts with clast
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/clast snapshot
