@@ -1,12 +1,60 @@
 name: release
+# Required repo secret: NPM_TOKEN (npmjs.com automation token,
+# type: Automation, scope: publish for @procrastivity/clast).
+# GITHUB_TOKEN is provided automatically by Actions.
 
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
-  placeholder:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "release workflow placeholder — wired up in step 17"
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v25
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Re-run every gate
+        run: |
+          nix develop -c make lint
+          nix develop -c make test
+          nix develop -c make check-version-sync
+          nix develop -c make npm-pack-check
+          nix develop -c make nix-smoke
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(jq -r '.version' package.json)
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+      - name: Build Nix package
+        run: nix build .#default --print-build-logs
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          tarball=$(npm pack --silent)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public "${{ steps.pack.outputs.tarball }}"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            "${{ steps.pack.outputs.tarball }}"
