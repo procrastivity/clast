@@ -64,4 +64,33 @@ assert_eq "/tmp/clast-test-y" "$forwarded_projects" "--projects-dir forwards int
 env_journal="$(CLAST_JOURNAL_DIR=/tmp/clast-test-z "$CLAST_BIN" whereami --json | jq -r .journal_dir)"
 assert_eq "/tmp/clast-test-z" "$env_journal" "CLAST_JOURNAL_DIR env var honored"
 
+# --- help block stays honest -------------------------------------------
+#
+# Catches the failure mode where a subcommand ships but its help-line
+# `(planned)` suffix gets left behind, or where a new subcommand is added
+# to the help block without a matching dispatcher case.
+
+case "$help_out" in
+  *"(planned)"*) _clast_test_fail "help block has no stale (planned) labels"; printf '%s\n' "$help_out" >&2 ;;
+  *) _clast_test_pass "help block has no stale (planned) labels" ;;
+esac
+
+# Every subcommand listed under "Subcommands:" in the help block must have a
+# matching dispatcher case in bin/clast.
+help_subcommands=$(printf '%s\n' "$help_out" \
+  | awk '/^Subcommands:/{p=1; next} /^Global flags:/{p=0} p && NF{print $1}')
+missing_dispatch=""
+while IFS= read -r sub; do
+  [ -z "$sub" ] && continue
+  if ! grep -qE "^[[:space:]]*${sub}\)" "$CLAST_BIN"; then
+    missing_dispatch="${missing_dispatch}${sub} "
+  fi
+done <<<"$help_subcommands"
+if [ -z "$missing_dispatch" ]; then
+  _clast_test_pass "every help-listed subcommand has a dispatcher branch"
+else
+  _clast_test_fail "every help-listed subcommand has a dispatcher branch"
+  printf 'missing dispatcher branch for: %s\n' "$missing_dispatch" >&2
+fi
+
 clast_test_summary
