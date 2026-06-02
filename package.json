@@ -1,6 +1,6 @@
 {
   "name": "@procrastivity/clast",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Capture, curate, and surface Claude Code session history across all your projects.",
   "homepage": "https://github.com/procrastivity/clast#readme",
   "bin": {
@@ -24,7 +24,13 @@
     "type": "git",
     "url": "https://github.com/procrastivity/clast.git"
   },
-  "keywords": ["claude-code", "session", "journal", "history", "cli"],
+  "keywords": [
+    "claude-code",
+    "session",
+    "journal",
+    "history",
+    "cli"
+  ],
   "author": "Beau",
   "license": "MIT",
   "engines": {
