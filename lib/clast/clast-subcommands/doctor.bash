@@ -473,7 +473,7 @@ clast_cmd_doctor() {
           _clast_doctor_err "--fix needs --yes when --json is set"
           return 2
         fi
-        if ! { exec 3</dev/tty; } 2>/dev/null; then
+        if [[ ! -t 0 ]] || ! { exec 3</dev/tty; } 2>/dev/null; then
           _clast_doctor_err "--fix needs --yes when stdin is not a TTY"
           return 2
         fi
