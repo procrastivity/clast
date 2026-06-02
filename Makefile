@@ -4,7 +4,7 @@ test:
 	./test/test-clast.sh
 
 lint:
-	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast; [ -f hooks/snapshot.sh ] && echo hooks/snapshot.sh; [ -f install.sh ] && echo install.sh; [ -f uninstall.sh ] && echo uninstall.sh; [ -f contrib/nix-smoke.sh ] && echo contrib/nix-smoke.sh; [ -f contrib/npm-pack-check.sh ] && echo contrib/npm-pack-check.sh; [ -f contrib/check-version-sync.sh ] && echo contrib/check-version-sync.sh); \
+	@files=$$(find lib/clast -type f -name '*.bash'; find test -maxdepth 1 -type f -name '*.sh'; [ -f bin/clast ] && echo bin/clast; [ -f hooks/snapshot.sh ] && echo hooks/snapshot.sh; [ -f install.sh ] && echo install.sh; [ -f uninstall.sh ] && echo uninstall.sh; [ -f contrib/nix-smoke.sh ] && echo contrib/nix-smoke.sh; [ -f contrib/npm-pack-check.sh ] && echo contrib/npm-pack-check.sh; [ -f contrib/check-version-sync.sh ] && echo contrib/check-version-sync.sh; [ -f contrib/release ] && echo contrib/release); \
 	shellcheck -x $$files
 
 nix-smoke:

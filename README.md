@@ -2,7 +2,7 @@
 
 Capture, curate, and surface Claude Code session history across all your projects.
 
-> v1.0: CLI contract is stable. Configuration TOML loading is planned for v1.x.
+> 🚧 Pre-1.0 — APIs may change before v1.0.
 
 ## What it does
 
