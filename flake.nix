@@ -12,7 +12,7 @@
         packages.default = pkgs.stdenv.mkDerivation {
           pname = "clast";
           # Bump in lockstep with package.json.
-          version = "0.1.0";
+          version = "0.0.0";
           src = ./.;
 
           nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -70,6 +70,7 @@
             git           # remote detection
             shellcheck    # linting
             pre-commit    # hook runner
+            git-cliff     # changelog generation for contrib/release
           ];
 
           shellHook = ''

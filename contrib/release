@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# contrib/release — bump version, regenerate CHANGELOG.md via git-cliff,
+# commit, push, and create+push the annotated v{version} tag. The tag
+# push triggers .github/workflows/release.yml, which runs gates and
+# publishes to npm with provenance + creates the GitHub Release.
+set -Eeuo pipefail
+
+DIR=$(cd "$(dirname "${0}")" && pwd)
+PROJECT_ROOT=$(cd "$DIR/.." && pwd)
+cd "$PROJECT_ROOT"
+
+usage() {
+  echo "Usage: contrib/release --major | --minor | --patch"
+  echo
+  echo "Bumps the version in package.json and flake.nix (lockstep),"
+  echo "regenerates CHANGELOG.md via git-cliff, commits 'release: vX.Y.Z',"
+  echo "pushes the branch, then creates and pushes the annotated v{version}"
+  echo "tag. The tag push triggers the release workflow."
+  exit 1
+}
+
+# --- Parse arguments ---
+
+case "${1:-}" in
+--major) BUMP="major" ;;
+--minor) BUMP="minor" ;;
+--patch) BUMP="patch" ;;
+*) usage ;;
+esac
+
+# --- Preconditions ---
+
+for tool in jq git git-cliff; do
+  command -v "$tool" >/dev/null || {
+    echo "error: '$tool' not found on PATH (are you in the dev shell? 'direnv allow' / 'nix develop')" >&2
+    exit 1
+  }
+done
+
+# Refuse to release from a dirty tree — the release commit must contain only
+# the version bump + changelog.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "error: working tree has uncommitted changes; commit or stash them first." >&2
+  git status --short
+  exit 1
+fi
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ]; then
+  echo "error: releases must be cut from 'main' (currently on '$BRANCH')." >&2
+  exit 1
+fi
+
+CURRENT_VERSION=$(jq -r .version package.json)
+
+# Confirm the two version sources agree before we start editing either.
+./contrib/check-version-sync.sh >/dev/null
+
+# --- Bump version (pure bash semver, no Node) ---
+
+IFS='.' read -r MAJOR MINOR PATCH <<<"$CURRENT_VERSION"
+case "$BUMP" in
+major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+patch) PATCH=$((PATCH + 1)) ;;
+esac
+NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+TAG="v${NEW_VERSION}"
+
+echo "Releasing ${CURRENT_VERSION} -> ${NEW_VERSION} (tag ${TAG}) on branch ${BRANCH}"
+
+# --- Edit package.json (jq into temp file + mv so a jq error cannot truncate) ---
+
+tmp=$(mktemp)
+jq --arg v "$NEW_VERSION" '.version = $v' package.json >"$tmp" && mv "$tmp" package.json
+
+# --- Edit flake.nix (single-line literal; sed -i.bak is BSD/GNU portable) ---
+
+sed -i.bak -E 's/^([[:space:]]*version = ")[^"]+(";[[:space:]]*)$/\1'"$NEW_VERSION"'\2/' flake.nix
+rm -f flake.nix.bak
+
+# Verify the substitution landed.
+if ! grep -E '^[[:space:]]*version = "'"$NEW_VERSION"'";' flake.nix >/dev/null; then
+  echo "error: failed to update flake.nix to version $NEW_VERSION" >&2
+  exit 1
+fi
+
+# Verify lockstep after both edits.
+./contrib/check-version-sync.sh
+
+# --- Regenerate changelog ---
+
+echo "Regenerating CHANGELOG.md (tag ${TAG})..."
+git-cliff --tag "$TAG" -o CHANGELOG.md
+
+# --- Run gates BEFORE committing — a broken release commit is worse than no release commit ---
+
+echo "Running gates..."
+make lint
+make test
+make check-version-sync
+make npm-pack-check
+make nix-smoke
+
+# --- Commit the bump ---
+
+git add package.json flake.nix CHANGELOG.md
+git commit -m "release: v${NEW_VERSION}"
+
+# --- Push the branch, then create and push the tag ---
+
+echo "Pushing ${BRANCH}..."
+git push
+
+echo "Tagging ${TAG}..."
+git tag -a "$TAG" -m "$TAG"
+git push origin "$TAG"
+
+cat <<EOF
+
+Pushed ${TAG}. The release workflow is running.
+
+Watch it:
+  gh run watch
+
+Verify after it goes green:
+  npm view @procrastivity/clast version
+  gh release view ${TAG}
+  nix run github:procrastivity/clast/${TAG} -- --version
+EOF

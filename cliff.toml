@@ -30,14 +30,21 @@ conventional_commits = true
 filter_unconventional = true
 split_commits = false
 commit_parsers = [
+  # Skip the release commit itself (produced by contrib/release) so a
+  # release does not appear in its own changelog body.
+  { message = "^release:", skip = true },
+  # Skip per-step squash-merge commits from the build history.
+  { message = "^step-[0-9]+:", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^test", skip = true },
+  { message = "^refactor", skip = true },
+  { message = "^style", skip = true },
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Bug Fixes" },
   { message = "^docs", group = "Documentation" },
   { message = "^perf", group = "Performance" },
-  { message = "^refactor", group = "Refactor" },
-  { message = "^test", group = "Tests" },
-  { message = "^chore", group = "Chores" },
   { message = "^ci", group = "CI" },
+  { message = "^build", group = "Build" },
 ]
 filter_commits = false
 tag_pattern = "v[0-9]*"
