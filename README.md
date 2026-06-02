@@ -109,6 +109,18 @@ For Home Manager or nix-darwin users, `overlays.default` exposes `pkgs.clast`.
 See [`docs/repo-bootstrap.md#nix-flake`](./docs/repo-bootstrap.md#nix-flake)
 for the full overlay wiring.
 
+## Install via npm
+
+```sh
+npm install -g @procrastivity/clast
+npx -p @procrastivity/clast clast --version
+```
+
+The npm package ships the same install set as `install.sh` and Nix: `bin/`,
+`lib/`, `.claude-plugin/`, `hooks/`, `examples/`, `README.md`, and `LICENSE`.
+After a global install, register the plugin with
+`claude plugin install $(npm root -g)/@procrastivity/clast`.
+
 ## Install as a Claude Code plugin
 
 For a local checkout, install the plugin with:

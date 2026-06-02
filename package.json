@@ -2,6 +2,7 @@
   "name": "@procrastivity/clast",
   "version": "0.1.0",
   "description": "Capture, curate, and surface Claude Code session history across all your projects.",
+  "homepage": "https://github.com/procrastivity/clast#readme",
   "bin": {
     "clast": "bin/clast"
   },
@@ -15,8 +16,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "test/test-clast.sh",
-    "lint": "shellcheck bin/clast lib/clast/**/*.bash test/*.sh hooks/snapshot.sh"
+    "test": "make test",
+    "lint": "make lint",
+    "prepublishOnly": "make lint && make test && make check-version-sync && ./contrib/npm-pack-check.sh"
   },
   "repository": {
     "type": "git",
