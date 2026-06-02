@@ -4,7 +4,7 @@
 set -euo pipefail
 
 pkg_version=$(jq -r '.version' package.json)
-flake_version=$(grep -E '^\s*version = "[^"]+";' flake.nix \
+flake_version=$(grep -E '^[[:space:]]*version = "[^"]+";' flake.nix \
     | head -1 \
     | sed -E 's/.*version = "([^"]+)";.*/\1/')
 
