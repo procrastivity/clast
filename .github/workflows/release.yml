@@ -1,7 +1,8 @@
 name: release
-# Required repo secret: NPM_TOKEN (npmjs.com automation token,
-# type: Automation, scope: publish for @procrastivity/clast).
-# GITHUB_TOKEN is provided automatically by Actions.
+# Publishes to npm via Trusted Publishing (OIDC) — no NPM_TOKEN
+# secret required. Configure the trusted publisher for
+# @procrastivity/clast at https://www.npmjs.com (see
+# docs/releasing.md). GITHUB_TOKEN is provided automatically.
 
 on:
   push:
@@ -22,7 +23,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - name: Re-run every gate
         run: |
@@ -47,8 +48,6 @@ jobs:
           tarball=$(npm pack --silent)
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public "${{ steps.pack.outputs.tarball }}"
       - name: Create GitHub Release
         env:

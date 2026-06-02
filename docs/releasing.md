@@ -11,13 +11,10 @@ release is a single command: `contrib/release --patch|--minor|--major`.
   refuses to run elsewhere.
 - `make check-version-sync` passes (the script also runs it before
   editing anything, but checking ahead saves a feedback loop).
-- The `NPM_TOKEN` repo secret exists. Verify with:
-
-  ```sh
-  gh secret list --repo procrastivity/clast | grep NPM_TOKEN
-  ```
-
-  If it does not, see [NPM_TOKEN setup](#npm_token-setup) below.
+- The npm Trusted Publisher for `@procrastivity/clast` is configured
+  on npmjs.com (one-time setup; see
+  [Trusted Publishing setup](#trusted-publishing-setup) below). There
+  is no CLI to verify this — confirm via the npm web UI.
 - Commits since the last release follow Conventional Commits
   (`feat:`, `fix:`, `docs:`, etc.). `git-cliff` ignores anything
   unconventional, so non-conventional messages silently drop from
@@ -80,11 +77,15 @@ In order:
 7. Packs the npm tarball: `npm pack --silent`.
 8. Publishes to npm with provenance:
    `npm publish --provenance --access public <tarball>`.
+   Authentication is via npm Trusted Publishing (OIDC) — the
+   workflow exchanges its GitHub Actions ID token for a short-lived
+   npm publish token. No `NPM_TOKEN` secret is involved.
 9. Creates a GitHub Release for the tag with auto-generated notes
    and attaches the npm tarball.
 
-The workflow uses the automatic `GITHUB_TOKEN` for the GitHub Release
-and the repo secret `NPM_TOKEN` for npm publishing.
+The workflow uses the automatic `GITHUB_TOKEN` for the GitHub
+Release. npm publishing uses OIDC via the workflow's
+`permissions.id-token: write`.
 
 ## If something fails
 
@@ -139,26 +140,37 @@ workflow's verify step.
 That version is permanently consumed. Bump to the next version with
 `contrib/release --patch` and tag the new version.
 
-## NPM_TOKEN setup
+## Trusted Publishing setup
 
-Create an npm automation token:
+The workflow uses npm Trusted Publishing (OIDC), which means there
+is no long-lived `NPM_TOKEN` to manage. Setup is per-package and
+one-time.
 
-1. Go to npmjs.com.
-2. Open account settings.
-3. Open Access Tokens.
-4. Create an **Automation** token.
-5. Scope it to publish `@procrastivity/clast`.
+1. Sign in to https://www.npmjs.com with an account that has
+   publish rights on the `@procrastivity` org.
+2. Avatar → **Packages** → **Trusted Publishers** → **Add trusted
+   publisher for an unpublished package** (use this path because the
+   package doesn't exist on npm yet; after the first publish the
+   trusted publisher is also editable from the package's own access
+   page at `https://www.npmjs.com/package/@procrastivity/clast/access`).
+3. Fill in (case-sensitive, exact match):
+   - **Package name**: `@procrastivity/clast`
+   - **Publisher**: GitHub Actions
+   - **Organization**: `procrastivity`
+   - **Repository**: `clast`
+   - **Workflow filename**: `release.yml` (filename only, no path)
+   - **Environment name**: leave blank
+   - **Allowed actions**: tick `npm publish`
 
-Install it in GitHub:
+The workflow already sets `permissions.id-token: write`, which is
+the only requirement on the GitHub side. The npm CLI auto-detects
+the OIDC environment when `id-token: write` is present and the
+publisher binding exists.
 
-1. Open the repository settings.
-2. Go to Secrets and variables → Actions.
-3. Add or update the secret named `NPM_TOKEN`.
-4. Paste the automation token value.
-
-The workflow publishes with npm provenance, which requires
-`permissions.id-token: write` — already configured in
-`.github/workflows/release.yml`.
+Requirements (already satisfied by the workflow):
+- `actions/setup-node` with `registry-url: https://registry.npmjs.org`.
+- Node 24 (ships npm ≥ 11.5.1, the minimum for trusted publishing).
+- `permissions.id-token: write`.
 
 ## Post-release verification
 
