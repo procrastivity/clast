@@ -1,0 +1,16 @@
+# clast cron sample for unattended transcript capture.
+# Install with: crontab -l | { cat; cat examples/cron/crontab.sample; } | crontab -
+# Edit the clast path if you installed somewhere other than /usr/local/bin.
+
+# Every hour at :05, capture any new transcripts.
+# Idempotent and silent on no-op, so safe to run frequently.
+5 * * * * /usr/local/bin/clast snapshot >/dev/null 2>&1
+
+# Alternative: every 15 minutes for active users moving between many sessions.
+# */15 * * * * /usr/local/bin/clast snapshot >/dev/null 2>&1
+
+# Alternative: once daily for hands-off archival.
+# 10 4 * * * /usr/local/bin/clast snapshot >/dev/null 2>&1
+
+# Alternative: no cron. Rely on the SessionStart hook installed with the plugin.
+# The hook covers most use cases already; cron is only useful when you want capture without ever opening Claude.

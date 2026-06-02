@@ -60,7 +60,8 @@ clast/
 ├── examples/
 │   ├── cron/
 │   │   ├── crontab.sample
-│   │   └── systemd-timer.sample
+│   │   ├── clast-snapshot.service
+│   │   └── clast-snapshot.timer
 │   ├── config/
 │   │   └── config.toml.sample
 │   └── workflows/
@@ -367,67 +368,27 @@ echo "  claude plugin install $PREFIX/share/clast"
 
 ### Claude Code plugin marketplace
 
-Once `clast` is on PATH (via any method above), users can install the plugin separately via marketplace — direnv-session-loader's README has the pattern. Beau's `procrastivity` GitHub org should host the marketplace, with `clast/` registered alongside `direnv-session-loader`.
+For v1, users install the plugin from a local checkout or from the installed npm
+package path. A centralized marketplace listing is a separate distribution
+channel and is deliberately not part of the v1 release.
 
 ---
 
 ## CI
 
-### `.github/workflows/test.yml`
+The actual workflows are:
 
-```yaml
-name: test
+- `.github/workflows/test.yml`: runs `make lint`, `make test`,
+  `make check-version-sync`, and `make npm-pack-check` on pushes and pull
+  requests.
+- `.github/workflows/nix.yml`: runs `make nix-smoke`, `nix flake check`, and
+  `nix build .#default` on pushes and pull requests.
+- `.github/workflows/release.yml`: runs on `v*` tags, re-runs every gate,
+  verifies the tag matches `package.json`, builds Nix, packs npm, publishes to
+  npm with provenance, and creates a GitHub Release.
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run shellcheck
-        run: shellcheck bin/clast lib/clast/**/*.bash test/*.sh
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        bash_version: ['5.0', '5.1', '5.2']
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install bash ${{ matrix.bash_version }}
-        run: |
-          # via docker or apt; xcind has a pattern for this
-      - name: Install jq
-        run: sudo apt-get install -y jq
-      - name: Run tests
-        run: test/test-clast.sh
-```
-
-### `.github/workflows/nix.yml`
-
-```yaml
-name: nix-check
-
-on: [push, pull_request]
-
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v25
-      - run: nix flake check
-      - run: nix build
-```
-
-### `.github/workflows/release.yml`
-
-Trigger on tag. Build, publish to npm, build nix flake, attach tarball to GH release. Mirror xcind's release process if possible.
+See [`releasing.md`](./releasing.md) for the release procedure and failure
+recovery runbook.
 
 ---
 
