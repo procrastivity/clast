@@ -1,6 +1,14 @@
 name: nix-check
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: nix-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -10,4 +18,9 @@ jobs:
       - uses: cachix/install-nix-action@v25
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-      - run: nix flake check
+      - name: Flake check
+        run: nix flake check
+      - name: Build package
+        run: nix build .#default --print-build-logs
+      - name: Smoke run
+        run: ./result/bin/clast --version

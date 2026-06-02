@@ -159,6 +159,13 @@ only reads. See
 
 **Without Nix.** Install `bash 5+`, `jq`, `git`, and `shellcheck` via your package manager, then run `make deps-check` to verify they're on PATH.
 
+## CI / Release
+
+Pull requests run lint, tests, version sync, npm pack shape, Nix smoke, flake check, and Nix build automatically.
+Releases trigger on `v*` tags, and the tag version must match `package.json` exactly.
+The release workflow publishes to npm with provenance and creates a GitHub Release with the npm tarball attached.
+Configure the `NPM_TOKEN` repo secret before the first release tag.
+
 ## Documentation
 
 - [`docs/overview.md`](./docs/overview.md) — project overview and design.
