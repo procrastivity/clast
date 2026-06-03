@@ -3,8 +3,8 @@
 # Sourced after clast-lib.bash and clast-decode-lib.bash. The registry is
 # an append-only JSONL log at $(clast_journal_dir)/projects.json (the
 # ".json" name is historical — semantically it is JSONL). See
-# docs/cli-contract.md#registry-line-in-projectsjson for the on-disk
-# schema and docs/cli-contract.md#clast-registry for the resolution rules.
+# docs/reference/cli.md#registry-line-in-projectsjson for the on-disk
+# schema and docs/reference/cli.md#clast-registry for the resolution rules.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-decode-lib.bash

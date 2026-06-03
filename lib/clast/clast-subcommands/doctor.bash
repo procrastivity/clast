@@ -2,7 +2,7 @@
 #
 # Run six sanity checks against the journal and report findings. With
 # `--fix`, perform the two safe repairs (manifest rebuild from disk,
-# orphan-snapshot removal). See docs/cli-contract.md#clast-doctor.
+# orphan-snapshot removal). See docs/reference/cli.md#clast-doctor.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash

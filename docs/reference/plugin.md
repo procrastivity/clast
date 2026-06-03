@@ -1,6 +1,9 @@
-# `clast` — Skill Prompts
+# Plugin reference
 
-> Reference doc. Read [`overview.md`](./overview.md) first. This doc spec's the Claude Code plugin: the three skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
+> Reference doc. New to clast? Start with
+> [`explanation/what-is-clast.md`](../explanation/what-is-clast.md). This doc
+> specs the Claude Code plugin: the three skills, their `SKILL.md` content,
+> their internal LLM prompt templates, and the `AskUserQuestion` option sets.
 
 Three skills total: `day-wakeup`, `wakeup`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
 

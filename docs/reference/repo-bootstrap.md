@@ -1,6 +1,8 @@
-# `clast` — Repo Bootstrap
+# Repo bootstrap
 
-> Reference doc. Read [`overview.md`](./overview.md) first. This doc spec's the repo layout, distribution channels, packaging, and CI for `clast`.
+> Reference doc. New to clast? Start with
+> [`explanation/what-is-clast.md`](../explanation/what-is-clast.md). This doc
+> specs the repo layout, distribution channels, packaging, and CI for `clast`.
 
 Models the hybrid of [direnv-session-loader](https://github.com/procrastivity/direnv-session-loader) (plugin scaffolding + Nix flake) and [xcind](https://github.com/scinddev/xcind) (CLI bins + lib + multi-channel distribution).
 
@@ -64,17 +66,16 @@ clast/
 │   │   └── clast-snapshot.timer
 │   ├── config/
 │   │   └── config.toml.sample
-│   └── workflows/
-│       └── morning-briefing.md     # narrative example of a /day-wakeup transcript
+│   └── cron/
+│       └── (see cron and systemd-timer samples)
 ├── docs/
-│   ├── overview.md                 # this planning's overview.md, distilled
-│   ├── cli-contract.md             # CLI reference
-│   ├── skill-prompts.md            # plugin reference
-│   ├── repo-bootstrap.md           # this doc (kept for reference)
+│   ├── README.md                   # docs index
+│   ├── explanation/                # what is clast, architecture, data model, conventions
+│   ├── getting-started/            # install, first-snapshot, install-the-plugin
+│   ├── guides/                     # task-oriented how-tos (cron, curate, breadcrumbs, …)
+│   ├── reference/                  # cli, plugin, entry-frontmatter, config, repo-bootstrap, releasing
 │   ├── build-steps.md              # step generation meta-doc
-│   ├── jsonl-format.md             # what clast assumes about CC's JSONL format
-│   ├── releasing.md                # release process
-│   └── steps/                      # actual self-executing prompts go here
+│   └── steps/                      # historical self-executing build prompts
 │       ├── step-01-repo-scaffold.md
 │       ├── step-02-core-libs.md
 │       └── …
@@ -227,7 +228,7 @@ Per the direnv-session-loader reference, only `name` is strictly required. Other
 
 ### `.claude-plugin/skills/*/SKILL.md`
 
-Full content in [`skill-prompts.md`](./skill-prompts.md).
+Full content in [`plugin.md`](./plugin.md).
 
 ---
 

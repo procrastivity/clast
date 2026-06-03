@@ -28,7 +28,7 @@ EOF
 
 # _clast_snapshot_bucket_for_epoch <epoch>
 #   Mirror of clast_today's cutoff math against an arbitrary epoch. Local
-#   time per docs/overview.md#conventions.
+#   time per docs/explanation/conventions.md.
 _clast_snapshot_bucket_for_epoch() {
   local epoch="$1"
   local cutoff="${CLAST_DAY_CUTOFF:-04:00}"
@@ -247,7 +247,7 @@ _clast_snapshot_emit_summary() {
   fi
 
   # Silent no-op: load-bearing for the SessionStart hook (step 11). Re-read
-  # docs/cli-contract.md#clast-snapshot before changing this.
+  # docs/reference/cli.md#clast-snapshot before changing this.
   if (( ${#_caps[@]} == 0 && ${#_errs[@]} == 0 )); then
     return 0
   fi

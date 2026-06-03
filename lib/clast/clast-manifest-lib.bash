@@ -2,7 +2,7 @@
 #
 # Sourced after clast-lib.bash. The manifest is an append-only JSONL log at
 # $(clast_journal_dir)/.manifest.jsonl, one line per capture event. Per
-# docs/cli-contract.md#manifest-line each line has seven required fields:
+# docs/reference/cli.md#manifest-line each line has seven required fields:
 # session_id, source, snapshot, captured_at, source_mtime, source_size,
 # day_bucket. Lookups use "most recent line wins" semantics.
 # shellcheck shell=bash
@@ -68,7 +68,7 @@ clast_manifest_append() {
   }
 
   # Append-only single-line write — crash-safe at line boundary per
-  # docs/overview.md#cross-machine-considerations. Do NOT use
+  # docs/explanation/architecture.md#cross-machine-considerations. Do NOT use
   # clast_atomic_write here: it rewrites the whole file and would clobber
   # concurrent appends from another machine.
   local manifest_path

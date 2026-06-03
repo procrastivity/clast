@@ -11,7 +11,7 @@ fi
 _CLAST_LIB_SOURCED=1
 
 # Hard dependency check: jq must be on PATH. Exit 3 (env problem) per
-# docs/overview.md#exit-codes if missing — no grep/sed fallback.
+# docs/explanation/conventions.md#exit-codes if missing — no grep/sed fallback.
 if ! command -v jq >/dev/null 2>&1; then
   echo "clast: error: required dependency 'jq' not found on PATH" >&2
   exit 3

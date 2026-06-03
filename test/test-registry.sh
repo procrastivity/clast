@@ -123,7 +123,7 @@ foo_path="$(realpath -m /tmp/proj-foo)"
 foo2_path="$(realpath -m /tmp/proj-foo-2)"
 clast_registry_add /tmp/proj-foo --slug foo --remote R >/dev/null
 line="$(clast_registry_add /tmp/proj-foo-2 --slug ignored --remote R)"
-# Why: docs/cli-contract.md#clast-registry add step 4 — remote match merges
+# Why: docs/reference/cli.md#clast-registry add step 4 — remote match merges
 # into the existing slug rather than creating a new one. The caller's
 # --slug is overridden on purpose.
 assert_eq "foo" "$(jq -r .slug <<<"$line")" "add: remote match overrides --slug"

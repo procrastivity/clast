@@ -1,6 +1,10 @@
-# `clast` — CLI Contract Reference
+# CLI reference
 
-> Reference doc. Read [`overview.md`](./overview.md) first. This doc spec'd the `clast` CLI in detail: arguments, output formats, JSON schemas, exit codes, error handling.
+> Reference doc. New to clast? Start with
+> [`explanation/what-is-clast.md`](../explanation/what-is-clast.md) and
+> [`getting-started/first-snapshot.md`](../getting-started/first-snapshot.md).
+> This doc specs the `clast` CLI in detail: arguments, output formats, JSON
+> schemas, exit codes, error handling.
 
 The CLI is a single dispatcher binary (`bin/clast`) with subcommands dispatched to handlers in `lib/clast/clast-subcommands/<name>.bash`. All subcommands are LLM-free. Every command supports `--help` and `--json` where output is structured.
 
@@ -519,25 +523,8 @@ All fields required. Lookups use "most recent line wins" semantics for a given `
 
 ### Entry frontmatter
 
-```yaml
----
-date: 2026-05-30
-time: 14:30
-day_bucket: 2026-05-30
-project: xesapps
-project_path: /home/beau/code/xesapps
-project_remote: git@gitlab.xes-inc.com:xes/xesapps.git
-branch: feature/canonical-field
-author: beau
-tags: [mysql, optimization, eav]
-session_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-session_slug: vw-consumer-fields-explain
-snapshot_path: transcripts/2026-05-30/-home-beau-code-xesapps/a1b2c3....jsonl
-machine: beau-wsl2
----
-```
-
-Body is free-form Markdown. Convention is for `# Session: <title>`, then sections like `## Goal`, `## What shipped`, `## Open threads`, `## Dead ends touched`, `## Notes`. None enforced by the CLI.
+See [`entry-frontmatter.md`](./entry-frontmatter.md) for the full field-by-field
+schema and the conventional body structure.
 
 ### Breadcrumb file
 
