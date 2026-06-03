@@ -174,7 +174,7 @@ Start at [`docs/README.md`](./docs/README.md) for the full index. Highlights:
 
 - [What is clast?](./docs/explanation/what-is-clast.md) and [Architecture](./docs/explanation/architecture.md)
 - [Install](./docs/getting-started/install.md) · [First snapshot](./docs/getting-started/first-snapshot.md) · [Install the plugin](./docs/getting-started/install-the-plugin.md)
-- Guides: [curate an entry](./docs/guides/curate-an-entry.md), [use breadcrumbs](./docs/guides/use-breadcrumbs.md), [automate with cron](./docs/guides/automate-with-cron.md) or [systemd](./docs/guides/automate-with-systemd.md), [repair the journal](./docs/guides/repair-the-journal.md), [query recipes](./docs/guides/query-recipes.md), [morning briefing](./docs/guides/morning-briefing.md)
+- Guides: [curate an entry](./docs/guides/curate-an-entry.md), [use breadcrumbs](./docs/guides/use-breadcrumbs.md), [automate with cron](./docs/guides/automate-with-cron.md) or [systemd](./docs/guides/automate-with-systemd.md), [repair the journal](./docs/guides/repair-the-journal.md), [query recipes](./docs/guides/query-recipes.md), [morning briefing](./examples/workflows/morning-briefing.md)
 - Reference: [CLI](./docs/reference/cli.md), [Plugin](./docs/reference/plugin.md), [Entry frontmatter](./docs/reference/entry-frontmatter.md), [Config](./docs/reference/config.md), [Repo bootstrap](./docs/reference/repo-bootstrap.md), [Releasing](./docs/reference/releasing.md)
 - [`examples/`](./examples/) — cron and systemd-timer samples.
 

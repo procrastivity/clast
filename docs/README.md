@@ -22,7 +22,7 @@ The docs are split four ways, modeled on the
   [systemd](./guides/automate-with-systemd.md)
 - [Repair the journal](./guides/repair-the-journal.md)
 - [Query recipes (`jq` over `--json`)](./guides/query-recipes.md)
-- [Morning briefing walkthrough](./guides/morning-briefing.md)
+- [Morning briefing walkthrough](../examples/workflows/morning-briefing.md) (in `examples/` because it ships with the npm tarball)
 
 ## Reference
 

@@ -74,5 +74,5 @@ clast entries read <entry-filename>.md     # cat one
   field-by-field frontmatter schema and conventional body sections.
 - [`reference/cli.md#clast-entries`](../reference/cli.md#clast-entries) — write
   command flags and exit codes.
-- [`guides/morning-briefing.md`](./morning-briefing.md) — a worked
-  `/day-wakeup` walkthrough (uses the plugin).
+- [`examples/workflows/morning-briefing.md`](../../examples/workflows/morning-briefing.md)
+  — a worked `/day-wakeup` walkthrough (uses the plugin).
