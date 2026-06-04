@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# clast-brief — LLM-powered project briefing without Claude Code.
+#
+# Replicates the /wakeup plugin skill using an OpenAI-compatible
+# chat completions endpoint. Reads curated entries, breadcrumbs,
+# and today's sessions for a project, then synthesizes a briefing.
+#
+# Usage: clast-brief [<project-slug>]
+#
+# If no slug is given, resolves from the current working directory.
+#
+# Required env vars:
+#   CLAST_LLM_BASE_URL  — e.g. https://api.openai.com/v1
+#   CLAST_LLM_API_KEY   — bearer token
+#   CLAST_LLM_MODEL     — e.g. gpt-4o, llama3
+set -euo pipefail
+
+CLAST_BRIEF_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+die() { printf 'clast-brief: %s\n' "$1" >&2; exit "${2:-1}"; }
+warn() { printf 'clast-brief: warning: %s\n' "$1" >&2; }
+info() { printf '%s\n' "$1"; }
+
+# ── Preflight ────────────────────────────────────────────────────────
+
+preflight() {
+  for tool in clast curl jq; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      die "required tool not found: $tool"
+    fi
+  done
+
+  local missing=0
+  if [[ -z "${CLAST_LLM_BASE_URL:-}" ]]; then
+    warn "CLAST_LLM_BASE_URL not set"; missing=1
+  fi
+  if [[ -z "${CLAST_LLM_API_KEY:-}" ]]; then
+    warn "CLAST_LLM_API_KEY not set"; missing=1
+  fi
+  if [[ -z "${CLAST_LLM_MODEL:-}" ]]; then
+    warn "CLAST_LLM_MODEL not set"; missing=1
+  fi
+
+  if (( missing )); then
+    cat >&2 <<'EOF'
+
+Set these env vars before running clast-brief:
+
+  export CLAST_LLM_BASE_URL="https://api.openai.com/v1"
+  export CLAST_LLM_API_KEY="sk-..."
+  export CLAST_LLM_MODEL="gpt-4o"
+
+Or for a local model (ollama, vllm, etc.):
+
+  export CLAST_LLM_BASE_URL="http://localhost:11434/v1"
+  export CLAST_LLM_API_KEY="unused"
+  export CLAST_LLM_MODEL="llama3"
+EOF
+    exit 1
+  fi
+}
+
+# ── LLM call ─────────────────────────────────────────────────────────
+
+llm_chat() {
+  local system_msg="$1"
+  local user_msg="$2"
+
+  local payload
+  payload="$(jq -cn \
+    --arg model "$CLAST_LLM_MODEL" \
+    --arg system "$system_msg" \
+    --arg user "$user_msg" \
+    '{
+      model: $model,
+      messages: [
+        {role: "system", content: $system},
+        {role: "user", content: $user}
+      ],
+      temperature: 0.3
+    }')"
+
+  local response http_code body
+  response="$(curl -s -w '\n%{http_code}' \
+    "${CLAST_LLM_BASE_URL}/chat/completions" \
+    -H "Authorization: Bearer $CLAST_LLM_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>&1)" || true
+
+  http_code="$(tail -n1 <<<"$response")"
+  body="$(sed '$d' <<<"$response")"
+
+  if [[ "$http_code" != "200" ]]; then
+    warn "LLM API returned HTTP $http_code"
+    if [[ -n "$body" ]]; then
+      local err_msg
+      err_msg="$(jq -r '.error.message // .error // .' <<<"$body" 2>/dev/null || echo "$body")"
+      warn "$err_msg"
+    fi
+    return 1
+  fi
+
+  local content
+  content="$(jq -r '.choices[0].message.content // empty' <<<"$body" 2>/dev/null)" || {
+    warn "failed to parse LLM response"
+    return 1
+  }
+
+  if [[ -z "$content" ]]; then
+    warn "LLM returned empty content"
+    return 1
+  fi
+
+  printf '%s' "$content"
+}
+
+# ── Prompt template ──────────────────────────────────────────────────
+
+resolve_prompt_dir() {
+  local dir="$CLAST_BRIEF_DIR/lib/clast/prompts"
+  if [[ -d "$dir" ]]; then
+    printf '%s' "$dir"
+    return
+  fi
+  local installed
+  for installed in /usr/local/lib/clast/prompts "$HOME/.local/lib/clast/prompts"; do
+    if [[ -d "$installed" ]]; then
+      printf '%s' "$installed"
+      return
+    fi
+  done
+  die "cannot find prompts directory (checked $dir and install paths)"
+}
+
+load_system_prompt() {
+  local prompt_dir
+  prompt_dir="$(resolve_prompt_dir)"
+  local file="$prompt_dir/brief-system.md"
+  if [[ ! -r "$file" ]]; then
+    die "system prompt not found: $file"
+  fi
+  cat "$file"
+}
+
+build_user_prompt() {
+  local project="$1" entries="$2" breadcrumbs="$3" sessions="$4"
+
+  local prompt_dir
+  prompt_dir="$(resolve_prompt_dir)"
+  local template_file="$prompt_dir/brief-user.md"
+
+  if [[ -r "$template_file" ]]; then
+    local template
+    template="$(cat "$template_file")"
+    template="${template//\{\{project\}\}/${project}}"
+    template="${template//\{\{entries\}\}/${entries:-None.}}"
+    template="${template//\{\{breadcrumbs\}\}/${breadcrumbs:-None.}}"
+    template="${template//\{\{sessions\}\}/${sessions:-None.}}"
+    printf '%s' "$template"
+  else
+    warn "user prompt template not found: $template_file — using inline fallback"
+    cat <<EOF
+Project: ${project}
+
+Recent curated entries (newest first):
+${entries:-None.}
+
+Today's breadcrumbs for this project:
+${breadcrumbs:-None.}
+
+Today's session activity for this project:
+${sessions:-None.}
+EOF
+  fi
+}
+
+# ── Resolve project ──────────────────────────────────────────────────
+
+resolve_project() {
+  local slug="${1:-}"
+
+  if [[ -n "$slug" ]]; then
+    printf '%s' "$slug"
+    return
+  fi
+
+  local resolved
+  resolved="$(clast registry resolve "$(pwd)" 2>/dev/null)" || true
+  if [[ -n "$resolved" ]]; then
+    printf '%s' "$resolved"
+    return
+  fi
+
+  die "Not in a registered project. Run \`clast registry add .\` first, or invoke as \`clast-brief <slug>\`."
+}
+
+# ── Gather data ──────────────────────────────────────────────────────
+
+gather_entries() {
+  local project="$1"
+  local entries_json
+  entries_json="$(clast --json entries --project "$project" --limit 5 2>/dev/null)" || true
+
+  if [[ -z "$entries_json" ]] || [[ "$(jq 'length' <<<"$entries_json" 2>/dev/null)" == "0" ]]; then
+    return
+  fi
+
+  local n i entry_meta entry_path entry_body result=""
+  n="$(jq 'length' <<<"$entries_json")"
+
+  for (( i = 0; i < n; i++ )); do
+    entry_meta="$(jq -c ".[$i]" <<<"$entries_json")"
+    entry_path="$(jq -r '.path' <<<"$entry_meta")"
+
+    entry_body="$(clast entries read "$entry_path" 2>/dev/null)" || true
+    if [[ -z "$entry_body" ]]; then
+      local title date
+      title="$(jq -r '.title // "untitled"' <<<"$entry_meta")"
+      date="$(jq -r '.date' <<<"$entry_meta")"
+      entry_body="# $date — $title (body not available)"
+    fi
+
+    if [[ -n "$result" ]]; then
+      result="${result}
+
+---
+
+"
+    fi
+    result="${result}${entry_body}"
+  done
+
+  printf '%s' "$result"
+}
+
+gather_breadcrumbs() {
+  local project="$1"
+  clast breadcrumb --read --project "$project" --day today 2>/dev/null || true
+}
+
+gather_sessions() {
+  local project="$1"
+  local sessions_json
+  sessions_json="$(clast --json sessions --day today --project "$project" 2>/dev/null)" || true
+
+  if [[ -z "$sessions_json" ]] || [[ "$(jq 'length' <<<"$sessions_json" 2>/dev/null)" == "0" ]]; then
+    return
+  fi
+
+  local n
+  n="$(jq 'length' <<<"$sessions_json")"
+
+  if (( n > 5 )); then
+    local latest_start
+    latest_start="$(jq -r 'sort_by(.start) | last | .start // ""' <<<"$sessions_json")"
+    printf 'Worked %d sessions today, most recent at %s.' "$n" "${latest_start:11:5}"
+    return
+  fi
+
+  jq -r '
+    sort_by(.start) | .[] |
+    "\(.start[11:16]) start: \(if .branch and .branch != "null" then .branch else "no branch" end), \(.msg_count_approx) messages"
+  ' <<<"$sessions_json" 2>/dev/null || true
+}
+
+# ── Main ─────────────────────────────────────────────────────────────
+
+main() {
+  preflight
+
+  local project
+  project="$(resolve_project "${1:-}")"
+  info "Briefing for project: $project"
+
+  info "Gathering context..."
+
+  local entries breadcrumbs sessions
+  entries="$(gather_entries "$project")"
+  breadcrumbs="$(gather_breadcrumbs "$project")"
+  sessions="$(gather_sessions "$project")"
+
+  if [[ -z "$entries" && -z "$breadcrumbs" && -z "$sessions" ]]; then
+    info "No curated entries, breadcrumbs, or sessions for \`$project\`."
+    info "Run \`clast-wake\` to curate recent sessions first, or run \`clast sessions --project $project\` to see what's available."
+    exit 0
+  fi
+
+  local system_prompt user_prompt
+  system_prompt="$(load_system_prompt)"
+  user_prompt="$(build_user_prompt "$project" "$entries" "$breadcrumbs" "$sessions")"
+
+  info "Synthesizing briefing..."
+  printf '\n'
+
+  local briefing
+  if ! briefing="$(llm_chat "$system_prompt" "$user_prompt")"; then
+    die "LLM call failed"
+  fi
+
+  printf '%s\n' "$briefing"
+}
+
+main "$@"

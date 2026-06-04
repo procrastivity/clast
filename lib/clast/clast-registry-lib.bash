@@ -61,13 +61,18 @@ clast_registry_resolve() {
   local arr
   arr="$(clast_registry_list_json)"
 
-  # Segment input: starts with `-`. Decode (possibly ambiguous) then
-  # resolve as a path.
+  # Segment input: starts with `-`. Try raw segment first (handles
+  # segments registered as-is), then decode to filesystem paths.
   if [[ "$input" == -* ]]; then
+    local slug
+    slug="$(_clast_registry_lookup_path "$input" "$arr" 2>/dev/null)" || true
+    if [[ -n "$slug" ]]; then
+      printf '%s\n' "$slug"
+      return 0
+    fi
     local -a candidates=()
     mapfile -t candidates < <(clast_decode_candidates "$input")
-    local c slug
-    # Prefer registry-matching candidate over filesystem-resolving one.
+    local c
     for c in "${candidates[@]}"; do
       slug="$(_clast_registry_lookup_path "$c" "$arr")" || continue
       if [[ -n "$slug" ]]; then
@@ -126,6 +131,8 @@ clast_registry_add() {
         fi
         remote="$2"; remote_explicit=1; shift 2 ;;
       --remote=*) remote="${1#*=}"; remote_explicit=1; shift ;;
+      --)
+        shift; break ;;
       -*)
         clast_log_error "clast_registry_add: unknown flag '$1'"
         return 2
@@ -139,6 +146,19 @@ clast_registry_add() {
         ;;
     esac
   done
+
+  # Consume remaining positional after --
+  if [[ $# -gt 0 ]]; then
+    if [[ -n "$path" ]]; then
+      clast_log_error "clast_registry_add: unexpected positional '$1'"
+      return 2
+    fi
+    path="$1"; shift
+  fi
+  if [[ $# -gt 0 ]]; then
+    clast_log_error "clast_registry_add: unexpected positional '$1'"
+    return 2
+  fi
 
   # Reject empty / whitespace-only paths.
   local trimmed="${path//[[:space:]]/}"

@@ -8,10 +8,12 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$PREFIX/bin" "$PREFIX/lib/clast" "$PREFIX/share/clast"
 
 install -m755 "$SRC/bin/clast" "$PREFIX/bin/clast"
+install -m755 "$SRC/bin/clast-wake" "$PREFIX/bin/clast-wake"
+install -m755 "$SRC/bin/clast-brief" "$PREFIX/bin/clast-brief"
 
 # Drop stale files from a prior install before re-copying.
 rm -rf "$PREFIX/lib/clast"
-mkdir -p "$PREFIX/lib/clast"
+mkdir -p "$PREFIX/lib/clast" "$PREFIX/lib/clast/prompts"
 cp -R "$SRC/lib/clast/." "$PREFIX/lib/clast/"
 
 # Drop stale files from a prior install before re-copying.

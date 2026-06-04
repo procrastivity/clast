@@ -61,8 +61,8 @@ _assert_skill_wakeup_triggers() {
 _assert_skill_wakeup_cli_commands() {
   local skill=.claude-plugin/skills/wakeup/SKILL.md
   local ok=0
-  for cmd in 'clast registry resolve' 'entries --project' 'clast entries read' \
-             'clast breadcrumb --read' 'sessions --day today'; do
+  for cmd in 'CLAST_BIN registry resolve' 'entries --project' 'CLAST_BIN entries read' \
+             'CLAST_BIN breadcrumb --read' 'sessions --day today'; do
     if ! grep -q "$cmd" "$skill"; then
       printf 'wakeup SKILL.md: missing CLI command: %s\n' "$cmd" >&2
       ok=1
@@ -74,16 +74,19 @@ _assert_skill_wakeup_cli_commands() {
 _assert_skill_wakeup_readonly() {
   local skill=.claude-plugin/skills/wakeup/SKILL.md
   local ok=0
-  if grep -qE 'clast entries write' "$skill"; then
-    printf 'wakeup SKILL.md: read-only invariant violated — found "clast entries write"\n' >&2
+  # shellcheck disable=SC2016
+  if grep -qE '(clast|\$CLAST_BIN) entries write' "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found entries write\n' >&2
     ok=1
   fi
-  if grep -qE "clast breadcrumb [^-]" "$skill"; then
-    printf 'wakeup SKILL.md: read-only invariant violated — found write-form "clast breadcrumb"\n' >&2
+  # shellcheck disable=SC2016
+  if grep -qE '(clast|\$CLAST_BIN) breadcrumb [^-]' "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found write-form breadcrumb\n' >&2
     ok=1
   fi
-  if grep -qE 'clast snapshot' "$skill"; then
-    printf 'wakeup SKILL.md: read-only invariant violated — found "clast snapshot"\n' >&2
+  # shellcheck disable=SC2016
+  if grep -qE '(clast|\$CLAST_BIN) snapshot' "$skill"; then
+    printf 'wakeup SKILL.md: read-only invariant violated — found snapshot\n' >&2
     ok=1
   fi
   return "$ok"
@@ -145,8 +148,8 @@ _assert_skill_day_wakeup_triggers() {
 _assert_skill_day_wakeup_cli_commands() {
   local skill=.claude-plugin/skills/day-wakeup/SKILL.md
   local ok=0
-  for cmd in 'clast snapshot' 'clast --json sessions --day yesterday' 'clast --json show' \
-             'clast breadcrumb --read' 'clast entries write'; do
+  for cmd in 'CLAST_BIN snapshot' 'CLAST_BIN --json sessions --since' 'CLAST_BIN --json show' \
+             'CLAST_BIN breadcrumb --read' 'CLAST_BIN entries write' 'CLAST_BIN sessions dismiss'; do
     if ! grep -q "$cmd" "$skill"; then
       printf 'day-wakeup SKILL.md: missing CLI command: %s\n' "$cmd" >&2
       ok=1

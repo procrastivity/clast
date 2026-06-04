@@ -179,12 +179,15 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
     "msg_count_approx": 47,
     "snapshot_path": "transcripts/2026-05-30/-home-beau-code-xesapps/a1b2c3....jsonl",
     "day_bucket": "2026-05-30",
-    "curated": false
+    "curated": false,
+    "stale": false
   }
 ]
 ```
 
 `curated: true` if there's a corresponding entry in `entries/` (joined on `session_id` via entry frontmatter). The plugin's `/day-wakeup` uses this field to iterate only uncurated sessions.
+
+`stale: true` when a session has been curated but its transcript was updated after the entry was written (detected by comparing the entry's `curated_source_mtime` frontmatter field against the manifest's current `source_mtime`). Legacy entries without `curated_source_mtime` are conservatively treated as not stale.
 
 ---
 
@@ -288,7 +291,7 @@ Behavior:
 
 1. Look up session in manifest by `session_id`. Error if unknown.
 2. Resolve project info from the session's snapshot (segment → registry → slug + remote).
-3. Compose frontmatter (date, time, day_bucket, project, project_path, project_remote, branch, author, tags, session_id, session_slug, snapshot_path, machine).
+3. Compose frontmatter (date, time, day_bucket, project, project_path, project_remote, branch, author, tags, session_id, session_slug, snapshot_path, machine, curated_source_mtime).
 4. Read body from `--body-from FILE` or stdin (`--body-stdin`).
 5. Write to `entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md`.
 6. Refuse to overwrite existing file with same name (suffix `-2`, `-3`).
@@ -534,6 +537,7 @@ session_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 session_slug: vw-consumer-fields-explain
 snapshot_path: transcripts/2026-05-30/-home-beau-code-xesapps/a1b2c3....jsonl
 machine: beau-wsl2
+curated_source_mtime: 2026-05-30T14:30:30Z
 ---
 ```
 

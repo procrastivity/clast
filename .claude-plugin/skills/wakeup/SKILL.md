@@ -12,12 +12,35 @@ Synthesize a briefing for the current (or named) project so the user can resume 
 
 `/day-wakeup` curates yesterday's work into entries. `/wakeup` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
 
+## Step 0: Resolve the clast binary
+
+Before running any `clast` command, determine which binary to use. Run this
+once at the start and reuse the result for all commands in this skill:
+
+```bash
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast" ]]; then
+  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast"
+elif command -v clast >/dev/null 2>&1; then
+  CLAST_BIN="clast"
+else
+  _pdir="$(find ~/.claude -maxdepth 5 -name plugin.json -path '*/clast/.claude-plugin/*' -print -quit 2>/dev/null)"
+  if [[ -n "$_pdir" ]]; then
+    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast"
+  fi
+fi
+```
+
+If `CLAST_BIN` is still empty, tell the user: "clast CLI not found. Install it
+with `npm i -g @procrastivity/clast` or see the README for other options."
+
+Use `$CLAST_BIN` in place of bare `clast` for all commands in this skill.
+
 ## Step 1: Resolve the project
 
 If the user passed a slug as an argument (`/wakeup xesapps`), use it directly. Otherwise resolve from current working directory:
 
 ```bash
-clast registry resolve "$(pwd)"
+$CLAST_BIN registry resolve "$(pwd)"
 ```
 
 If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast registry add .` first, or invoke as `/wakeup <slug>`." and stop.
@@ -28,19 +51,19 @@ In parallel:
 
 ```bash
 # Recent curated entries for this project (newest first)
-clast --json entries --project <slug> --limit 5
+$CLAST_BIN --json entries --project <slug> --limit 5
 
 # Today's breadcrumbs for this project
-clast breadcrumb --read --project <slug> --day today
+$CLAST_BIN breadcrumb --read --project <slug> --day today
 
 # Today's session activity (if any — user might have started already)
-clast --json sessions --day today --project <slug>
+$CLAST_BIN --json sessions --day today --project <slug>
 ```
 
 For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):
 
 ```bash
-clast entries read <entry-path>
+$CLAST_BIN entries read <entry-path>
 ```
 
 ## Step 3: Synthesize the briefing

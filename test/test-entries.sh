@@ -190,7 +190,7 @@ content="$(cat "$target")"
 # Frontmatter key-order assertion: extract keys (text before colon) from the
 # frontmatter block, in order, and compare to the documented sequence.
 fm_keys="$(awk 'BEGIN{in_fm=0;seen=0} /^---$/{if(!seen){in_fm=1;seen=1;next} if(in_fm)exit} in_fm{sub(/:.*$/,""); print}' <<<"$content" | paste -sd, -)"
-expected_keys="date,time,day_bucket,project,project_path,project_remote,branch,author,tags,session_id,session_slug,snapshot_path,machine"
+expected_keys="date,time,day_bucket,project,project_path,project_remote,branch,author,tags,session_id,session_slug,snapshot_path,machine,curated_source_mtime"
 assert_eq "$expected_keys" "$fm_keys" "entries write stdin: frontmatter key order"
 case "$content" in
   *"author: test-user"*) _clast_test_pass "entries write stdin: author=test-user" ;;
@@ -227,6 +227,10 @@ esac
 case "$content" in
   *"snapshot_path: transcripts/2026-05-30/-tmp-proj-xesapps/22222222"*) _clast_test_pass "entries write stdin: snapshot_path from manifest" ;;
   *) _clast_test_fail "entries write stdin: snapshot_path from manifest" ;;
+esac
+case "$content" in
+  *'curated_source_mtime: "2026-05-30T14:30:30Z"'*) _clast_test_pass "entries write stdin: curated_source_mtime from manifest" ;;
+  *) _clast_test_fail "entries write stdin: curated_source_mtime from manifest" ;;
 esac
 # Body assertion: everything after the second `---\n\n` must equal exactly "Hello\n".
 body="$(awk 'BEGIN{seen=0;past=0;body=0} /^---$/{if(!seen){seen=1;next} if(!past){past=1;next}} past{if(!body){if($0~/^[[:space:]]*$/)next; body=1} print}' <<<"$content")"
@@ -378,6 +382,44 @@ case "$err_msg" in
   *) _clast_test_fail "write --json error: error field present"; printf '%s\n' "$out" >&2 ;;
 esac
 assert_eq "1" "$err_code" "write --json error: code=1"
+teardown_test_journal
+
+# === stale detection ========================================================
+
+# --- stale=false when mtime matches (freshly curated) ---------------------
+_seed_manifest_only
+printf 'Freshly curated session.\n' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug stale-fresh --body-stdin >/dev/null 2>&1
+sess_out="$("$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+stale_val="$(jq -r --arg s "$KNOWN_SID" '.[] | select(.session_id == $s) | .stale' <<<"$sess_out")"
+assert_eq "false" "$stale_val" "stale detection: false when mtime matches"
+teardown_test_journal
+
+# --- stale=true when manifest mtime changes after curation ----------------
+_seed_manifest_only
+printf 'Will become stale.\n' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug stale-updated --body-stdin >/dev/null 2>&1
+# Simulate re-snapshot with a newer mtime by appending a new manifest line.
+manifest_path="$CLAST_JOURNAL_DIR/.manifest.jsonl"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/2222.jsonl","snapshot":"transcripts/2026-05-30/-tmp-proj-xesapps/%s.jsonl","captured_at":"2026-05-30T18:00:00Z","source_mtime":"2026-05-30T17:45:00Z","source_size":800,"day_bucket":"2026-05-30"}\n' \
+  "$KNOWN_SID" "$KNOWN_SID" >>"$manifest_path"
+sess_out="$("$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+stale_val="$(jq -r --arg s "$KNOWN_SID" '.[] | select(.session_id == $s) | .stale' <<<"$sess_out")"
+assert_eq "true" "$stale_val" "stale detection: true when mtime differs after curation"
+curated_val="$(jq -r --arg s "$KNOWN_SID" '.[] | select(.session_id == $s) | .curated' <<<"$sess_out")"
+assert_eq "true" "$curated_val" "stale detection: still curated=true"
+teardown_test_journal
+
+# --- stale=false for legacy entries without curated_source_mtime ----------
+_seed_full
+# The seed entries don't have curated_source_mtime; append a new manifest line
+# with a different mtime to test the conservative fallback.
+manifest_path="$CLAST_JOURNAL_DIR/.manifest.jsonl"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/2222.jsonl","snapshot":"transcripts/2026-05-30/-tmp-proj-xesapps/%s.jsonl","captured_at":"2026-05-30T18:00:00Z","source_mtime":"2026-05-30T17:45:00Z","source_size":800,"day_bucket":"2026-05-30"}\n' \
+  "$KNOWN_SID" "$KNOWN_SID" >>"$manifest_path"
+sess_out="$("$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+stale_val="$(jq -r --arg s "$KNOWN_SID" '.[] | select(.session_id == $s) | .stale' <<<"$sess_out")"
+assert_eq "false" "$stale_val" "stale detection: false for legacy entry without curated_source_mtime"
 teardown_test_journal
 
 # === misc ===================================================================

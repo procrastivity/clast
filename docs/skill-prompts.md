@@ -48,13 +48,15 @@ clast snapshot
 
 Errors here are non-fatal — proceed even if it fails, just warn the user.
 
-## Step 2: Enumerate uncurated sessions from yesterday
+## Step 2: Enumerate uncurated sessions
 
 ```bash
-clast sessions --day yesterday --json
+clast sessions --since -30d --json
 ```
 
-Filter to sessions with `curated: false`. If everything from yesterday is already curated, print "Nothing to curate from yesterday — already done." and stop.
+Filter to sessions with `curated: false`. If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
+
+If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage prompt so the user can choose: process all, yesterday only, choose how many days back, or dismiss older sessions and process the rest. If only one day has uncurated sessions, skip triage and process directly.
 
 Group sessions by project for presentation. Order: most recent project first, sessions chronological within each project.
 
@@ -105,56 +107,14 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 ## Draft generation prompt
 
-When generating each draft, use this prompt internally (with the placeholders filled in):
+The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the standalone `clast-wake` script:
 
-```
-You are drafting a journal entry for a Claude Code session that the user just reviewed. The entry will be written to the user's journal and may be read days or weeks later to refresh context on what was happening.
+- **System prompt:** [`lib/clast/prompts/day-wakeup-draft-system.md`](../lib/clast/prompts/day-wakeup-draft-system.md)
+- **User prompt template:** [`lib/clast/prompts/day-wakeup-draft-user.md`](../lib/clast/prompts/day-wakeup-draft-user.md)
 
-Session metadata:
-- Project: {project}
-- Branch: {branch}
-- Start: {start}
-- End: {end}
-- Approximate messages: {msg_count}
+The user prompt template uses `{{placeholder}}` syntax: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 
-First 8 turns of the session:
-{first_turns}
-
-Last 8 turns of the session:
-{last_turns}
-
-Breadcrumbs the user left during this session's day:
-{breadcrumbs}
-
-Draft a journal entry in this exact markdown structure. Omit any section that has no content (don't write "N/A"):
-
-```
-# Session: <short human-readable title>
-
-## Goal
-One sentence describing what this session was trying to accomplish.
-
-## What shipped
-- Bullet list of what actually got done (files written, features built, fixes landed). Extract from the transcript.
-
-## Issues + fixes
-- **Issue:** what broke. **Fix:** what resolved it.
-
-## Dead ends touched
-- **Tried:** approach. (You can usually see this in the transcript as "tried X then switched to Y".)
-  - Note: if you can't tell *why* an approach was abandoned from the transcript, leave that for the user to fill in. Don't speculate.
-
-## Open threads
-- Anything still unfinished or deferred. Use the breadcrumbs and the last turns of the session as signal.
-
-## Notes
-- Anything else useful for the next session in this project.
-```
-
-Be concise. Prefer bullets over paragraphs. Use the user's terminology (project-specific names, file paths). Don't invent details. If you're uncertain about something, omit it rather than guess.
-
-Suggest tags after the entry, separated by a blank line, prefixed with "Suggested tags:". The user will confirm.
-```
+When generating each draft, read those files, substitute the placeholders with session data, and use them as the system and user messages respectively.
 
 ## AskUserQuestion: promotion options per session
 

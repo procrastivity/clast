@@ -13,23 +13,76 @@ Curation at end-of-session has high friction (the user wants to stop, not summar
 
 The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/day-wakeup` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
 
-## Step 1: Ensure fresh data
+## Step 0: Resolve the clast binary
 
-Run `clast snapshot` (idempotent; silent on no-op). This guarantees we're not missing anything that ran since the last hook fire.
+Before running any `clast` command, determine which binary to use. Run this
+once at the start and reuse the result for all commands in this skill:
 
 ```bash
-clast snapshot
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast" ]]; then
+  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast"
+elif command -v clast >/dev/null 2>&1; then
+  CLAST_BIN="clast"
+else
+  _pdir="$(find ~/.claude -maxdepth 5 -name plugin.json -path '*/clast/.claude-plugin/*' -print -quit 2>/dev/null)"
+  if [[ -n "$_pdir" ]]; then
+    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast"
+  fi
+fi
+```
+
+If `CLAST_BIN` is still empty, tell the user: "clast CLI not found. Install it
+with `npm i -g @procrastivity/clast` or see the README for other options."
+
+Use `$CLAST_BIN` in place of bare `clast` for all commands in this skill.
+
+## Step 1: Ensure fresh data
+
+Run `$CLAST_BIN snapshot` (idempotent; silent on no-op). This guarantees we're not missing anything that ran since the last hook fire.
+
+```bash
+$CLAST_BIN snapshot
 ```
 
 Errors here are non-fatal — proceed even if it fails, just warn the user.
 
-## Step 2: Enumerate uncurated sessions from yesterday
+## Step 2: Enumerate uncurated sessions
+
+Query all recent sessions (last 30 days) and filter to uncurated:
 
 ```bash
-clast --json sessions --day yesterday
+$CLAST_BIN --json sessions --since -30d
 ```
 
-Filter to sessions with `curated: false`. If everything from yesterday is already curated, print "Nothing to curate from yesterday — already done." and stop.
+Filter to sessions with `curated: false` or `stale: true` (stale sessions were curated but their transcript was updated since). If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
+
+### Triage when multiple days have uncurated sessions
+
+If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage step before processing. Show a per-day breakdown:
+
+```
+Found 45 uncurated sessions across 5 days (2026-05-26 to 2026-05-30).
+
+    2026-05-26  8 session(s)
+    2026-05-27  12 session(s)
+    2026-05-28  15 session(s)
+    2026-05-29  7 session(s)
+    2026-05-30  3 session(s)
+```
+
+Then present via AskUserQuestion:
+
+- **question**: "How would you like to handle these?"
+- **header**: "Backlog"
+- **options**:
+  - `Process all` — curate everything
+  - `Yesterday only` — only process yesterday's sessions
+  - `Choose days back` — prompt for a number, process only that many days back
+  - `Dismiss older, process recent` — prompt for how many days to keep, dismiss the rest via `$CLAST_BIN sessions dismiss`, then process what remains
+
+If only one day has uncurated sessions, skip triage and process directly.
+
+### Ordering
 
 Group sessions by project for presentation. Order: most recent project first, sessions chronological within each project.
 
@@ -39,13 +92,13 @@ For each session in the list:
 
 1. Read session details:
    ```bash
-   clast --json show <session-id> --full --turns 8
+   $CLAST_BIN --json show <session-id> --full --turns 8
    ```
    This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
 
 2. Read breadcrumbs for this project from yesterday:
    ```bash
-   clast breadcrumb --read --project <slug> --day yesterday
+   $CLAST_BIN breadcrumb --read --project <slug> --day yesterday
    ```
 
 3. Generate a draft entry using the **draft generation prompt** (see below).
@@ -80,56 +133,12 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 ## Draft generation prompt
 
-When generating each draft, use this prompt internally (with the placeholders filled in):
+The prompt templates live in `lib/clast/prompts/` so they are shared with the standalone `clast-wake` script:
 
-````markdown
-You are drafting a journal entry for a Claude Code session that the user just reviewed. The entry will be written to the user's journal and may be read days or weeks later to refresh context on what was happening.
+- **System prompt:** `lib/clast/prompts/day-wakeup-draft-system.md`
+- **User prompt template:** `lib/clast/prompts/day-wakeup-draft-user.md` (uses `{{placeholder}}` syntax)
 
-Session metadata:
-- Project: {project}
-- Branch: {branch}
-- Start: {start}
-- End: {end}
-- Approximate messages: {msg_count}
-
-First 8 turns of the session:
-{first_turns}
-
-Last 8 turns of the session:
-{last_turns}
-
-Breadcrumbs the user left during this session's day:
-{breadcrumbs}
-
-Draft a journal entry in this exact markdown structure. Omit any section that has no content (don't write "N/A"):
-
-```
-# Session: <short human-readable title>
-
-## Goal
-One sentence describing what this session was trying to accomplish.
-
-## What shipped
-- Bullet list of what actually got done (files written, features built, fixes landed). Extract from the transcript.
-
-## Issues + fixes
-- **Issue:** what broke. **Fix:** what resolved it.
-
-## Dead ends touched
-- **Tried:** approach. (You can usually see this in the transcript as "tried X then switched to Y".)
-  - Note: if you can't tell *why* an approach was abandoned from the transcript, leave that for the user to fill in. Don't speculate.
-
-## Open threads
-- Anything still unfinished or deferred. Use the breadcrumbs and the last turns of the session as signal.
-
-## Notes
-- Anything else useful for the next session in this project.
-```
-
-Be concise. Prefer bullets over paragraphs. Use the user's terminology (project-specific names, file paths). Don't invent details. If you're uncertain about something, omit it rather than guess.
-
-Suggest tags after the entry, separated by a blank line, prefixed with "Suggested tags:". The user will confirm.
-````
+When generating each draft, read those files and substitute the placeholders with session data. The user prompt template uses these placeholders: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 
 ## AskUserQuestion: promotion options per session
 
@@ -169,7 +178,7 @@ When the user accepts:
 2. Pipe the entry body (without the suggested-tags trailer) to `clast entries write`:
 
 ```bash
-clast entries write \
+$CLAST_BIN entries write \
   --session <session-id> \
   --slug <session-slug> \
   --tags <tag1>,<tag2>,<tag3> \
@@ -187,8 +196,8 @@ For promoted items (decisions, common-issues, workflows): currently these are tr
 
 ## Edge cases
 
-- **No sessions from yesterday**: print "No sessions from yesterday." and stop.
-- **All sessions already curated**: print "All sessions from yesterday already curated." and stop.
+- **No uncurated sessions**: print "Nothing to curate — all sessions are curated or dismissed." and stop.
+- **Multi-day backlog**: present the triage step (Step 2) so the user can choose scope before processing.
 - **`clast snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
 - **`clast show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
 - **User says "do them all without prompting"**: not a v1 feature. Each session gets its own AskUserQuestion. The friction is intentional — it's where curation happens.

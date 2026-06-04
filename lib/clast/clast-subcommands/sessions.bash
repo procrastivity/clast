@@ -8,20 +8,26 @@
 # shellcheck source=lib/clast/clast-manifest-lib.bash
 # shellcheck source=lib/clast/clast-registry-lib.bash
 # shellcheck source=lib/clast/clast-decode-lib.bash
+# shellcheck source=lib/clast/clast-dismissed-lib.bash
 
 _clast_sessions_usage() {
   cat <<'EOF'
 Usage: clast sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG]
+       clast sessions dismiss <session-id> [<session-id>...] [--reason TEXT]
 
 List sessions captured in a date window.
 
+Subcommands:
+  dismiss ID...    Mark session(s) as dismissed (excluded from future queries).
+
 Flags:
-  --day DATE       Single-day window (default: today). Mutually exclusive
-                   with --since/--until.
-  --since DATE     Start of range (inclusive).
-  --until DATE     End of range (inclusive).
-  --project SLUG   Filter to a single registry slug.
-  -h, --help       Print this usage and exit.
+  --day DATE              Single-day window (default: today). Mutually exclusive
+                          with --since/--until.
+  --since DATE            Start of range (inclusive).
+  --until DATE            End of range (inclusive).
+  --project SLUG          Filter to a single registry slug.
+  --include-dismissed     Include dismissed sessions in results.
+  -h, --help              Print this usage and exit.
 
 DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`,
 `-Nd`, or `-Nw`. See docs/cli-contract.md#date-parsing.
@@ -37,9 +43,72 @@ _clast_sessions_err() {
   fi
 }
 
+# _clast_sessions_dismiss <id> [<id>...] [--reason TEXT]
+_clast_sessions_dismiss() {
+  if [[ $# -eq 0 ]]; then
+    _clast_sessions_err "dismiss requires at least one session ID"
+    return 2
+  fi
+
+  source "$CLAST_LIB/clast-dismissed-lib.bash"
+
+  local -a ids=()
+  local reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason)
+        if [[ $# -lt 2 ]]; then _clast_sessions_err "--reason requires a value"; return 2; fi
+        reason="$2"; shift 2 ;;
+      --reason=*)
+        reason="${1#*=}"; shift ;;
+      -h|--help)
+        _clast_sessions_usage; return 0 ;;
+      -*)
+        _clast_sessions_err "dismiss: unknown flag '$1'"; return 2 ;;
+      *)
+        ids+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    _clast_sessions_err "dismiss requires at least one session ID"
+    return 2
+  fi
+
+  local id count=0
+  for id in "${ids[@]}"; do
+    if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+      _clast_sessions_err "dismiss: '$id' is not a valid UUID"
+      return 2
+    fi
+    if clast_dismissed_check "$id"; then
+      if [[ -z "${CLAST_QUIET:-}" ]]; then
+        clast_log_info "already dismissed: $id"
+      fi
+      continue
+    fi
+    clast_dismissed_add "$id" "$reason"
+    count=$(( count + 1 ))
+  done
+
+  if [[ -n "${CLAST_JSON:-}" ]]; then
+    jq -cn --argjson count "$count" '{dismissed: $count}'
+  elif [[ -z "${CLAST_QUIET:-}" ]]; then
+    clast_log_info "Dismissed $count session(s)."
+  fi
+}
+
 clast_cmd_sessions() {
+  # Handle "sessions dismiss" sub-action before flag parsing.
+  if [[ "${1:-}" == "dismiss" ]]; then
+    shift
+    _clast_sessions_dismiss "$@"
+    return $?
+  fi
+
   local day_filter="" since_date="" until_date=""
   local project_filter=""
+  local include_dismissed=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -81,6 +150,10 @@ clast_cmd_sessions() {
         project_filter="$2"; shift 2 ;;
       --project=*)
         project_filter="${1#*=}"; shift ;;
+      --include-dismissed)
+        include_dismissed=1; shift ;;
+      --json)
+        export CLAST_JSON=1; shift ;;
       -h|--help)
         _clast_sessions_usage; return 0 ;;
       --)
@@ -113,6 +186,13 @@ clast_cmd_sessions() {
   local journal_dir
   journal_dir="$(clast_journal_dir)"
 
+  # Build dismissed set unless --include-dismissed was passed.
+  source "$CLAST_LIB/clast-dismissed-lib.bash"
+  declare -A dismissed_ids=()
+  if (( include_dismissed == 0 )); then
+    clast_dismissed_set dismissed_ids
+  fi
+
   # Build the project segment whitelist if --project was passed.
   declare -A allowed_segs=()
   local have_project_filter=0
@@ -134,6 +214,10 @@ clast_cmd_sessions() {
     [[ -z "$line" ]] && continue
     sid="$(jq -r '.session_id' <<<"$line")"
     [[ -z "$sid" || "$sid" == "null" ]] && continue
+    # Skip dismissed sessions early to avoid unnecessary work.
+    if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
+      continue
+    fi
     latest_line["$sid"]="$line"
   done < <(clast_manifest_iterate "$filter")
 
@@ -183,10 +267,31 @@ clast_cmd_sessions() {
     branch=""
 
     curated=false
+    local stale=false
     if [[ -d "$entries_dir" ]]; then
-      if grep -l "session_id: $sid" "$entries_dir"/*.md 2>/dev/null | head -n1 | grep -q .; then
+      local entry_matches
+      entry_matches="$(grep -l "session_id: $sid" "$entries_dir"/*.md 2>/dev/null)" || true
+      if [[ -n "$entry_matches" ]]; then
         curated=true
+        local best_curated_mtime="" ef cm
+        while IFS= read -r ef; do
+          [[ -z "$ef" ]] && continue
+          cm="$(grep '^curated_source_mtime:' "$ef" 2>/dev/null | head -n1 | sed 's/^curated_source_mtime:[[:space:]]*//')" || true
+          cm="${cm#\"}"
+          cm="${cm%\"}"
+          if [[ -n "$cm" && ( -z "$best_curated_mtime" || "$cm" > "$best_curated_mtime" ) ]]; then
+            best_curated_mtime="$cm"
+          fi
+        done <<<"$entry_matches"
+        if [[ -n "$best_curated_mtime" && "$best_curated_mtime" != "$mtime" ]]; then
+          stale=true
+        fi
       fi
+    fi
+
+    local is_dismissed=false
+    if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
+      is_dismissed=true
     fi
 
     rows+=("$(jq -cn \
@@ -200,6 +305,8 @@ clast_cmd_sessions() {
       --arg snapshot_path "$snapshot" \
       --arg day_bucket "$day_bucket" \
       --argjson curated "$curated" \
+      --argjson stale "$stale" \
+      --argjson dismissed "$is_dismissed" \
       '{
          session_id: $session_id,
          project: $project,
@@ -210,7 +317,9 @@ clast_cmd_sessions() {
          msg_count_approx: $msg_count_approx,
          snapshot_path: $snapshot_path,
          day_bucket: $day_bucket,
-         curated: $curated
+         curated: $curated,
+         stale: $stale,
+         dismissed: $dismissed
        }')")
   done
 

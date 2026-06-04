@@ -532,7 +532,7 @@ _clast_entries_write() {
   local snapshot_rel mtime
   snapshot_rel="$(jq -r '.snapshot' <<<"$manifest_line")"
   mtime="$(jq -r '.source_mtime' <<<"$manifest_line")"
-  : "$mtime"  # unused for now; reserved for future best-effort fields
+  # curated_source_mtime: stored in frontmatter for stale-curation detection
 
   local seg
   seg="$(awk -F/ 'NR==1{print $3}' <<<"$snapshot_rel")"
@@ -650,6 +650,7 @@ _clast_entries_write() {
   fm+="session_slug: $(_clast_entries_yaml_string "$slug")"$'\n'
   fm+="snapshot_path: $(_clast_entries_yaml_string "$snapshot_rel")"$'\n'
   fm+="machine: $(_clast_entries_yaml_string "$machine")"$'\n'
+  fm+="curated_source_mtime: $(_clast_entries_yaml_string "$mtime")"$'\n'
 
   local composed="---"$'\n'"$fm""---"$'\n\n'"$body"
 
