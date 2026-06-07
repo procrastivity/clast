@@ -2,7 +2,7 @@
 #
 # Read-only view over .manifest.jsonl: list sessions in a date window,
 # optionally filtered by registry slug. See
-# docs/cli-contract.md#clast-sessions.
+# docs/reference/cli.md#clast-sessions.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
@@ -30,7 +30,7 @@ Flags:
   -h, --help              Print this usage and exit.
 
 DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`,
-`-Nd`, or `-Nw`. See docs/cli-contract.md#date-parsing.
+`-Nd`, or `-Nw`. See docs/reference/cli.md#date-parsing.
 EOF
 }
 
@@ -174,7 +174,7 @@ clast_cmd_sessions() {
     day_filter="$(clast_today)"
   fi
 
-  # `--until` defaults to `today` per docs/cli-contract.md#clast-sessions
+  # `--until` defaults to `today` per docs/reference/cli.md#clast-sessions
   # when `--since` is supplied without an explicit upper bound.
   if [[ -n "$since_date" && -z "$until_date" ]]; then
     until_date="$(clast_today)"

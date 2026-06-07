@@ -1,7 +1,7 @@
 # clast-subcommands/show.bash — `clast show <session-id>`.
 #
 # Dump metadata + (optionally) first/last turns of a single captured
-# session. See docs/cli-contract.md#clast-show.
+# session. See docs/reference/cli.md#clast-show.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash

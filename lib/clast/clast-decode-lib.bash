@@ -6,8 +6,8 @@
 # segment, identical to a path separator. Decoding ambiguity is resolved
 # against the filesystem (and, for git repos, a `git rev-parse` probe).
 #
-# See docs/overview.md#glossary for the "segment" term and
-# docs/repo-bootstrap.md#libclastclast-decode-libbash for the algorithm.
+# See docs/explanation/data-model.md for the "segment" term and
+# docs/reference/repo-bootstrap.md#libclastclast-decode-libbash for the algorithm.
 # shellcheck shell=bash
 
 if [[ -n "${_CLAST_DECODE_LIB_SOURCED:-}" ]]; then

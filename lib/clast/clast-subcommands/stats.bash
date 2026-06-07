@@ -2,7 +2,7 @@
 #
 # Read-only summary of journal activity over a date window using manifest
 # + filesystem stat only. No JSONL body parsing. See
-# docs/cli-contract.md#clast-stats.
+# docs/reference/cli.md#clast-stats.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
@@ -23,7 +23,7 @@ Flags:
   -h, --help       Print this usage and exit.
 
 DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`,
-`-Nd`, or `-Nw`. See docs/cli-contract.md#date-parsing.
+`-Nd`, or `-Nw`. See docs/reference/cli.md#date-parsing.
 EOF
 }
 

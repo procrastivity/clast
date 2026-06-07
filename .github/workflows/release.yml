@@ -2,7 +2,7 @@ name: release
 # Publishes to npm via Trusted Publishing (OIDC) — no NPM_TOKEN
 # secret required. Configure the trusted publisher for
 # @procrastivity/clast at https://www.npmjs.com (see
-# docs/releasing.md). GITHUB_TOKEN is provided automatically.
+# docs/reference/releasing.md). GITHUB_TOKEN is provided automatically.
 
 on:
   push:
