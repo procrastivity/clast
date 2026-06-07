@@ -1,6 +1,6 @@
 # `clast` — Skill Prompts
 
-> Reference doc. Read [`overview.md`](./overview.md) first. This doc spec's the Claude Code plugin: the three skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
+> Reference doc. Read [What is clast?](../explanation/what-is-clast.md) first. This doc spec's the Claude Code plugin: the three skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
 
 Three skills total: `day-wakeup`, `wakeup`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
 
@@ -109,8 +109,8 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the standalone `clast-wake` script:
 
-- **System prompt:** [`lib/clast/prompts/day-wakeup-draft-system.md`](../lib/clast/prompts/day-wakeup-draft-system.md)
-- **User prompt template:** [`lib/clast/prompts/day-wakeup-draft-user.md`](../lib/clast/prompts/day-wakeup-draft-user.md)
+- **System prompt:** [`lib/clast/prompts/day-wakeup-draft-system.md`](../../lib/clast/prompts/day-wakeup-draft-system.md)
+- **User prompt template:** [`lib/clast/prompts/day-wakeup-draft-user.md`](../../lib/clast/prompts/day-wakeup-draft-user.md)
 
 The user prompt template uses `{{placeholder}}` syntax: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 
@@ -283,6 +283,13 @@ Wakeup is read-only. Never invoke `clast entries write` or `clast breadcrumb` fr
 ```
 
 ### Synthesis prompt — internal
+
+The shared templates for this briefing live alongside the day-wakeup prompts in `lib/clast/prompts/` so the plugin skill and the standalone [`clast-brief`](../guides/run-without-claude-code.md) script stay in sync:
+
+- **System prompt:** [`lib/clast/prompts/brief-system.md`](../../lib/clast/prompts/brief-system.md)
+- **User prompt template:** [`lib/clast/prompts/brief-user.md`](../../lib/clast/prompts/brief-user.md)
+
+The inline form below documents the same intent:
 
 ```
 You are synthesizing a project briefing for the user. They are about to start work on the `{slug}` project and want a tight summary of where they left off.

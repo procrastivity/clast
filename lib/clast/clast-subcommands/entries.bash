@@ -3,7 +3,7 @@
 # Curated journal entries live at
 #   $(clast_journal_dir)/entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md
 # as Markdown files with a YAML frontmatter block. See
-# docs/cli-contract.md#clast-entries and docs/cli-contract.md#entry-frontmatter.
+# docs/reference/cli.md#clast-entries and docs/reference/cli.md#entry-frontmatter.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash

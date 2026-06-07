@@ -1,6 +1,9 @@
 # `clast` — CLI Contract Reference
 
-> Reference doc. Read [`overview.md`](./overview.md) first. This doc spec'd the `clast` CLI in detail: arguments, output formats, JSON schemas, exit codes, error handling.
+> Reference doc. New to clast? Start with
+> [`explanation/what-is-clast.md`](../explanation/what-is-clast.md) and
+> [`getting-started/first-snapshot.md`](../getting-started/first-snapshot.md).
+> This doc specs the `clast` CLI in detail: arguments, output formats, JSON schemas, exit codes, error handling.
 
 The CLI is a single dispatcher binary (`bin/clast`) with subcommands dispatched to handlers in `lib/clast/clast-subcommands/<name>.bash`. All subcommands are LLM-free. Every command supports `--help` and `--json` where output is structured.
 
@@ -153,8 +156,17 @@ List sessions in a window, optionally filtered by project.
 ### Synopsis
 
 ```
-clast sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG]
+clast sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG] [--include-dismissed]
+clast sessions dismiss <session-id> [<session-id>...] [--reason TEXT]
 ```
+
+### Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--day` / `--since` / `--until` | recent window | Restrict the listing window (see [Date parsing](#date-parsing)). |
+| `--project SLUG` | all | Only sessions for the given project. |
+| `--include-dismissed` | off | Include dismissed sessions in the listing (they are excluded by default). |
 
 ### Output (default)
 
@@ -180,7 +192,8 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
     "snapshot_path": "transcripts/2026-05-30/-home-beau-code-xesapps/a1b2c3....jsonl",
     "day_bucket": "2026-05-30",
     "curated": false,
-    "stale": false
+    "stale": false,
+    "dismissed": false
   }
 ]
 ```
@@ -188,6 +201,18 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
 `curated: true` if there's a corresponding entry in `entries/` (joined on `session_id` via entry frontmatter). The plugin's `/day-wakeup` uses this field to iterate only uncurated sessions.
 
 `stale: true` when a session has been curated but its transcript was updated after the entry was written (detected by comparing the entry's `curated_source_mtime` frontmatter field against the manifest's current `source_mtime`). Legacy entries without `curated_source_mtime` are conservatively treated as not stale.
+
+`dismissed: true` if the session has been explicitly dismissed (see below). Dismissed sessions are omitted from the listing unless `--include-dismissed` is passed, in which case they appear with this flag set.
+
+### `clast sessions dismiss <session-id>... [--reason TEXT]`
+
+Mark one or more sessions as dismissed so they are excluded from future `clast sessions` queries (and therefore skipped by curation workflows). Useful for throwaway or noise sessions you never intend to curate.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--reason TEXT` | none | Optional note recorded alongside the dismissal. |
+
+Each ID must be a valid session UUID. Already-dismissed IDs are skipped (idempotent). Dismissals are appended to `.dismissed.jsonl` in the journal root (one JSON record per line: `session_id`, `dismissed_at` timestamp, and `reason` — `null` when omitted). With `--json`, prints `{"dismissed": N}` where N is the count newly added.
 
 ---
 

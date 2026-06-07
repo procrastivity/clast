@@ -1,7 +1,7 @@
 # clast-subcommands/projects.bash — `clast projects`.
 #
 # Read-only view over .manifest.jsonl: list projects (segments) with
-# session activity in a date window. See docs/cli-contract.md#clast-projects.
+# session activity in a date window. See docs/reference/cli.md#clast-projects.
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
@@ -24,7 +24,7 @@ Flags:
   -h, --help         Print this usage and exit.
 
 DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`,
-`-Nd`, or `-Nw`. See docs/cli-contract.md#date-parsing.
+`-Nd`, or `-Nw`. See docs/reference/cli.md#date-parsing.
 EOF
 }
 
@@ -98,7 +98,7 @@ clast_cmd_projects() {
     day_filter="$(clast_today)"
   fi
 
-  # `--until` defaults to `today` per docs/cli-contract.md#clast-projects when
+  # `--until` defaults to `today` per docs/reference/cli.md#clast-projects when
   # `--since` is supplied without an explicit upper bound.
   if [[ -n "$since_date" && -z "$until_date" ]]; then
     until_date="$(clast_today)"
