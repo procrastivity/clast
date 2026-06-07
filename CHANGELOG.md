@@ -3,6 +3,20 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.2] - 2026-06-07
+
+### CI
+
+- Switch npm publish to Trusted Publishing (OIDC) (#23)
+
+### Documentation
+
+- Restructure into Diátaxis layout (#25)
+
+### Features
+
+- Standalone clast-wake and clast-brief scripts, dismissed sessions, stale detection
+
 ## [0.0.1] - 2026-06-02
 
 ### Bug Fixes
