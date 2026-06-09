@@ -4,7 +4,9 @@
   "description": "Capture, curate, and surface Claude Code session history across all your projects.",
   "homepage": "https://github.com/procrastivity/clast#readme",
   "bin": {
-    "clast": "bin/clast"
+    "clast": "bin/clast",
+    "clast-wake": "bin/clast-wake",
+    "clast-brief": "bin/clast-brief"
   },
   "files": [
     "bin/",

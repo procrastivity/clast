@@ -15,7 +15,7 @@
 #   CLAST_LLM_MODEL     — e.g. gpt-4o, llama3
 set -euo pipefail
 
-CLAST_BRIEF_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CLAST_BRIEF_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

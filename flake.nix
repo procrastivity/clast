@@ -18,6 +18,7 @@
           nativeBuildInputs = [ pkgs.makeWrapper ];
           buildInputs = [
             pkgs.bash
+            pkgs.curl
             pkgs.jq
             pkgs.coreutils
             pkgs.findutils
@@ -57,6 +58,26 @@
                 pkgs.gnugrep
                 pkgs.inetutils
               ]}
+
+            # Standalone LLM helpers. They call clast/curl/jq directly and
+            # resolve prompts via dirname($0)/../lib/clast/prompts, so they need
+            # $out/bin (for clast) and the toolset on PATH, but not CLAST_LIB.
+            install -m755 bin/clast-wake $out/bin/clast-wake
+            install -m755 bin/clast-brief $out/bin/clast-brief
+            for helper in clast-wake clast-brief; do
+              wrapProgram $out/bin/$helper \
+                --prefix PATH : "$out/bin" \
+                --prefix PATH : ${pkgs.lib.makeBinPath [
+                  pkgs.curl
+                  pkgs.jq
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.gawk
+                  pkgs.git
+                  pkgs.gnugrep
+                  pkgs.inetutils
+                ]}
+            done
           '';
         };
 
