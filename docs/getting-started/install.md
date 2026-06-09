@@ -47,8 +47,10 @@ cd clast
 ./install.sh ~/.local        # or: ./install.sh /usr/local (default)
 ```
 
-`make install` wraps the same script. Use `./uninstall.sh ~/.local`
-(or `make uninstall` for the default prefix) to remove the installed files.
+`make install` wraps the same script; `make install-local` installs the working
+tree to `~/.local` with no sudo (and `make uninstall-local` removes it). Use
+`./uninstall.sh ~/.local` (or `make uninstall` for the default prefix) to remove
+the installed files.
 
 ## Verify
 

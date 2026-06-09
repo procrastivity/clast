@@ -1,4 +1,4 @@
-.PHONY: test lint nix-smoke npm-pack-check check-version-sync install uninstall release clean deps-check
+.PHONY: test lint nix-smoke npm-pack-check check-version-sync install install-local uninstall uninstall-local release clean deps-check
 
 test:
 	./test/test-clast.sh
@@ -27,8 +27,14 @@ check-version-sync:
 install:
 	./install.sh
 
+install-local:
+	./install.sh ~/.local
+
 uninstall:
 	./uninstall.sh
+
+uninstall-local:
+	./uninstall.sh ~/.local
 
 clean:
 	rm -rf .test-tmp
