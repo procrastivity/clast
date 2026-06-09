@@ -262,24 +262,20 @@ _clast_entries_list() {
     return 0
   fi
 
-  printf '%-11s %-6s %-17s %-29s %s\n' \
-    "date" "time" "project" "slug" "tags"
+  printf '%-50s %s\n' "entry" "tags"
 
-  local n i row r_date r_time r_project r_slug r_tags tags_disp
+  local n i row r_path r_basename r_tags tags_disp
   n="$(jq 'length' <<<"$rows_json")"
   for (( i = 0; i < n; i++ )); do
     row="$(jq -c ".[$i]" <<<"$rows_json")"
-    r_date="$(jq -r '.date // ""' <<<"$row")"
-    r_time="$(jq -r '.time // ""' <<<"$row")"
-    r_project="$(jq -r '.project // ""' <<<"$row")"
-    r_slug="$(jq -r '.session_slug // ""' <<<"$row")"
+    r_path="$(jq -r '.path // ""' <<<"$row")"
+    r_basename="$(basename "$r_path")"
     r_tags="$(jq -r '.tags // [] | join(",")' <<<"$row")"
     tags_disp="$r_tags"
     if (( ${#tags_disp} > 30 )); then
       tags_disp="${tags_disp:0:29}…"
     fi
-    printf '%-11s %-6s %-17s %-29s %s\n' \
-      "$r_date" "$r_time" "$r_project" "$r_slug" "$tags_disp"
+    printf '%-50s %s\n' "$r_basename" "$tags_disp"
   done
 }
 
@@ -515,6 +511,7 @@ _clast_entries_write() {
       trimmed="${rt#"${rt%%[![:space:]]*}"}"
       trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
       [[ -z "$trimmed" ]] && continue
+      trimmed="${trimmed,,}"
       if ! [[ "$trimmed" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
         _clast_entries_err "write: invalid tag '$trimmed'"; return 2
       fi
@@ -566,16 +563,13 @@ _clast_entries_write() {
   fi
 
   # Best-effort branch from snapshot.
+  # Claude Code stores gitBranch (camelCase) on type:"user" lines, not on line 1.
   local journal_dir snapshot_abs branch=""
   journal_dir="$(clast_journal_dir)"
   snapshot_abs="$journal_dir/$snapshot_rel"
   if [[ -r "$snapshot_abs" ]]; then
-    branch="$(head -n1 "$snapshot_abs" 2>/dev/null | jq -r '.cwd // .git_branch // empty' 2>/dev/null || true)"
-    # `.cwd` isn't a branch, but we keep parity with step 07's TODO: leave best-effort placeholder.
-    # If the value looks like a path, drop it.
-    case "$branch" in
-      /*|"") branch="" ;;
-    esac
+    branch="$(grep -m1 '"gitBranch"' "$snapshot_abs" 2>/dev/null \
+      | jq -r '.gitBranch // empty' 2>/dev/null || true)"
   fi
 
   local author machine

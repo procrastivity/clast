@@ -1,5 +1,5 @@
 {"type":"summary","cwd":"/tmp/proj-xesapps","timestamp":"2026-05-30T13:22:00Z","session_id":"22222222-2222-4222-8222-222222222222"}
-{"type":"message","role":"user","timestamp":"2026-05-30T13:22:05Z","content":"first xesapps prompt"}
+{"type":"user","cwd":"/tmp/proj-xesapps","gitBranch":"feat/consumer-fields","timestamp":"2026-05-30T13:22:05Z","content":"first xesapps prompt"}
 {"type":"message","role":"assistant","timestamp":"2026-05-30T13:22:30Z","content":"first xesapps reply"}
 {"type":"message","role":"user","timestamp":"2026-05-30T14:30:00Z","content":"last xesapps prompt"}
 {"type":"message","role":"assistant","timestamp":"2026-05-30T14:30:30Z","content":"last xesapps reply"}

@@ -43,7 +43,7 @@ _seed_full
 out="$("$CLAST_BIN" entries 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "entries default: exits 0"
 case "$out" in
-  *"date"*"time"*"project"*"slug"*"tags"*) _clast_test_pass "entries default: header line" ;;
+  *"entry"*"tags"*) _clast_test_pass "entries default: header line" ;;
   *) _clast_test_fail "entries default: header line"; printf '%s\n' "$out" >&2 ;;
 esac
 lines="$(printf '%s\n' "$out" | grep -c '^20')"
@@ -51,7 +51,7 @@ assert_eq "3" "$lines" "entries default: 3 data rows"
 # Sort check: first data row is most recent (2026-05-30 14:30).
 first_data="$(printf '%s\n' "$out" | grep '^20' | head -n1)"
 case "$first_data" in
-  "2026-05-30"*"14:30"*"xesapps"*"vw-consumer-fields-explain"*) _clast_test_pass "entries default: first row is most recent" ;;
+  "2026-05-30-1430-xesapps-vw-consumer-fields-explain.md"*) _clast_test_pass "entries default: first row is most recent" ;;
   *) _clast_test_fail "entries default: first row is most recent"; printf '%s\n' "$first_data" >&2 ;;
 esac
 teardown_test_journal
@@ -140,7 +140,7 @@ setup_test_journal >/dev/null
 out="$("$CLAST_BIN" entries 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "entries empty: exits 0"
 case "$out" in
-  *"date"*"time"*"project"*) _clast_test_pass "entries empty: header line printed" ;;
+  *"entry"*"tags"*) _clast_test_pass "entries empty: header line printed" ;;
   *) _clast_test_fail "entries empty: header line printed" ;;
 esac
 out="$("$CLAST_BIN" --json entries 2>/dev/null)"
@@ -211,6 +211,10 @@ esac
 case "$content" in
   *"project_remote:"*"example.com"*) _clast_test_pass "entries write stdin: project_remote from registry" ;;
   *) _clast_test_fail "entries write stdin: project_remote from registry" ;;
+esac
+case "$content" in
+  *"branch: feat/consumer-fields"*) _clast_test_pass "entries write stdin: branch from snapshot gitBranch" ;;
+  *) _clast_test_fail "entries write stdin: branch from snapshot gitBranch"; printf '%s\n' "$content" >&2 ;;
 esac
 case "$content" in
   *"session_id: $KNOWN_SID"*) _clast_test_pass "entries write stdin: session_id" ;;
@@ -341,6 +345,21 @@ teardown_test_journal
 _seed_manifest_only
 err="$(printf 'x' | _env_for_write "$CLAST_BIN" entries write --session "$KNOWN_SID" --slug s --tags 'mysql,BAD_TAG' --body-stdin 2>&1 >/dev/null)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "write bad tag: exits 2"
+teardown_test_journal
+
+# --- mixed-case tags auto-lowercased --------------------------------------
+_seed_manifest_only
+out="$(printf 'body' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug lc-slug --tags 'ADRs,Phase-0' \
+  --body-stdin 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "write mixed-case tags: exits 0"
+target="$CLAST_JOURNAL_DIR/entries/2026-05-30-1430-xesapps-lc-slug.md"
+assert_file_exists "$target" "write mixed-case tags: file exists"
+content="$(cat "$target")"
+case "$content" in
+  *"tags: [adrs, phase-0]"*) _clast_test_pass "write mixed-case tags: lowercased in frontmatter" ;;
+  *) _clast_test_fail "write mixed-case tags: lowercased in frontmatter"; printf '%s\n' "$content" >&2 ;;
+esac
 teardown_test_journal
 
 # --- empty body ------------------------------------------------------------
