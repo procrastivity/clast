@@ -135,10 +135,10 @@ Run `/brief <project>` to start working on a specific project today.
 
 ## Draft generation prompt
 
-The prompt templates live in `lib/clast/prompts/` so they are shared with the porcelain `clast wake` subcommand:
+The prompt templates are installed alongside the plugin under `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/`:
 
-- **System prompt:** `lib/clast/prompts/wake-draft-system.md`
-- **User prompt template:** `lib/clast/prompts/wake-draft-user.md` (uses `{{placeholder}}` syntax)
+- **System prompt:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/wake-draft-system.md`
+- **User prompt template:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/wake-draft-user.md` (uses `{{placeholder}}` syntax)
 
 When generating each draft, read those files and substitute the placeholders with session data. The user prompt template uses these placeholders: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 

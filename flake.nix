@@ -36,9 +36,15 @@
               $out/share/clast/.claude-plugin \
               $out/share/clast/skills \
               $out/share/clast/hooks \
-              $out/share/clast/examples
+              $out/share/clast/examples \
+              $out/share/clast/bin \
+              $out/share/clast/lib/clast/prompts
 
             cp -R lib/clast/. $out/lib/clast/
+            # Copy prompt templates into the plugin root so skills can read
+            # them at $CLAUDE_PLUGIN_ROOT/lib/clast/prompts/ when installed
+            # from share/clast.
+            cp -R lib/clast/prompts/. $out/share/clast/lib/clast/prompts/
             cp -R .claude-plugin/. $out/share/clast/.claude-plugin/
             cp -R skills/. $out/share/clast/skills/
             cp -R hooks/. $out/share/clast/hooks/
@@ -70,6 +76,9 @@
                   pkgs.inetutils
                 ]}
             done
+            # Expose clast-plumbing in the plugin bin/ so Claude adds it to
+            # PATH when the plugin is installed from share/clast.
+            ln -sf $out/bin/clast-plumbing $out/share/clast/bin/clast-plumbing
           '';
         };
 

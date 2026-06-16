@@ -46,6 +46,11 @@ fi
 assert_file_exists "$PREFIX/share/clast/README.md" "installed README"
 assert_file_exists "$PREFIX/share/clast/LICENSE" "installed LICENSE"
 assert_file_exists "$PREFIX/lib/clast/package.json" "installed package metadata"
+assert_file_exists "$PREFIX/share/clast/bin/clast-plumbing" "installed plugin bin/clast-plumbing symlink"
+assert_file_exists "$PREFIX/share/clast/lib/clast/prompts/wake-draft-system.md" "installed plugin wake-draft-system prompt"
+assert_file_exists "$PREFIX/share/clast/lib/clast/prompts/wake-draft-user.md" "installed plugin wake-draft-user prompt"
+assert_file_exists "$PREFIX/share/clast/lib/clast/prompts/brief-system.md" "installed plugin brief-system prompt"
+assert_file_exists "$PREFIX/share/clast/lib/clast/prompts/brief-user.md" "installed plugin brief-user prompt"
 
 unset CLAST_LIB
 expected_version="$(jq -r '.version' package.json)"
