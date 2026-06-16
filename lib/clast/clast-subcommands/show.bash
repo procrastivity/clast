@@ -224,7 +224,7 @@ clast_cmd_show() {
 _clast_show_user_messages() {
   local path="$1"
   jq -r '
-    select((.role // .message.role) == "user")
+    select((.role // .message.role // .type) == "user")
     | (.message.content // .content // empty)
     | if type == "array" then map(.text? // "") | join(" ") else . end
     | select(. != null and . != "")
@@ -237,9 +237,9 @@ _clast_show_collect_turns() {
   local path="$1"
   jq -sc '
     map(
-      select((.role // .message.role) as $r | $r == "user" or $r == "assistant")
+      select((.role // .message.role // .type) as $r | $r == "user" or $r == "assistant")
       | {
-          role: (.role // .message.role),
+          role: (.role // .message.role // .type),
           text: ((.message.content // .content // "") | if type == "array" then map(.text? // "") | join(" ") else . end)
         }
       | select(.text != null and .text != "")
