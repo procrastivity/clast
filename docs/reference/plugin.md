@@ -16,7 +16,7 @@ A `SKILL.md` file has YAML frontmatter (name + description) and a body that beco
 
 ## Skill 1: `day-wakeup`
 
-**Location:** `.claude-plugin/skills/day-wakeup/SKILL.md`
+**Location:** `skills/day-wakeup/SKILL.md`
 
 **Purpose:** The primary curation point. Snapshot fresh transcripts, iterate yesterday's sessions, generate a draft entry per session, prompt the user to accept/edit/promote, write accepted entries via `clast-plumbing entries write`.
 
@@ -189,7 +189,7 @@ A few intentional choices in the prompt template above worth flagging:
 
 ## Skill 2: `wakeup`
 
-**Location:** `.claude-plugin/skills/wakeup/SKILL.md`
+**Location:** `skills/wakeup/SKILL.md`
 
 **Purpose:** Per-project briefing synthesized from recent entries + today's breadcrumbs. Fast, read-only. Used when starting work in a specific repo today.
 

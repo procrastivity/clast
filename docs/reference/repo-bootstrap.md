@@ -13,14 +13,14 @@ Models the hybrid of [direnv-session-loader](https://github.com/procrastivity/di
 ```
 clast/
 ├── .claude-plugin/
-│   ├── plugin.json                 # plugin manifest
-│   └── skills/
-│       ├── day-wakeup/
-│       │   └── SKILL.md
-│       ├── wakeup/
-│       │   └── SKILL.md
-│       └── breadcrumb/             # OPTIONAL v1.1; can omit in v1
-│           └── SKILL.md
+│   └── plugin.json                 # plugin manifest (ONLY this lives here)
+├── skills/                         # sibling of .claude-plugin/, NOT inside it
+│   ├── day-wakeup/
+│   │   └── SKILL.md
+│   ├── wakeup/
+│   │   └── SKILL.md
+│   └── breadcrumb/                 # OPTIONAL v1.1; can omit in v1
+│       └── SKILL.md
 ├── hooks/
 │   ├── hooks.json
 │   └── snapshot.sh                 # SessionStart → backgrounds `clast-plumbing snapshot`
@@ -243,7 +243,7 @@ Per the direnv-session-loader reference, only `name` is strictly required. Other
 }
 ```
 
-### `.claude-plugin/skills/*/SKILL.md`
+### `skills/*/SKILL.md`
 
 Full content in [`plugin.md`](./plugin.md).
 
@@ -270,6 +270,7 @@ Match xcind's pattern. Multi-channel from day one.
     "bin/",
     "lib/",
     ".claude-plugin/",
+    "skills/",
     "hooks/",
     "examples/",
     "README.md",
@@ -330,6 +331,7 @@ The structure below is the final shape (after step 15). For the step-01-only ver
             mkdir -p $out/bin $out/lib/clast $out/share/clast
             cp -r lib/clast/* $out/lib/clast/
             cp -r .claude-plugin $out/share/clast/
+            cp -r skills $out/share/clast/
             cp -r hooks $out/share/clast/
             cp -r examples $out/share/clast/
             install -m755 bin/clast $out/bin/clast
@@ -372,6 +374,7 @@ mkdir -p "$PREFIX/bin" "$PREFIX/lib/clast" "$PREFIX/share/clast"
 install -m755 "$SRC/bin/clast" "$PREFIX/bin/clast"
 cp -r "$SRC/lib/clast"/* "$PREFIX/lib/clast/"
 cp -r "$SRC/.claude-plugin" "$PREFIX/share/clast/"
+cp -r "$SRC/skills" "$PREFIX/share/clast/"
 cp -r "$SRC/hooks" "$PREFIX/share/clast/"
 cp -r "$SRC/examples" "$PREFIX/share/clast/"
 

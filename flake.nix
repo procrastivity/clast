@@ -34,11 +34,13 @@
               $out/bin \
               $out/lib/clast \
               $out/share/clast/.claude-plugin \
+              $out/share/clast/skills \
               $out/share/clast/hooks \
               $out/share/clast/examples
 
             cp -R lib/clast/. $out/lib/clast/
             cp -R .claude-plugin/. $out/share/clast/.claude-plugin/
+            cp -R skills/. $out/share/clast/skills/
             cp -R hooks/. $out/share/clast/hooks/
             # Belt-and-suspenders: ensure the SessionStart hook is executable.
             chmod +x $out/share/clast/hooks/snapshot.sh
@@ -82,6 +84,7 @@
             shellcheck    # linting
             pre-commit    # hook runner
             git-cliff     # changelog generation for contrib/release
+            nodejs_24     # npm for contrib/npm-pack-check.sh + publish
           ];
 
           shellHook = ''

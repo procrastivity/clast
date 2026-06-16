@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.." || exit 1
 # behavioral surface to integration-test — there's nothing to invoke and
 # nothing to assert beyond "files exist and are well-formed."
 _assert_skill_wakeup_frontmatter() {
-  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local skill=skills/wakeup/SKILL.md
   local ok=0
   if [[ ! -f "$skill" ]]; then
     printf 'wakeup SKILL.md: file not found\n' >&2
@@ -47,7 +47,7 @@ _assert_skill_wakeup_frontmatter() {
 }
 
 _assert_skill_wakeup_triggers() {
-  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local skill=skills/wakeup/SKILL.md
   local ok=0
   for phrase in '/wakeup' 'wake up' 'where was I' 'resume'; do
     if ! grep -q "$phrase" "$skill"; then
@@ -59,7 +59,7 @@ _assert_skill_wakeup_triggers() {
 }
 
 _assert_skill_wakeup_cli_commands() {
-  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local skill=skills/wakeup/SKILL.md
   local ok=0
   for cmd in 'CLAST_BIN registry resolve' 'entries --project' 'CLAST_BIN entries read' \
              'CLAST_BIN breadcrumb --read' 'sessions --day today'; do
@@ -72,7 +72,7 @@ _assert_skill_wakeup_cli_commands() {
 }
 
 _assert_skill_wakeup_readonly() {
-  local skill=.claude-plugin/skills/wakeup/SKILL.md
+  local skill=skills/wakeup/SKILL.md
   local ok=0
   # shellcheck disable=SC2016
   if grep -qE '(clast|\$CLAST_BIN) entries write' "$skill"; then
@@ -93,7 +93,7 @@ _assert_skill_wakeup_readonly() {
 }
 
 _assert_skill_day_wakeup_frontmatter() {
-  local skill=.claude-plugin/skills/day-wakeup/SKILL.md
+  local skill=skills/day-wakeup/SKILL.md
   local ok=0
   if [[ ! -f "$skill" ]]; then
     printf 'day-wakeup SKILL.md: file not found\n' >&2
@@ -134,7 +134,7 @@ _assert_skill_day_wakeup_frontmatter() {
 }
 
 _assert_skill_day_wakeup_triggers() {
-  local skill=.claude-plugin/skills/day-wakeup/SKILL.md
+  local skill=skills/day-wakeup/SKILL.md
   local ok=0
   for phrase in '/day-wakeup' 'morning briefing' 'catch me up on yesterday'; do
     if ! grep -q "$phrase" "$skill"; then
@@ -146,7 +146,7 @@ _assert_skill_day_wakeup_triggers() {
 }
 
 _assert_skill_day_wakeup_cli_commands() {
-  local skill=.claude-plugin/skills/day-wakeup/SKILL.md
+  local skill=skills/day-wakeup/SKILL.md
   local ok=0
   for cmd in 'CLAST_BIN snapshot' 'CLAST_BIN --json sessions --since' 'CLAST_BIN --json show' \
              'CLAST_BIN breadcrumb --read' 'CLAST_BIN entries write' 'CLAST_BIN sessions dismiss'; do

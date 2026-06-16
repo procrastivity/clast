@@ -20,9 +20,11 @@ cp -R "$SRC/lib/clast/." "$PREFIX/lib/clast/"
 # Drop stale files from a prior install before re-copying.
 rm -rf \
   "$PREFIX/share/clast/.claude-plugin" \
+  "$PREFIX/share/clast/skills" \
   "$PREFIX/share/clast/hooks" \
   "$PREFIX/share/clast/examples"
 cp -R "$SRC/.claude-plugin" "$PREFIX/share/clast/"
+cp -R "$SRC/skills" "$PREFIX/share/clast/"
 cp -R "$SRC/hooks" "$PREFIX/share/clast/"
 chmod +x "$PREFIX/share/clast/hooks/snapshot.sh"
 cp -R "$SRC/examples" "$PREFIX/share/clast/"
