@@ -3,6 +3,12 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.4] - 2026-06-16
+
+### Performance
+
+- Make clast sessions / wake fast on large journals (7min → 3s) (#29)
+
 ## [0.0.3] - 2026-06-16
 
 ### Bug Fixes

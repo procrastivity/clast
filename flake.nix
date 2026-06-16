@@ -12,7 +12,7 @@
         packages.default = pkgs.stdenv.mkDerivation {
           pname = "clast";
           # Bump in lockstep with package.json.
-          version = "0.0.3";
+          version = "0.0.4";
           src = ./.;
 
           nativeBuildInputs = [ pkgs.makeWrapper ];
