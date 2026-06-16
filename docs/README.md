@@ -22,7 +22,7 @@ The docs are split four ways, modeled on the
   [systemd](./guides/automate-with-systemd.md)
 - [Repair the journal](./guides/repair-the-journal.md)
 - [Query recipes (`jq` over `--json`)](./guides/query-recipes.md)
-- [Run curation without Claude Code](./guides/run-without-claude-code.md) — the `clast-wake` / `clast-brief` scripts
+- [Run curation without Claude Code](./guides/run-without-claude-code.md) — the `clast wake` / `clast brief` porcelain subcommands
 - [Morning briefing walkthrough](../examples/workflows/morning-briefing.md) (in `examples/` because it ships with the npm tarball)
 
 ## Reference

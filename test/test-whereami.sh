@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-whereami"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 
 # --- default human output has all 10 labels in order --------------------
 

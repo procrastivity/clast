@@ -204,10 +204,10 @@ clast_version() {
 # to stderr for usage errors.
 clast_usage() {
   cat <<'EOF'
-clast — Claude Code session journal
+clast-plumbing — Claude Code session journal (deterministic core)
 
 Usage:
-  clast [GLOBAL FLAGS] <subcommand> [ARGS...]
+  clast-plumbing [GLOBAL FLAGS] <subcommand> [ARGS...]
 
 Subcommands:
   whereami      Show current path, registry, and journal state
@@ -229,5 +229,8 @@ Global flags:
   -q, --quiet           Suppress informational stdout output
       --journal-dir P   Override ~/.claude/journal/ (env: CLAST_JOURNAL_DIR)
       --projects-dir P  Override ~/.claude/projects/ (env: CLAST_PROJECTS_DIR)
+
+The user-facing porcelain (LLM-aware) is `clast`. Run `clast --help` for
+the `wake` and `brief` subcommands.
 EOF
 }

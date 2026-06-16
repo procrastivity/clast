@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-breadcrumb"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 export TZ=UTC
 FROZEN_EPOCH="$(date -u -d '2026-05-30T14:23:00Z' +%s)"
 LATER_EPOCH="$(date -u -d '2026-05-30T16:07:00Z' +%s)"

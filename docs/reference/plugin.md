@@ -4,7 +4,7 @@
 
 Three skills total: `day-wakeup`, `wakeup`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
 
-The core principle: skills are **thin LLM layers over the CLI**. Every skill follows the same shape: gather data via `clast` subcommands, do the LLM work (drafting, synthesis, prompting), then write back via `clast` subcommands. Skills never read or write the journal directly.
+The core principle: skills are **thin LLM layers over the CLI**. Every skill follows the same shape: gather data via `clast-plumbing` subcommands, do the LLM work (drafting, synthesis, prompting), then write back via `clast-plumbing` subcommands. Skills never read or write the journal directly.
 
 ---
 
@@ -18,14 +18,14 @@ A `SKILL.md` file has YAML frontmatter (name + description) and a body that beco
 
 **Location:** `.claude-plugin/skills/day-wakeup/SKILL.md`
 
-**Purpose:** The primary curation point. Snapshot fresh transcripts, iterate yesterday's sessions, generate a draft entry per session, prompt the user to accept/edit/promote, write accepted entries via `clast entries write`.
+**Purpose:** The primary curation point. Snapshot fresh transcripts, iterate yesterday's sessions, generate a draft entry per session, prompt the user to accept/edit/promote, write accepted entries via `clast-plumbing entries write`.
 
 ### `SKILL.md` content
 
 ```markdown
 ---
 name: day-wakeup
-description: Generate curated journal entries from yesterday's Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday's sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.
+description: Generate curated journal entries from yesterday's Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday's sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.
 ---
 
 # Day Wakeup
@@ -40,10 +40,10 @@ The transcripts themselves are captured automatically by the SessionStart hook +
 
 ## Step 1: Ensure fresh data
 
-Run `clast snapshot` (idempotent; silent on no-op). This guarantees we're not missing anything that ran since the last hook fire.
+Run `clast-plumbing snapshot` (idempotent; silent on no-op). This guarantees we're not missing anything that ran since the last hook fire.
 
 ```bash
-clast snapshot
+clast-plumbing snapshot
 ```
 
 Errors here are non-fatal — proceed even if it fails, just warn the user.
@@ -51,7 +51,7 @@ Errors here are non-fatal — proceed even if it fails, just warn the user.
 ## Step 2: Enumerate uncurated sessions
 
 ```bash
-clast sessions --since -30d --json
+clast-plumbing sessions --since -30d --json
 ```
 
 Filter to sessions with `curated: false`. If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
@@ -66,13 +66,13 @@ For each session in the list:
 
 1. Read session details:
    ```bash
-   clast show <session-id> --full --turns 8 --json
+   clast-plumbing show <session-id> --full --turns 8 --json
    ```
    This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
 
 2. Read breadcrumbs for this project from yesterday:
    ```bash
-   clast breadcrumb --read --project <slug> --day yesterday
+   clast-plumbing breadcrumb --read --project <slug> --day yesterday
    ```
 
 3. Generate a draft entry using the **draft generation prompt** (see below).
@@ -82,7 +82,7 @@ For each session in the list:
 5. Present the **promotion question** (see below) via AskUserQuestion.
 
 6. Handle the response:
-   - **Accept** (any combination of accept-flavored options): pipe the draft to `clast entries write` via stdin.
+   - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
    - **Stop here**: end the entire `/day-wakeup` flow, leaving remaining sessions uncurated (user can resume tomorrow).
@@ -107,7 +107,7 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 ## Draft generation prompt
 
-The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the standalone `clast-wake` script:
+The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the porcelain `clast wake` subcommand:
 
 - **System prompt:** [`lib/clast/prompts/day-wakeup-draft-system.md`](../../lib/clast/prompts/day-wakeup-draft-system.md)
 - **User prompt template:** [`lib/clast/prompts/day-wakeup-draft-user.md`](../../lib/clast/prompts/day-wakeup-draft-user.md)
@@ -151,10 +151,10 @@ If the user selects `Edit`:
 When the user accepts:
 
 1. Extract the suggested tags from the draft (the user may have edited them).
-2. Pipe the entry body (without the suggested-tags trailer) to `clast entries write`:
+2. Pipe the entry body (without the suggested-tags trailer) to `clast-plumbing entries write`:
 
 ```bash
-clast entries write \
+clast-plumbing entries write \
   --session <session-id> \
   --slug <session-slug> \
   --tags <tag1>,<tag2>,<tag3> \
@@ -166,14 +166,14 @@ clast entries write \
 
 3. If the write succeeds, append a one-line confirmation to the running summary.
 
-For promoted items (decisions, common-issues, workflows): currently these are tracked inside the entry's body for v1. **TODO for v1.1: separate `clast decisions write` / `clast common-issues write` / `clast workflows write` subcommands and a directory structure to match.** Note this in the user-facing summary so the user knows they're folded into the entry for now.
+For promoted items (decisions, common-issues, workflows): currently these are tracked inside the entry's body for v1. **TODO for v1.1: separate `clast-plumbing decisions write` / `clast-plumbing common-issues write` / `clast-plumbing workflows write` subcommands and a directory structure to match.** Note this in the user-facing summary so the user knows they're folded into the entry for now.
 
 ## Edge cases
 
 - **No sessions from yesterday**: print "No sessions from yesterday." and stop.
 - **All sessions already curated**: print "All sessions from yesterday already curated." and stop.
-- **`clast snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
-- **`clast show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
+- **`clast-plumbing snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
+- **`clast-plumbing show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
 - **User says "do them all without prompting"**: not a v1 feature. Each session gets its own AskUserQuestion. The friction is intentional — it's where curation happens.
 ```
 
@@ -214,10 +214,10 @@ Synthesize a briefing for the current (or named) project so the user can resume 
 If the user passed a slug as an argument (`/wakeup xesapps`), use it directly. Otherwise resolve from current working directory:
 
 ```bash
-clast registry resolve "$(pwd)"
+clast-plumbing registry resolve "$(pwd)"
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast registry add .` first, or invoke as `/wakeup <slug>`." and stop.
+If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/wakeup <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -225,19 +225,19 @@ In parallel:
 
 ```bash
 # Recent curated entries for this project (newest first)
-clast entries --project <slug> --limit 5 --json
+clast-plumbing entries --project <slug> --limit 5 --json
 
 # Today's breadcrumbs for this project
-clast breadcrumb --read --project <slug> --day today
+clast-plumbing breadcrumb --read --project <slug> --day today
 
 # Today's session activity (if any — user might have started already)
-clast sessions --day today --project <slug> --json
+clast-plumbing sessions --day today --project <slug> --json
 ```
 
 For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):
 
 ```bash
-clast entries read <entry-path>
+clast-plumbing entries read <entry-path>
 ```
 
 ## Step 3: Synthesize the briefing
@@ -273,18 +273,18 @@ End with one of:
 
 ## Step 4: Don't write anything
 
-Wakeup is read-only. Never invoke `clast entries write` or `clast breadcrumb` from this skill.
+Wakeup is read-only. Never invoke `clast-plumbing entries write` or `clast-plumbing breadcrumb` from this skill.
 
 ## Edge cases
 
-- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast sessions --project <slug>` to see what's available." and stop.
+- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 ```
 
 ### Synthesis prompt — internal
 
-The shared templates for this briefing live alongside the day-wakeup prompts in `lib/clast/prompts/` so the plugin skill and the standalone [`clast-brief`](../guides/run-without-claude-code.md) script stay in sync:
+The shared templates for this briefing live alongside the day-wakeup prompts in `lib/clast/prompts/` so the plugin skill and the porcelain [`clast brief`](../guides/run-without-claude-code.md) script stay in sync:
 
 - **System prompt:** [`lib/clast/prompts/brief-system.md`](../../lib/clast/prompts/brief-system.md)
 - **User prompt template:** [`lib/clast/prompts/brief-user.md`](../../lib/clast/prompts/brief-user.md)
@@ -316,7 +316,7 @@ For the "Suggested next step": prefer the most recent entry's "Open threads" con
 
 ## Skill 3: `breadcrumb` (optional, v1.1)
 
-**Recommendation:** defer to v1.1. The bare `clast breadcrumb "<text>"` command is already trivial. A skill wrapper adds value mostly when context inference is needed.
+**Recommendation:** defer to v1.1. The bare `clast-plumbing breadcrumb "<text>"` command is already trivial. A skill wrapper adds value mostly when context inference is needed.
 
 If shipped:
 
@@ -335,7 +335,7 @@ Append a one-line hint to today's breadcrumb file for the current project.
 ## Step 1: Resolve project
 
 ```bash
-clast registry resolve "$(pwd)"
+clast-plumbing registry resolve "$(pwd)"
 ```
 
 If unresolved, ask the user: "Which project should this breadcrumb attach to?" Show registered slugs as options via AskUserQuestion, plus a "Global (no project)" option.
@@ -347,9 +347,9 @@ Take everything after the skill trigger as the breadcrumb text. If the user invo
 ## Step 3: Write
 
 ```bash
-clast breadcrumb --project <slug> "<text>"
+clast-plumbing breadcrumb --project <slug> "<text>"
 # or for global:
-clast breadcrumb --global "<text>"
+clast-plumbing breadcrumb --global "<text>"
 ```
 
 ## Step 4: Confirm
@@ -386,14 +386,14 @@ That's it. Don't summarize, don't ask follow-up questions, don't suggest next st
 #!/usr/bin/env bash
 # hooks/snapshot.sh
 #
-# Fired on Claude Code SessionStart. Backgrounds `clast snapshot` so it doesn't
+# Fired on Claude Code SessionStart. Backgrounds `clast-plumbing snapshot` so it doesn't
 # block session start. Silent if clast isn't installed — the plugin can still
 # load cleanly even if the CLI isn't on PATH.
 #
 # Idempotent. Safe to run repeatedly.
 
-if command -v clast >/dev/null 2>&1; then
-  (clast snapshot >/dev/null 2>&1 &)
+if command -v clast-plumbing >/dev/null 2>&1; then
+  (clast-plumbing snapshot >/dev/null 2>&1 &)
 fi
 exit 0
 ```
@@ -421,7 +421,7 @@ Lives in `examples/cron/crontab.sample`:
 ```cron
 # Every hour at :05, capture any new transcripts.
 # Idempotent and silent on no-op, so safe to run frequently.
-5 * * * * /usr/local/bin/clast snapshot >/dev/null 2>&1
+5 * * * * /usr/local/bin/clast-plumbing snapshot >/dev/null 2>&1
 ```
 
 For systemd-timer users: `examples/cron/systemd-timer.sample` should provide a `.service` + `.timer` pair with the same behavior.

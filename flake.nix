@@ -47,25 +47,15 @@
             install -m644 README.md $out/share/clast/README.md
             install -m644 LICENSE $out/share/clast/LICENSE
             install -m755 bin/clast $out/bin/clast
-            wrapProgram $out/bin/clast \
-              --set CLAST_LIB "$out/lib/clast" \
-              --prefix PATH : ${pkgs.lib.makeBinPath [
-                pkgs.jq
-                pkgs.coreutils
-                pkgs.findutils
-                pkgs.gawk
-                pkgs.git
-                pkgs.gnugrep
-                pkgs.inetutils
-              ]}
-
-            # Standalone LLM helpers. They call clast/curl/jq directly and
-            # resolve prompts via dirname($0)/../lib/clast/prompts, so they need
-            # $out/bin (for clast) and the toolset on PATH, but not CLAST_LIB.
-            install -m755 bin/clast-wake $out/bin/clast-wake
-            install -m755 bin/clast-brief $out/bin/clast-brief
-            for helper in clast-wake clast-brief; do
-              wrapProgram $out/bin/$helper \
+            install -m755 bin/clast-plumbing $out/bin/clast-plumbing
+            # Both binaries source CLAST_LIB and shell out to each other
+            # (porcelain → plumbing). They share the same wrap so curl/jq
+            # are on PATH for the porcelain's LLM calls and the plumbing
+            # binary itself is reachable from within `clast wake` / `clast
+            # brief`.
+            for bin in clast clast-plumbing; do
+              wrapProgram $out/bin/$bin \
+                --set CLAST_LIB "$out/lib/clast" \
                 --prefix PATH : "$out/bin" \
                 --prefix PATH : ${pkgs.lib.makeBinPath [
                   pkgs.curl

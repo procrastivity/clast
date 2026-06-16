@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hooks/snapshot.sh — SessionStart hook. Backgrounds `clast snapshot`.
+# hooks/snapshot.sh — SessionStart hook. Backgrounds `clast-plumbing snapshot`.
 # Idempotent. Best-effort: never propagates a non-zero exit.
 # shellcheck shell=bash
 
@@ -11,10 +11,10 @@ _plugin_root="$(cd "$_snap_dir/.." && pwd)"
 # Prefer the bundled binary (version-matched to this plugin).
 # Fall back to a system-level install on PATH.
 _clast=""
-if [[ -x "$_plugin_root/bin/clast" ]]; then
-  _clast="$_plugin_root/bin/clast"
-elif command -v clast >/dev/null 2>&1; then
-  _clast="clast"
+if [[ -x "$_plugin_root/bin/clast-plumbing" ]]; then
+  _clast="$_plugin_root/bin/clast-plumbing"
+elif command -v clast-plumbing >/dev/null 2>&1; then
+  _clast="clast-plumbing"
 fi
 
 if [[ -n "$_clast" ]]; then

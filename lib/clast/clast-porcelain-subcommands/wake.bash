@@ -1,32 +1,22 @@
-#!/usr/bin/env bash
-# clast-wake — LLM-powered day curation without Claude Code.
+# clast wake — LLM-powered interactive day curation.
 #
-# Replicates the /day-wakeup plugin skill using an OpenAI-compatible
-# chat completions endpoint. Calls clast commands for data, assembles
-# prompts, calls the LLM via curl, presents drafts interactively.
+# Replicates the /day-wakeup plugin skill using an OpenAI-compatible chat
+# completions endpoint. Calls clast-plumbing for data, assembles prompts,
+# calls the LLM via curl, presents drafts interactively.
 #
-# Required env vars:
-#   CLAST_LLM_BASE_URL  — e.g. https://api.openai.com/v1
-#   CLAST_LLM_API_KEY   — bearer token
-#   CLAST_LLM_MODEL     — e.g. gpt-4o, llama3
-set -euo pipefail
+# Usage: clast wake
+# shellcheck shell=bash
 
-CLAST_WAKE_DIR="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+# --- Small helpers -----------------------------------------------------------
 
-# ── Helpers ──────────────────────────────────────────────────────────
-
-die() { printf 'clast-wake: %s\n' "$1" >&2; exit "${2:-1}"; }
-warn() { printf 'clast-wake: warning: %s\n' "$1" >&2; }
-info() { printf '%s\n' "$1"; }
-
-slugify() {
+_clast_wake_slugify() {
   local s="$1"
   s="${s,,}"
   s="$(printf '%s' "$s" | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
   printf '%s' "${s:0:60}"
 }
 
-separator() {
+_clast_wake_separator() {
   local label="$1"
   local width=72
   local pad=$(( width - ${#label} - 4 ))
@@ -37,141 +27,25 @@ separator() {
   printf '── %s %s\n' "$label" "$dashes"
 }
 
-# ── Preflight ────────────────────────────────────────────────────────
+# --- Preflight ---------------------------------------------------------------
 
-preflight() {
+_clast_wake_preflight() {
   if [[ ! -t 0 ]]; then
-    die "clast-wake requires an interactive terminal (stdin is not a tty)."
+    clast_porcelain_die "clast wake requires an interactive terminal (stdin is not a tty)."
   fi
-
-  for tool in clast curl jq; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      die "required tool not found: $tool"
-    fi
-  done
-
-  local missing=0
-  if [[ -z "${CLAST_LLM_BASE_URL:-}" ]]; then
-    warn "CLAST_LLM_BASE_URL not set"; missing=1
-  fi
-  if [[ -z "${CLAST_LLM_API_KEY:-}" ]]; then
-    warn "CLAST_LLM_API_KEY not set"; missing=1
-  fi
-  if [[ -z "${CLAST_LLM_MODEL:-}" ]]; then
-    warn "CLAST_LLM_MODEL not set"; missing=1
-  fi
-
-  if (( missing )); then
-    cat >&2 <<'EOF'
-
-Set these env vars before running clast-wake:
-
-  export CLAST_LLM_BASE_URL="https://api.openai.com/v1"
-  export CLAST_LLM_API_KEY="sk-..."
-  export CLAST_LLM_MODEL="gpt-4o"
-
-Or for a local model (ollama, vllm, etc.):
-
-  export CLAST_LLM_BASE_URL="http://localhost:11434/v1"
-  export CLAST_LLM_API_KEY="unused"
-  export CLAST_LLM_MODEL="llama3"
-EOF
-    exit 1
-  fi
+  clast_porcelain_preflight_llm
 }
 
-# ── LLM call ─────────────────────────────────────────────────────────
+# --- User prompt -------------------------------------------------------------
 
-llm_chat() {
-  local system_msg="$1"
-  local user_msg="$2"
-
-  local payload
-  payload="$(jq -cn \
-    --arg model "$CLAST_LLM_MODEL" \
-    --arg system "$system_msg" \
-    --arg user "$user_msg" \
-    '{
-      model: $model,
-      messages: [
-        {role: "system", content: $system},
-        {role: "user", content: $user}
-      ],
-      temperature: 0.3
-    }')"
-
-  local response http_code body
-  response="$(curl -s -w '\n%{http_code}' \
-    "${CLAST_LLM_BASE_URL}/chat/completions" \
-    -H "Authorization: Bearer $CLAST_LLM_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "$payload" 2>&1)" || true
-
-  http_code="$(tail -n1 <<<"$response")"
-  body="$(sed '$d' <<<"$response")"
-
-  if [[ "$http_code" != "200" ]]; then
-    warn "LLM API returned HTTP $http_code"
-    if [[ -n "$body" ]]; then
-      local err_msg
-      err_msg="$(jq -r '.error.message // .error // .' <<<"$body" 2>/dev/null || echo "$body")"
-      warn "$err_msg"
-    fi
-    return 1
-  fi
-
-  local content
-  content="$(jq -r '.choices[0].message.content // empty' <<<"$body" 2>/dev/null)" || {
-    warn "failed to parse LLM response"
-    return 1
-  }
-
-  if [[ -z "$content" ]]; then
-    warn "LLM returned empty content"
-    return 1
-  fi
-
-  printf '%s' "$content"
-}
-
-# ── Prompt template ──────────────────────────────────────────────────
-
-resolve_prompt_dir() {
-  local dir="$CLAST_WAKE_DIR/lib/clast/prompts"
-  if [[ -d "$dir" ]]; then
-    printf '%s' "$dir"
-    return
-  fi
-  local installed
-  for installed in /usr/local/lib/clast/prompts "$HOME/.local/lib/clast/prompts"; do
-    if [[ -d "$installed" ]]; then
-      printf '%s' "$installed"
-      return
-    fi
-  done
-  die "cannot find prompts directory (checked $dir and install paths)"
-}
-
-load_system_prompt() {
-  local prompt_dir
-  prompt_dir="$(resolve_prompt_dir)"
-  local file="$prompt_dir/day-wakeup-draft-system.md"
-  if [[ ! -r "$file" ]]; then
-    die "system prompt not found: $file"
-  fi
-  cat "$file"
-}
-
-build_user_prompt() {
+_clast_wake_build_user_prompt() {
   local project="$1" branch="$2" start="$3" end="$4" msg_count="$5"
   local first_turns="$6" last_turns="$7" breadcrumbs="$8"
 
-  local prompt_dir
-  prompt_dir="$(resolve_prompt_dir)"
-  local template_file="$prompt_dir/day-wakeup-draft-user.md"
+  local template_file template
+  template_file="$(clast_porcelain_user_prompt_file day-wakeup-draft-user)"
 
-  if [[ -r "$template_file" ]]; then
-    local template
+  if [[ -n "$template_file" ]]; then
     template="$(cat "$template_file")"
     template="${template//\{\{project\}\}/${project}}"
     template="${template//\{\{branch\}\}/${branch:-unknown}}"
@@ -183,7 +57,7 @@ build_user_prompt() {
     template="${template//\{\{breadcrumbs\}\}/${breadcrumbs:-None.}}"
     printf '%s' "$template"
   else
-    warn "user prompt template not found: $template_file — using inline fallback"
+    clast_porcelain_warn "user prompt template not found: day-wakeup-draft-user.md — using inline fallback"
     cat <<EOF
 Session metadata:
 - Project: ${project}
@@ -204,34 +78,31 @@ EOF
   fi
 }
 
-# ── Draft parsing ────────────────────────────────────────────────────
+# --- Draft parsing -----------------------------------------------------------
 
-extract_title() {
+_clast_wake_extract_title() {
   local draft="$1"
-  local title
-  title="$(grep -m1 '^# Session:' <<<"$draft" | sed 's/^# Session:[[:space:]]*//')"
-  printf '%s' "$title"
+  grep -m1 '^# Session:' <<<"$draft" | sed 's/^# Session:[[:space:]]*//'
 }
 
-extract_tags() {
+_clast_wake_extract_tags() {
   local draft="$1"
   local tags
   tags="$(grep -i '^Suggested tags:' <<<"$draft" | sed 's/^[Ss]uggested tags:[[:space:]]*//')"
-  tags="$(printf '%s' "$tags" | sed 's/[[:space:]]*,[[:space:]]*/,/g')"
-  printf '%s' "$tags"
+  printf '%s' "$tags" | sed 's/[[:space:]]*,[[:space:]]*/,/g'
 }
 
-strip_tags_trailer() {
+_clast_wake_strip_tags_trailer() {
   local draft="$1"
   printf '%s' "$draft" | sed '/^$/{ N; /\n[Ss]uggested tags:/d; }' | sed '/^[Ss]uggested tags:/d'
 }
 
-# ── Session slug ─────────────────────────────────────────────────────
+# --- Session slug ------------------------------------------------------------
 
-get_session_slug() {
+_clast_wake_get_session_slug() {
   local snapshot_path="$1" draft_title="$2"
   local journal_dir
-  journal_dir="$(clast whereami 2>/dev/null | grep '^journal_dir:' | awk '{print $2}')" || true
+  journal_dir="$(clast-plumbing whereami 2>/dev/null | grep '^journal_dir:' | awk '{print $2}')" || true
   if [[ -z "$journal_dir" ]]; then
     journal_dir="${HOME}/.claude/journal"
   fi
@@ -242,22 +113,22 @@ get_session_slug() {
     local ai_title
     ai_title="$(jq -r 'select(.type == "ai-title") | .aiTitle' "$abs_path" 2>/dev/null | tail -1)" || true
     if [[ -n "$ai_title" && "$ai_title" != "null" ]]; then
-      slugify "$ai_title"
+      _clast_wake_slugify "$ai_title"
       return
     fi
   fi
 
   if [[ -n "$draft_title" ]]; then
-    slugify "$draft_title"
+    _clast_wake_slugify "$draft_title"
     return
   fi
 
   printf 'session'
 }
 
-# ── Interactive menu ─────────────────────────────────────────────────
+# --- Interactive menu --------------------------------------------------------
 
-prompt_choice() {
+_clast_wake_prompt_choice() {
   local choice
   printf '\n  [a] Accept    [e] Edit    [d] Dismiss    [s] Skip    [q] Stop here\n' >/dev/tty
   printf '  Choice: ' >/dev/tty
@@ -266,23 +137,22 @@ prompt_choice() {
   printf '%s' "$choice"
 }
 
-prompt_edit_feedback() {
+_clast_wake_prompt_edit_feedback() {
   local feedback
   printf '\n  What should change? ' >/dev/tty
   read -r feedback </dev/tty
   printf '%s' "$feedback"
 }
 
-# ── Triage ───────────────────────────────────────────────────────────
+# --- Triage ------------------------------------------------------------------
 
 _clast_wake_triage() {
   local uncurated="$1" total="$2" day_count="$3"
   local first_day="$4" last_day="$5" project_count="$6"
 
-  info "Found $total uncurated session(s) across $day_count day(s) ($first_day to $last_day)." >/dev/tty
+  clast_porcelain_info "Found $total uncurated session(s) across $day_count day(s) ($first_day to $last_day)." >/dev/tty
   printf '\n' >/dev/tty
 
-  # Show per-day breakdown
   local breakdown
   breakdown="$(jq -r '
     group_by(.day_bucket) | sort_by(.[0].day_bucket) | .[] |
@@ -315,13 +185,13 @@ _clast_wake_triage() {
       printf '  How many days back? ' >/dev/tty
       read -r days </dev/tty
       if ! [[ "$days" =~ ^[1-9][0-9]*$ ]]; then
-        warn "invalid number — processing all sessions"
+        clast_porcelain_warn "invalid number — processing all sessions"
         printf '%s' "$uncurated"
         return
       fi
       local cutoff
       cutoff="$(date -d "-${days} days" +%Y-%m-%d 2>/dev/null)" || {
-        warn "failed to compute date — processing all sessions"
+        clast_porcelain_warn "failed to compute date — processing all sessions"
         printf '%s' "$uncurated"
         return
       }
@@ -332,28 +202,27 @@ _clast_wake_triage() {
       printf '  Keep how many days? (dismiss everything older) ' >/dev/tty
       read -r days_keep </dev/tty
       if ! [[ "$days_keep" =~ ^[1-9][0-9]*$ ]]; then
-        warn "invalid number — processing all sessions"
+        clast_porcelain_warn "invalid number — processing all sessions"
         printf '%s' "$uncurated"
         return
       fi
       local cutoff_keep
       cutoff_keep="$(date -d "-${days_keep} days" +%Y-%m-%d 2>/dev/null)" || {
-        warn "failed to compute date — processing all sessions"
+        clast_porcelain_warn "failed to compute date — processing all sessions"
         printf '%s' "$uncurated"
         return
       }
-      # Dismiss older sessions
       local old_ids
       old_ids="$(jq -r "[.[] | select(.day_bucket < \"$cutoff_keep\")] | .[].session_id" <<<"$uncurated")"
       local dismiss_count=0
       local old_id
       while IFS= read -r old_id; do
         [[ -z "$old_id" ]] && continue
-        clast sessions dismiss "$old_id" --reason "bulk dismiss via clast-wake triage" 2>/dev/null
+        clast-plumbing sessions dismiss "$old_id" --reason "bulk dismiss via clast wake triage" 2>/dev/null
         dismiss_count=$(( dismiss_count + 1 ))
       done <<<"$old_ids"
       if (( dismiss_count > 0 )); then
-        info "  Dismissed $dismiss_count older session(s)." >/dev/tty
+        clast_porcelain_info "  Dismissed $dismiss_count older session(s)." >/dev/tty
       fi
       jq -c "[.[] | select(.day_bucket >= \"$cutoff_keep\")]" <<<"$uncurated"
       ;;
@@ -361,26 +230,26 @@ _clast_wake_triage() {
       printf '[]'
       ;;
     *)
-      warn "unknown choice — processing all sessions"
+      clast_porcelain_warn "unknown choice — processing all sessions"
       printf '%s' "$uncurated"
       ;;
   esac
 }
 
-# ── Main ─────────────────────────────────────────────────────────────
+# --- Main --------------------------------------------------------------------
 
-main() {
-  preflight
+clast_cmd_wake() {
+  _clast_wake_preflight
 
-  info "Snapshotting fresh transcripts..."
-  if ! clast snapshot 2>/dev/null; then
-    warn "clast snapshot failed — proceeding with existing data"
+  clast_porcelain_info "Snapshotting fresh transcripts..."
+  if ! clast-plumbing snapshot 2>/dev/null; then
+    clast_porcelain_warn "clast-plumbing snapshot failed — proceeding with existing data"
   fi
 
-  info "Checking for uncurated or stale sessions..."
+  clast_porcelain_info "Checking for uncurated or stale sessions..."
   local sessions_json
-  sessions_json="$(clast --json sessions --since -30d 2>/dev/null)" || {
-    die "failed to list sessions"
+  sessions_json="$(clast-plumbing --json sessions --since -30d 2>/dev/null)" || {
+    clast_porcelain_die "failed to list sessions"
   }
 
   local uncurated
@@ -389,8 +258,8 @@ main() {
   total="$(jq 'length' <<<"$uncurated")"
 
   if (( total == 0 )); then
-    info "Nothing to curate — all sessions are curated or dismissed."
-    exit 0
+    clast_porcelain_info "Nothing to curate — all sessions are curated or dismissed."
+    return 0
   fi
 
   local day_count first_day last_day project_count
@@ -403,13 +272,13 @@ main() {
     uncurated="$(_clast_wake_triage "$uncurated" "$total" "$day_count" "$first_day" "$last_day" "$project_count")"
     total="$(jq 'length' <<<"$uncurated")"
     if (( total == 0 )); then
-      info "Nothing left to curate."
-      exit 0
+      clast_porcelain_info "Nothing left to curate."
+      return 0
     fi
     project_count="$(jq '[.[].project] | unique | length' <<<"$uncurated")"
   fi
 
-  info "Processing $total session(s) across $project_count project(s)."
+  clast_porcelain_info "Processing $total session(s) across $project_count project(s)."
   printf '\n'
 
   local curated_count=0 skipped_count=0 dismissed_count=0
@@ -440,12 +309,12 @@ main() {
     [[ -n "$branch" && "$branch" != "null" ]] && label="$label, $branch"
     label="$label)"
 
-    separator "$label"
-    info "Gathering context..."
+    _clast_wake_separator "$label"
+    clast_porcelain_info "Gathering context..."
 
     local show_json
-    show_json="$(clast --json show "$sid" --full --turns 8 2>/dev/null)" || {
-      warn "failed to read session $sid — skipping"
+    show_json="$(clast-plumbing --json show "$sid" --full --turns 8 2>/dev/null)" || {
+      clast_porcelain_warn "failed to read session $sid — skipping"
       skipped_count=$(( skipped_count + 1 ))
       i=$(( i + 1 ))
       continue
@@ -463,14 +332,14 @@ main() {
     ' <<<"$show_json" 2>/dev/null)" || true
 
     local breadcrumbs=""
-    breadcrumbs="$(clast breadcrumb --read --project "$project" --day yesterday 2>/dev/null)" || true
+    breadcrumbs="$(clast-plumbing breadcrumb --read --project "$project" --day yesterday 2>/dev/null)" || true
 
     local user_prompt
-    user_prompt="$(build_user_prompt "$project" "$branch" "$start_ts" "$end_ts" "$msg_count" \
+    user_prompt="$(_clast_wake_build_user_prompt "$project" "$branch" "$start_ts" "$end_ts" "$msg_count" \
       "$first_turns" "$last_turns" "$breadcrumbs")"
 
     local system_prompt
-    system_prompt="$(load_system_prompt)"
+    system_prompt="$(clast_porcelain_load_system_prompt day-wakeup-draft-system)"
 
     local draft="" edit_extra=""
     local drafting=1
@@ -484,10 +353,10 @@ main() {
 Revisions requested by user: ${edit_extra}"
       fi
 
-      info "Generating draft..."
-      if ! draft="$(llm_chat "$full_system" "$full_user")"; then
+      clast_porcelain_info "Generating draft..."
+      if ! draft="$(clast_porcelain_llm_chat "$full_system" "$full_user")"; then
         printf '\n'
-        warn "LLM call failed for session $sid"
+        clast_porcelain_warn "LLM call failed for session $sid"
         local retry
         printf '  [r] Retry    [s] Skip    [q] Stop\n  Choice: '
         read -r -n1 retry </dev/tty
@@ -503,39 +372,39 @@ Revisions requested by user: ${edit_extra}"
       printf '\n'
 
       local choice
-      choice="$(prompt_choice)"
+      choice="$(_clast_wake_prompt_choice)"
 
       case "$choice" in
         a|A)
           local title tags body slug
-          title="$(extract_title "$draft")"
-          tags="$(extract_tags "$draft")"
-          body="$(strip_tags_trailer "$draft")"
-          slug="$(get_session_slug "$snapshot_path" "$title")"
+          title="$(_clast_wake_extract_title "$draft")"
+          tags="$(_clast_wake_extract_tags "$draft")"
+          body="$(_clast_wake_strip_tags_trailer "$draft")"
+          slug="$(_clast_wake_get_session_slug "$snapshot_path" "$title")"
 
           local write_args=(entries write --session "$sid" --slug "$slug" --body-stdin)
           [[ -n "$tags" ]] && write_args+=(--tags "$tags")
           [[ -n "$title" ]] && write_args+=(--title "$title")
 
           local write_result
-          if write_result="$(printf '%s\n' "$body" | clast "${write_args[@]}" 2>&1)"; then
-            info "  $write_result"
+          if write_result="$(printf '%s\n' "$body" | clast-plumbing "${write_args[@]}" 2>&1)"; then
+            clast_porcelain_info "  $write_result"
             curated_count=$(( curated_count + 1 ))
             curated_projects+=("$project")
           else
-            warn "failed to write entry: $write_result"
+            clast_porcelain_warn "failed to write entry: $write_result"
           fi
           drafting=0
           ;;
         e|E)
-          edit_extra="$(prompt_edit_feedback)"
+          edit_extra="$(_clast_wake_prompt_edit_feedback)"
           ;;
         d|D)
-          if clast sessions dismiss "$sid" --reason "dismissed via clast-wake" 2>/dev/null; then
-            info "  Dismissed."
+          if clast-plumbing sessions dismiss "$sid" --reason "dismissed via clast wake" 2>/dev/null; then
+            clast_porcelain_info "  Dismissed."
             dismissed_count=$(( dismissed_count + 1 ))
           else
-            warn "failed to dismiss session $sid"
+            clast_porcelain_warn "failed to dismiss session $sid"
           fi
           drafting=0
           ;;
@@ -548,7 +417,7 @@ Revisions requested by user: ${edit_extra}"
           drafting=0
           ;;
         *)
-          info "  Unknown choice '$choice' — skipping."
+          clast_porcelain_info "  Unknown choice '$choice' — skipping."
           skipped_count=$(( skipped_count + 1 ))
           drafting=0
           ;;
@@ -565,15 +434,13 @@ Revisions requested by user: ${edit_extra}"
   [[ -z "$unique_projects" || "$unique_projects" == "0" ]] && unique_projects=0
 
   printf '\n'
-  separator "Summary"
-  info "  Curated: $curated_count session(s) across $unique_projects project(s)"
+  _clast_wake_separator "Summary"
+  clast_porcelain_info "  Curated: $curated_count session(s) across $unique_projects project(s)"
   if (( dismissed_count > 0 )); then
-    info "  Dismissed: $dismissed_count session(s)"
+    clast_porcelain_info "  Dismissed: $dismissed_count session(s)"
   fi
-  info "  Skipped: $skipped_count session(s)"
+  clast_porcelain_info "  Skipped: $skipped_count session(s)"
   if (( remaining > 0 )); then
-    info "  Remaining: $remaining session(s) (stopped early)"
+    clast_porcelain_info "  Remaining: $remaining session(s) (stopped early)"
   fi
 }
-
-main "$@"

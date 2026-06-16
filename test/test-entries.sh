@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-entries"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 FROZEN_EPOCH=$(date -d "2026-05-30T14:30:00Z" +%s)
 
 # Subprocesses inherit TZ=UTC so local time math (clast_today + HHMM) is

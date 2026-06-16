@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-registry-cmd"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 
 # --- registry list (human) against the fixture ------------------------------
 setup_test_journal >/dev/null

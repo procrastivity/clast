@@ -38,7 +38,7 @@ in your shell profile to get the same effect as the planned TOML keys.
 
 ### `[llm]`
 
-Only used by the standalone [`clast-wake` and `clast-brief`](../guides/run-without-claude-code.md) scripts, which call an OpenAI-compatible chat-completions endpoint directly. The Claude Code plugin skills do **not** read these — they run inside Claude Code and need no API key. There is no TOML equivalent; these are env-only.
+Only used by the porcelain [`clast wake` and `clast brief`](../guides/run-without-claude-code.md) subcommands, which call an OpenAI-compatible chat-completions endpoint directly. The Claude Code plugin skills do **not** read these — they run inside Claude Code and need no API key. There is no TOML equivalent; these are env-only.
 
 | Env var | Example | Meaning |
 |---|---|---|
@@ -46,7 +46,7 @@ Only used by the standalone [`clast-wake` and `clast-brief`](../guides/run-witho
 | `CLAST_LLM_API_KEY` | `sk-…` | API key sent as the bearer token. |
 | `CLAST_LLM_MODEL` | `gpt-4o` | Model name passed in the request. |
 
-All three must be set for `clast-wake`/`clast-brief` to run.
+All three must be set for `clast wake`/`clast brief` to run.
 
 ## Sample
 

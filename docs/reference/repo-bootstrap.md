@@ -23,22 +23,25 @@ clast/
 │           └── SKILL.md
 ├── hooks/
 │   ├── hooks.json
-│   └── snapshot.sh                 # SessionStart → backgrounds `clast snapshot`
+│   └── snapshot.sh                 # SessionStart → backgrounds `clast-plumbing snapshot`
 ├── bin/
-│   ├── clast                       # single dispatcher; sources libs, dispatches subcommand
-│   ├── clast-wake                  # standalone LLM day-curation (no Claude Code; see guides/run-without-claude-code.md)
-│   └── clast-brief                 # standalone LLM project briefing (no Claude Code)
+│   ├── clast                       # porcelain (LLM-aware): `clast wake` / `clast brief`
+│   └── clast-plumbing              # plumbing dispatcher: sources libs, dispatches subcommand
 ├── lib/clast/
 │   ├── clast-lib.bash              # shared: I/O, JSON, date math, path resolution
 │   ├── clast-decode-lib.bash       # segment ↔ path decoder with collision logic
 │   ├── clast-manifest-lib.bash     # manifest read/append/lookup/dedupe
 │   ├── clast-registry-lib.bash     # registry read/write/resolve, alias handling
 │   ├── clast-dismissed-lib.bash    # dismissed-session tracking (.dismissed.jsonl)
-│   ├── prompts/                    # shared LLM prompt templates (plugin skills + standalone scripts)
+│   ├── clast-porcelain-lib.bash    # porcelain-only helpers (LLM call, prompts, preflight)
+│   ├── prompts/                    # shared LLM prompt templates (plugin skills + porcelain)
 │   │   ├── day-wakeup-draft-system.md
 │   │   ├── day-wakeup-draft-user.md
 │   │   ├── brief-system.md
 │   │   └── brief-user.md
+│   ├── clast-porcelain-subcommands/
+│   │   ├── wake.bash               # `clast wake`
+│   │   └── brief.bash              # `clast brief`
 │   └── clast-subcommands/
 │       ├── snapshot.bash
 │       ├── projects.bash
