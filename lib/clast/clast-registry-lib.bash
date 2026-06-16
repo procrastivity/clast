@@ -61,25 +61,24 @@ clast_registry_resolve() {
   local arr
   arr="$(clast_registry_list_json)"
 
-  # Segment input: starts with `-`. Try raw segment first (handles
-  # segments registered as-is), then decode to filesystem paths.
+  # Segment input: starts with `-`. The candidate set is the raw segment
+  # (handles segments registered as-is) followed by every dash-decoded
+  # filesystem path. Test them all in ONE jq pass — first candidate in
+  # order to match a registry .path/.aliases wins — instead of forking one
+  # jq per candidate, which for deep paths meant ~hundreds/thousands of
+  # forks per resolve (the dominant cost of `clast wake` startup).
   if [[ "$input" == -* ]]; then
-    local slug
-    slug="$(_clast_registry_lookup_path "$input" "$arr" 2>/dev/null)" || true
+    local -a candidates=("$input")
+    local -a decoded=()
+    mapfile -t decoded < <(clast_decode_candidates "$input")
+    candidates+=("${decoded[@]}")
+    local cands_json slug
+    cands_json="$(printf '%s\n' "${candidates[@]}" | jq -Rn '[inputs]')"
+    slug="$(_clast_registry_lookup_paths "$cands_json" "$arr" 2>/dev/null)" || true
     if [[ -n "$slug" ]]; then
       printf '%s\n' "$slug"
       return 0
     fi
-    local -a candidates=()
-    mapfile -t candidates < <(clast_decode_candidates "$input")
-    local c
-    for c in "${candidates[@]}"; do
-      slug="$(_clast_registry_lookup_path "$c" "$arr")" || continue
-      if [[ -n "$slug" ]]; then
-        printf '%s\n' "$slug"
-        return 0
-      fi
-    done
     return 1
   fi
 
@@ -104,6 +103,25 @@ _clast_registry_lookup_path() {
     (map(select(.path == $p)) | .[0].slug)
     // (map(select(.aliases? // [] | index($p) != null)) | .[0].slug)
     // empty
+  ' <<<"$arr"
+}
+
+# _clast_registry_lookup_paths <candidates-json-array> <registry-json-array>
+#   Batched form of _clast_registry_lookup_path: given an ordered JSON array
+#   of candidate paths, return the slug for the FIRST candidate (in order)
+#   that matches a registry entry's .path or .aliases — path before alias,
+#   matching the single-path helper. Print slug or empty. One jq pass for
+#   the whole candidate set.
+_clast_registry_lookup_paths() {
+  local cands_json="$1" arr="$2"
+  jq -r --argjson cands "$cands_json" '
+    . as $arr
+    | first(
+        $cands[] as $c
+        | ( ($arr | map(select(.path == $c)) | .[0].slug)
+            // ($arr | map(select((.aliases? // []) | index($c) != null)) | .[0].slug) )
+        | select(. != null)
+      ) // empty
   ' <<<"$arr"
 }
 
