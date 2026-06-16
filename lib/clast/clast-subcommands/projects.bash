@@ -145,8 +145,14 @@ clast_cmd_projects() {
 
     seg_session_count["$seg"]=$(( ${seg_session_count["$seg"]:-0} + 1 ))
 
+    # Prefer cached msg_count on the manifest line (step 21); fall back to
+    # counting transcript lines for legacy lines that predate the cache.
     abs_path="$journal_dir/$snapshot"
-    if [[ -r "$abs_path" ]]; then
+    local cached_msgs
+    cached_msgs="$(jq -r '.msg_count // empty' <<<"$line")"
+    if [[ -n "$cached_msgs" ]]; then
+      msgs="$cached_msgs"
+    elif [[ -r "$abs_path" ]]; then
       msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
       [[ -z "$msgs" ]] && msgs=0
     else

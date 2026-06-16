@@ -51,12 +51,13 @@ clast_dismissed_set() {
     return 0
   fi
 
-  local line sid
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    sid="$(jq -r '.session_id // empty' <<<"$line" 2>/dev/null)" || continue
+  # Single jq pass over the whole file. Previously this forked one jq per
+  # line, which dominated when the dismissed log grew large. `fromjson?`
+  # silently drops malformed lines, matching the old per-line tolerance.
+  local sid
+  while IFS= read -r sid; do
     [[ -n "$sid" ]] && _ref["$sid"]=1
-  done < "$dismissed_file"
+  done < <(jq -rR 'fromjson? | .session_id // empty' "$dismissed_file" 2>/dev/null)
 }
 
 # clast_dismissed_check <session-id> — exit 0 if dismissed, 1 if not.

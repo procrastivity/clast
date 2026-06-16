@@ -247,8 +247,11 @@ clast_cmd_wake() {
   fi
 
   clast_porcelain_info "Checking for uncurated or stale sessions..."
+  # Window is configurable; a shorter default keeps the scan fast on large
+  # journals (clast sessions cost scales with sessions in the window).
+  local since="${CLAST_WAKE_SINCE:--14d}"
   local sessions_json
-  sessions_json="$(clast-plumbing --json sessions --since -30d 2>/dev/null)" || {
+  sessions_json="$(clast-plumbing --json sessions --since "$since" 2>/dev/null)" || {
     clast_porcelain_die "failed to list sessions"
   }
 

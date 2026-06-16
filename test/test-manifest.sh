@@ -25,7 +25,10 @@ clast_manifest_append \
   "transcripts/2025-05-30/-tmp-proj/$SID_A.jsonl" \
   "2025-05-30T11:55:00Z" \
   "1234" \
-  "2025-05-30"
+  "2025-05-30" \
+  "42" \
+  "2025-05-30T11:00:00.111Z" \
+  "2025-05-30T11:54:59.999Z"
 assert_file_exists "$CLAST_JOURNAL_DIR/.manifest.jsonl" "append creates manifest"
 line="$(clast_manifest_lookup "$SID_A")"
 assert_eq "$SID_A" "$(jq -r '.session_id' <<<"$line")" "lookup session_id"
@@ -33,7 +36,23 @@ assert_eq "1234" "$(jq -r '.source_size' <<<"$line")" "lookup source_size value"
 assert_eq "number" "$(jq -r '.source_size | type' <<<"$line")" "source_size is numeric"
 assert_eq "2025-05-30T12:00:00Z" "$(jq -r '.captured_at' <<<"$line")" "captured_at honors CLAST_NOW_EPOCH"
 assert_eq "2025-05-30" "$(jq -r '.day_bucket' <<<"$line")" "day_bucket round-trip"
+# --- cached metadata fields (step 21) ---
+assert_eq "42" "$(jq -r '.msg_count' <<<"$line")" "msg_count value"
+assert_eq "number" "$(jq -r '.msg_count | type' <<<"$line")" "msg_count is numeric"
+assert_eq "2025-05-30T11:00:00.111Z" "$(jq -r '.first_ts' <<<"$line")" "first_ts value"
+assert_eq "2025-05-30T11:54:59.999Z" "$(jq -r '.last_ts' <<<"$line")" "last_ts value"
 unset CLAST_NOW_EPOCH
+teardown_test_journal
+
+# --- empty first_ts/last_ts serialize as JSON null --------------------------
+setup_test_journal >/dev/null
+clast_manifest_append \
+  "$SID_A" "/tmp/proj/$SID_A.jsonl" \
+  "transcripts/2025-05-30/-tmp-proj/$SID_A.jsonl" \
+  "2025-05-30T11:55:00Z" "1234" "2025-05-30" "0" "" ""
+line="$(clast_manifest_lookup "$SID_A")"
+assert_eq "null" "$(jq -r '.first_ts | if . == null then "null" else . end' <<<"$line")" "empty first_ts -> JSON null"
+assert_eq "null" "$(jq -r '.last_ts | if . == null then "null" else . end' <<<"$line")" "empty last_ts -> JSON null"
 teardown_test_journal
 
 # --- append arity check -----------------------------------------------------
@@ -41,8 +60,18 @@ setup_test_journal >/dev/null
 err="$(clast_manifest_append a b c 2>&1)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "append wrong arity returns 2"
 case "$err" in
-  *expected\ 6\ args*) _clast_test_pass "append arity error message" ;;
+  *expected\ 9\ args*) _clast_test_pass "append arity error message" ;;
   *) _clast_test_fail "append arity error message (got: $err)" ;;
+esac
+teardown_test_journal
+
+# --- msg_count must be a non-negative integer -------------------------------
+setup_test_journal >/dev/null
+err="$(clast_manifest_append "$SID_A" s snap 2025-05-30T11:55:00Z 1234 2025-05-30 notanint x y 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "append non-integer msg_count returns 2"
+case "$err" in
+  *msg_count*) _clast_test_pass "append msg_count error message" ;;
+  *) _clast_test_fail "append msg_count error message (got: $err)" ;;
 esac
 teardown_test_journal
 
@@ -127,6 +156,12 @@ source_null_count="$(jq -c 'select(.source == null)' "$CLAST_JOURNAL_DIR/.manife
 assert_eq "2" "$source_null_count" "rebuild sets source=null"
 zero_size_count="$(jq -c 'select(.source_size == 0)' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
 assert_eq "2" "$zero_size_count" "rebuild sets source_size=0"
+# Cached metadata (step 21) IS recoverable from the snapshot copy, so
+# rebuild backfills msg_count from the transcript rather than leaving it absent.
+has_msg_count="$(jq -c 'select(has("msg_count"))' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$has_msg_count" "rebuild backfills msg_count"
+msg_count_numeric="$(jq -c 'select(.msg_count | type == "number")' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$msg_count_numeric" "rebuild msg_count is numeric"
 teardown_test_journal
 
 # --- rebuild empty transcripts tree -----------------------------------------

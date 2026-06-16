@@ -117,7 +117,7 @@ clast_cmd_snapshot() {
   # TODO(v1.1): parallel capture across segments.
   if [[ -d "$projects_dir" ]]; then
     local source segment session_id mtime_epoch mtime_iso source_size
-    local first_ts ts_epoch day_bucket
+    local first_ts ts_epoch day_bucket last_ts msg_count
     local dest_rel dest dest_dir tmp
     while IFS= read -r -d '' source; do
       segment="$(basename "$(dirname "$source")")"
@@ -163,6 +163,16 @@ clast_cmd_snapshot() {
         day_bucket="$(_clast_snapshot_bucket_for_epoch "$mtime_epoch")"
       fi
 
+      # Cache per-session metadata in the manifest (step 21) so readers
+      # don't re-open the transcript. msg_count uses wc -l semantics to
+      # match the readers' file-read fallback exactly; last_ts mirrors the
+      # existing first_ts extraction. Kept as separate reads (not a fused
+      # awk pass) to avoid the trailing-newline parsing hazard and because
+      # snapshot is a batch path where the extra forks are negligible.
+      last_ts="$(tail -n1 "$source" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+      msg_count="$(wc -l <"$source" 2>/dev/null | tr -d ' ')"
+      [[ "$msg_count" =~ ^[0-9]+$ ]] || msg_count=0
+
       # Dedup on (session_id, source_mtime). Mtime — not ctime or size —
       # is the manifest's "most recent line wins" key; Claude Code's
       # writer bumps mtime whenever a session grows.
@@ -199,7 +209,7 @@ clast_cmd_snapshot() {
         # Invariant: a manifest line implies the dest file exists. If the
         # append fails the dest is an orphan; doctor (step 10) will reap
         # it, and a re-run of snapshot overwrites + retries the append.
-        if ! clast_manifest_append "$session_id" "$source" "$dest_rel" "$mtime_iso" "$source_size" "$day_bucket"; then
+        if ! clast_manifest_append "$session_id" "$source" "$dest_rel" "$mtime_iso" "$source_size" "$day_bucket" "$msg_count" "$first_ts" "$last_ts"; then
           error_lines+=("$(jq -cn --arg f "$source" --arg r "manifest append failed" '{file:$f,reason:$r}')")
           continue
         fi

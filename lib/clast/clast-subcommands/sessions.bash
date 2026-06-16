@@ -207,32 +207,60 @@ clast_cmd_sessions() {
       | jq -r --arg s "$project_filter" '.[] | select(.slug == $s) | .path')
   fi
 
-  # Most-recent manifest line per session_id within window.
-  declare -A latest_line=()
-  local line sid
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    sid="$(jq -r '.session_id' <<<"$line")"
-    [[ -z "$sid" || "$sid" == "null" ]] && continue
-    # Skip dismissed sessions early to avoid unnecessary work.
-    if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
-      continue
-    fi
-    latest_line["$sid"]="$line"
-  done < <(clast_manifest_iterate "$filter")
+  local manifest_path
+  manifest_path="$(clast_manifest_path)"
 
-  local -a rows=()
-  local snapshot day_bucket mtime seg abs_path msgs
-  local first_ts last_ts start_ts end_ts curated branch slug
   local entries_dir
   entries_dir="$journal_dir/entries"
 
-  for sid in "${!latest_line[@]}"; do
-    line="${latest_line[$sid]}"
-    snapshot="$(jq -r '.snapshot' <<<"$line")"
-    day_bucket="$(jq -r '.day_bucket' <<<"$line")"
-    mtime="$(jq -r '.source_mtime' <<<"$line")"
-    seg="$(awk -F/ 'NR==1{print $3}' <<<"$snapshot")"
+  # Curated/stale index: scan every entry file ONCE up front instead of
+  # grepping the entries dir per session (the old approach was
+  # O(sessions × entries)). `curated_seen[sid]` marks a session as curated;
+  # `curated_mtime[sid]` holds the max curated_source_mtime across its
+  # entries ("" when none carry one — legacy entries then stay non-stale).
+  declare -A curated_seen=() curated_mtime=()
+  if [[ -d "$entries_dir" ]] && compgen -G "$entries_dir/*.md" >/dev/null 2>&1; then
+    local idx_sid idx_cm
+    while IFS=$'\t' read -r idx_sid idx_cm; do
+      [[ -z "$idx_sid" ]] && continue
+      curated_seen["$idx_sid"]=1
+      if [[ -n "$idx_cm" ]]; then
+        if [[ -z "${curated_mtime[$idx_sid]:-}" || "$idx_cm" > "${curated_mtime[$idx_sid]}" ]]; then
+          curated_mtime["$idx_sid"]="$idx_cm"
+        fi
+      fi
+    done < <(awk '
+      function flush() { if (sid != "") { print sid "\t" cm } sid=""; cm="" }
+      FNR==1 && NR>1 { flush() }
+      /^session_id:/           { v=$0; sub(/^session_id:[[:space:]]*/, "", v); sid=v }
+      /^curated_source_mtime:/ { v=$0; sub(/^curated_source_mtime:[[:space:]]*/, "", v); gsub(/"/, "", v); cm=v }
+      END { flush() }
+    ' "$entries_dir"/*.md 2>/dev/null)
+  fi
+
+  # Most-recent manifest line per session_id within window, in a SINGLE jq
+  # pass. Previously this forked one jq per manifest line plus several more
+  # per session; for large manifests that dominated runtime. The reduce keeps
+  # the last line seen per session_id (manifest is append-only, so last =
+  # most recent). Emits @tsv columns: session_id, snapshot, day_bucket,
+  # source_mtime.
+  local -a rows=()
+  local sid snapshot day_bucket mtime seg abs_path msgs
+  local cached_msgs cached_first cached_last
+  local first_ts last_ts start_ts end_ts curated stale branch slug
+  declare -A seg_slug=()
+
+  while IFS=$'\t' read -r sid snapshot day_bucket mtime cached_msgs cached_first cached_last; do
+    [[ -z "$sid" ]] && continue
+    # Skip dismissed sessions early, before any per-session file work.
+    if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
+      continue
+    fi
+
+    # segment = third path component of transcripts/<day>/<segment>/<uuid>.
+    seg="${snapshot#transcripts/}"   # <day>/<segment>/<uuid>.jsonl
+    seg="${seg#*/}"                  # <segment>/<uuid>.jsonl
+    seg="${seg%%/*}"                 # <segment>
 
     if (( have_project_filter == 1 )); then
       if [[ -z "${allowed_segs[$seg]:-}" ]]; then
@@ -241,7 +269,15 @@ clast_cmd_sessions() {
     fi
 
     abs_path="$journal_dir/$snapshot"
-    if [[ -r "$abs_path" ]]; then
+    if [[ -n "$cached_msgs" ]]; then
+      # Cache hit (step 21): the manifest line carries msg_count/first_ts/
+      # last_ts, so we never open the transcript. Empty cached_first/last
+      # means the cached value was JSON null (no first/last timestamp).
+      msgs="$cached_msgs"
+      first_ts="$cached_first"
+      last_ts="$cached_last"
+    elif [[ -r "$abs_path" ]]; then
+      # Legacy line (pre-cache): fall back to reading the transcript.
       msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
       [[ -z "$msgs" ]] && msgs=0
       first_ts="$(head -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
@@ -257,35 +293,30 @@ clast_cmd_sessions() {
     start_ts="${first_ts:-$mtime}"
     end_ts="${last_ts:-$mtime}"
 
-    if slug="$(clast_registry_resolve "$seg" 2>/dev/null)" && [[ -n "$slug" ]]; then
-      :
+    # Resolve the slug once per unique segment (segments repeat heavily
+    # across sessions; each resolve forks several jq calls).
+    if [[ -n "${seg_slug[$seg]+x}" ]]; then
+      slug="${seg_slug[$seg]}"
     else
-      slug="$seg"
+      if slug="$(clast_registry_resolve "$seg" 2>/dev/null)" && [[ -n "$slug" ]]; then
+        :
+      else
+        slug="$seg"
+      fi
+      seg_slug["$seg"]="$slug"
     fi
 
     # TODO(step-10): branch field is best-effort; revisit when stats command lands.
     branch=""
 
+    # Curated/stale from the prebuilt index (no per-session grep).
     curated=false
-    local stale=false
-    if [[ -d "$entries_dir" ]]; then
-      local entry_matches
-      entry_matches="$(grep -l "session_id: $sid" "$entries_dir"/*.md 2>/dev/null)" || true
-      if [[ -n "$entry_matches" ]]; then
-        curated=true
-        local best_curated_mtime="" ef cm
-        while IFS= read -r ef; do
-          [[ -z "$ef" ]] && continue
-          cm="$(grep '^curated_source_mtime:' "$ef" 2>/dev/null | head -n1 | sed 's/^curated_source_mtime:[[:space:]]*//')" || true
-          cm="${cm#\"}"
-          cm="${cm%\"}"
-          if [[ -n "$cm" && ( -z "$best_curated_mtime" || "$cm" > "$best_curated_mtime" ) ]]; then
-            best_curated_mtime="$cm"
-          fi
-        done <<<"$entry_matches"
-        if [[ -n "$best_curated_mtime" && "$best_curated_mtime" != "$mtime" ]]; then
-          stale=true
-        fi
+    stale=false
+    if [[ -n "${curated_seen[$sid]:-}" ]]; then
+      curated=true
+      local best_curated_mtime="${curated_mtime[$sid]:-}"
+      if [[ -n "$best_curated_mtime" && "$best_curated_mtime" != "$mtime" ]]; then
+        stale=true
       fi
     fi
 
@@ -321,11 +352,25 @@ clast_cmd_sessions() {
          stale: $stale,
          dismissed: $dismissed
        }')")
-  done
+  done < <(
+    if [[ -f "$manifest_path" ]]; then
+      jq -rRn '
+        reduce (inputs | fromjson?
+                | select('"$filter"')
+                | select(.session_id != null and .session_id != "")) as $l
+          ({}; .[$l.session_id] = $l)
+        | to_entries[] | .value
+        | [.session_id, .snapshot, .day_bucket, .source_mtime,
+           .msg_count, .first_ts, .last_ts] | @tsv
+      ' "$manifest_path"
+    fi
+  )
 
   local rows_json='[]'
   if (( ${#rows[@]} > 0 )); then
-    rows_json="$(printf '%s\n' "${rows[@]}" | jq -cs 'sort_by(.start)')"
+    # Tiebreak on session_id so the order is deterministic when sessions
+    # share a start timestamp (the old assoc-array iteration order was not).
+    rows_json="$(printf '%s\n' "${rows[@]}" | jq -cs 'sort_by(.start, .session_id)')"
   fi
 
   if [[ -n "${CLAST_JSON:-}" ]]; then

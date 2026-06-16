@@ -244,8 +244,13 @@ clast_cmd_stats() {
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
     bytes_sum=$((bytes_sum + size))
 
-    local abs="$journal_dir/$snapshot" m=0
-    if [[ -r "$abs" ]]; then
+    # Prefer cached msg_count on the manifest line (step 21); fall back to
+    # counting transcript lines for legacy lines that predate the cache.
+    local abs="$journal_dir/$snapshot" m=0 cached_m
+    cached_m="$(jq -r '.msg_count // empty' <<<"$row")"
+    if [[ -n "$cached_m" ]]; then
+      m="$cached_m"
+    elif [[ -r "$abs" ]]; then
       m="$(wc -l <"$abs" 2>/dev/null | tr -d ' ')"
       [[ -z "$m" ]] && m=0
     fi

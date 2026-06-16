@@ -26,13 +26,18 @@ _clast_manifest_now_iso() {
   date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ
 }
 
-# clast_manifest_append <session-id> <source> <snapshot> <source-mtime> <source-size> <day-bucket>
+# clast_manifest_append <session-id> <source> <snapshot> <source-mtime> <source-size> <day-bucket> <msg-count> <first-ts> <last-ts>
 clast_manifest_append() {
-  if [[ $# -ne 6 ]]; then
-    clast_log_error "clast_manifest_append: expected 6 args, got $#"
+  if [[ $# -ne 9 ]]; then
+    clast_log_error "clast_manifest_append: expected 9 args, got $#"
     return 2
   fi
   local session_id="$1" source="$2" snapshot="$3" source_mtime="$4" source_size="$5" day_bucket="$6"
+  # Cached per-session metadata (step 21): msg_count is an integer line
+  # count; first_ts/last_ts are the transcript's first/last line timestamps
+  # ("" → stored as JSON null). Readers prefer these over re-reading the
+  # snapshot file, falling back to the file when a line predates the cache.
+  local msg_count="$7" first_ts="$8" last_ts="$9"
   local field
   for field in session_id source snapshot source_mtime source_size day_bucket; do
     if [[ -z "${!field}" ]]; then
@@ -42,6 +47,10 @@ clast_manifest_append() {
   done
   if ! [[ "$source_size" =~ ^[0-9]+$ ]]; then
     clast_log_error "clast_manifest_append: source_size must be a non-negative integer, got '$source_size'"
+    return 2
+  fi
+  if ! [[ "$msg_count" =~ ^[0-9]+$ ]]; then
+    clast_log_error "clast_manifest_append: msg_count must be a non-negative integer, got '$msg_count'"
     return 2
   fi
 
@@ -62,7 +71,10 @@ clast_manifest_append() {
     --arg source_mtime "$source_mtime" \
     --argjson source_size "$source_size" \
     --arg day_bucket "$day_bucket" \
-    '{session_id: $session_id, source: $source, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: $source_size, day_bucket: $day_bucket}')" || {
+    --argjson msg_count "$msg_count" \
+    --arg first_ts "$first_ts" \
+    --arg last_ts "$last_ts" \
+    '{session_id: $session_id, source: $source, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: $source_size, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end)}')" || {
     clast_log_error "clast_manifest_append: jq failed to build manifest line"
     return 1
   }
@@ -168,6 +180,7 @@ clast_manifest_rebuild_from_disk() {
   local count=0
   if [[ -d "$transcripts_root" ]]; then
     local snapshot day session_id mtime_epoch mtime_iso line
+    local msg_count first_ts last_ts
     # source / source_size are unrecoverable: the snapshot file's size is
     # the captured copy's size, not the original source's size at capture
     # time, and the source path is not encoded in the snapshot itself.
@@ -185,13 +198,23 @@ clast_manifest_rebuild_from_disk() {
         rm -f "$tmp_file"
         return 1
       fi
+      # source / source_size are unrecoverable, but the cached metadata
+      # (step 21) IS recoverable from the snapshot copy — compute it so
+      # doctor --fix backfills rather than emitting legacy-shaped lines.
+      first_ts="$(head -n1 "$snapshot" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+      last_ts="$(tail -n1 "$snapshot" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+      msg_count="$(wc -l <"$snapshot" 2>/dev/null | tr -d ' ')"
+      [[ "$msg_count" =~ ^[0-9]+$ ]] || msg_count=0
       line="$(jq -c -n \
         --arg session_id "$session_id" \
         --arg snapshot "${snapshot#"$journal_dir/"}" \
         --arg captured_at "$mtime_iso" \
         --arg source_mtime "$mtime_iso" \
         --arg day_bucket "$day" \
-        '{session_id: $session_id, source: null, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: 0, day_bucket: $day_bucket}')" || {
+        --argjson msg_count "$msg_count" \
+        --arg first_ts "$first_ts" \
+        --arg last_ts "$last_ts" \
+        '{session_id: $session_id, source: null, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: 0, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end)}')" || {
         clast_log_error "clast_manifest_rebuild_from_disk: jq failed for '$snapshot'"
         rm -f "$tmp_file"
         return 1
