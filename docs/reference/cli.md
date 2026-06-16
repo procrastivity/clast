@@ -525,11 +525,21 @@ machine:        beau-wsl2
   "captured_at": "2026-05-30T16:42:11Z",
   "source_mtime": "2026-05-30T16:30:55Z",
   "source_size": 2384721,
-  "day_bucket": "2026-05-30"
+  "day_bucket": "2026-05-30",
+  "msg_count": 248,
+  "first_ts": "2026-05-30T15:01:22.118Z",
+  "last_ts": "2026-05-30T16:30:54.902Z"
 }
 ```
 
-All fields required. Lookups use "most recent line wins" semantics for a given `session_id`.
+The first seven fields (`session_id` … `day_bucket`) are always present and required. Lookups use "most recent line wins" semantics for a given `session_id`.
+
+`msg_count`, `first_ts`, and `last_ts` are cached per-session metadata written at snapshot time so that `sessions`, `projects`, `stats`, and `show` need not re-read the transcript to compute counts and start/end times:
+
+- `msg_count` — transcript line count (`wc -l` semantics).
+- `first_ts` / `last_ts` — the `.timestamp` of the transcript's first / last line, or `null` when that line carries no timestamp.
+
+These three are **optional**: manifest lines written before this cache was introduced omit them, and `doctor --fix` backfills them on rebuild. Readers fall back to reading the snapshot file (and ultimately `source_mtime`) when a cache field is absent or `null`.
 
 ### Registry line (in `projects.json`)
 

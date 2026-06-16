@@ -145,6 +145,37 @@ for k in session_id project segment branch start end msg_count_approx snapshot_p
 done
 teardown_test_journal
 
+# --- cached metadata (step 21): served from manifest, not the file ---------
+# A manifest line carrying msg_count/first_ts/last_ts whose snapshot file is
+# ABSENT must still report the cached values. If the reader fell through to
+# the file it would report msg_count=0 and start/end=source_mtime.
+_seed_journal
+SID_CACHE="abcdef01-2345-4678-8abc-def012345678"
+manifest_path="$CLAST_JOURNAL_DIR/.manifest.jsonl"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/cache.jsonl","snapshot":"transcripts/2026-05-30/-tmp-proj-xesapps/%s.jsonl","captured_at":"2026-05-30T18:00:00Z","source_mtime":"2026-05-30T17:45:00Z","source_size":800,"day_bucket":"2026-05-30","msg_count":248,"first_ts":"2026-05-30T15:01:22.118Z","last_ts":"2026-05-30T16:30:54.902Z"}\n' \
+  "$SID_CACHE" "$SID_CACHE" >>"$manifest_path"
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+row="$(jq -c --arg s "$SID_CACHE" '.[] | select(.session_id == $s)' <<<"$out")"
+assert_eq "248" "$(jq -r '.msg_count_approx' <<<"$row")" "cached: msg_count_approx from manifest (file absent)"
+assert_eq "2026-05-30T15:01:22.118Z" "$(jq -r '.start' <<<"$row")" "cached: start from cached first_ts"
+assert_eq "2026-05-30T16:30:54.902Z" "$(jq -r '.end' <<<"$row")" "cached: end from cached last_ts"
+teardown_test_journal
+
+# --- legacy line (no cache fields): falls back to file, start/end=mtime -----
+# Same shape but WITHOUT the cache fields and with an absent file: the reader
+# must fall back, yielding msg_count=0 and start/end=source_mtime.
+_seed_journal
+SID_LEGACY="abcdef01-2345-4678-8abc-def0deadbeef"
+manifest_path="$CLAST_JOURNAL_DIR/.manifest.jsonl"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/legacy.jsonl","snapshot":"transcripts/2026-05-30/-tmp-proj-xesapps/%s.jsonl","captured_at":"2026-05-30T18:00:00Z","source_mtime":"2026-05-30T17:45:00Z","source_size":800,"day_bucket":"2026-05-30"}\n' \
+  "$SID_LEGACY" "$SID_LEGACY" >>"$manifest_path"
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+row="$(jq -c --arg s "$SID_LEGACY" '.[] | select(.session_id == $s)' <<<"$out")"
+assert_eq "0" "$(jq -r '.msg_count_approx' <<<"$row")" "legacy: msg_count_approx falls back to 0 (file absent)"
+assert_eq "2026-05-30T17:45:00Z" "$(jq -r '.start' <<<"$row")" "legacy: start falls back to source_mtime"
+assert_eq "2026-05-30T17:45:00Z" "$(jq -r '.end' <<<"$row")" "legacy: end falls back to source_mtime"
+teardown_test_journal
+
 # === clast show =============================================================
 
 # --- known session (default) ----------------------------------------------

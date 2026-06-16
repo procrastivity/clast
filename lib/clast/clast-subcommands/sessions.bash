@@ -246,10 +246,11 @@ clast_cmd_sessions() {
   # source_mtime.
   local -a rows=()
   local sid snapshot day_bucket mtime seg abs_path msgs
+  local cached_msgs cached_first cached_last
   local first_ts last_ts start_ts end_ts curated stale branch slug
   declare -A seg_slug=()
 
-  while IFS=$'\t' read -r sid snapshot day_bucket mtime; do
+  while IFS=$'\t' read -r sid snapshot day_bucket mtime cached_msgs cached_first cached_last; do
     [[ -z "$sid" ]] && continue
     # Skip dismissed sessions early, before any per-session file work.
     if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
@@ -268,7 +269,15 @@ clast_cmd_sessions() {
     fi
 
     abs_path="$journal_dir/$snapshot"
-    if [[ -r "$abs_path" ]]; then
+    if [[ -n "$cached_msgs" ]]; then
+      # Cache hit (step 21): the manifest line carries msg_count/first_ts/
+      # last_ts, so we never open the transcript. Empty cached_first/last
+      # means the cached value was JSON null (no first/last timestamp).
+      msgs="$cached_msgs"
+      first_ts="$cached_first"
+      last_ts="$cached_last"
+    elif [[ -r "$abs_path" ]]; then
+      # Legacy line (pre-cache): fall back to reading the transcript.
       msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
       [[ -z "$msgs" ]] && msgs=0
       first_ts="$(head -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
@@ -351,7 +360,8 @@ clast_cmd_sessions() {
                 | select(.session_id != null and .session_id != "")) as $l
           ({}; .[$l.session_id] = $l)
         | to_entries[] | .value
-        | [.session_id, .snapshot, .day_bucket, .source_mtime] | @tsv
+        | [.session_id, .snapshot, .day_bucket, .source_mtime,
+           .msg_count, .first_ts, .last_ts] | @tsv
       ' "$manifest_path"
     fi
   )

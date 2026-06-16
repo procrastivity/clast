@@ -24,11 +24,20 @@ transcript file at query time: `wc -l` for the line count and
 A prior performance pass (PR #29, `perf(sessions)`) removed the
 per-manifest-line and per-session `grep` forks from `clast sessions`,
 taking a 30-day window from ~7 min to ~1.5 min on a large real journal.
-What remains is an **I/O floor**: the query still opens and reads every
-referenced transcript file to recompute the same three values. On a
-journal with hundreds of sessions that is the dominant remaining cost,
-and it is pure recomputation — the values never change for a given
-capture.
+The query still opens and reads every referenced transcript file to
+recompute the same three values — pure recomputation, since the values
+never change for a given capture.
+
+> **Correction (post-profiling).** This step was originally scoped on the
+> assumption that those transcript reads were the dominant remaining cost.
+> A syscall trace of the ~1.5-min run disproved that: ~98% of `exec`s are
+> `clast_registry_resolve` forking one `jq` per decoded candidate path for
+> unregistered/deep segments (~16.6k `jq` total), not the file reads. The
+> real headline win lives in **step 22** (batch registry candidate
+> lookups). This step is still worth doing — it removes O(bytes) work from
+> four read paths, is a clean correctness/design improvement, and lets the
+> reads stay cheap once step 22 makes resolution cheap — but it is a
+> *prerequisite/cleanup*, not the fix for the slow `clast wake` startup.
 
 The snapshot writer already reads the transcript at capture time: it
 reads the first line for `first_ts` (to compute `day_bucket`) and copies

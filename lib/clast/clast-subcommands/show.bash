@@ -94,11 +94,22 @@ clast_cmd_show() {
     slug="$seg"
   fi
 
+  # Prefer the cached metadata on the manifest line (step 21); fall back to
+  # reading the transcript for legacy lines that predate the cache.
   local msgs first_ts last_ts start_ts end_ts
-  msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
-  [[ -z "$msgs" ]] && msgs=0
-  first_ts="$(head -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
-  last_ts="$(tail -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+  local cached_msgs cached_first cached_last
+  IFS=$'\t' read -r cached_msgs cached_first cached_last \
+    < <(jq -r '[(.msg_count // ""), (.first_ts // ""), (.last_ts // "")] | @tsv' <<<"$line")
+  if [[ -n "$cached_msgs" ]]; then
+    msgs="$cached_msgs"
+    first_ts="$cached_first"
+    last_ts="$cached_last"
+  else
+    msgs="$(wc -l <"$abs_path" 2>/dev/null | tr -d ' ')"
+    [[ -z "$msgs" ]] && msgs=0
+    first_ts="$(head -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+    last_ts="$(tail -n1 "$abs_path" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
+  fi
   start_ts="${first_ts:-$source_mtime}"
   end_ts="${last_ts:-$source_mtime}"
 
