@@ -3,6 +3,18 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.3] - 2026-06-16
+
+### Bug Fixes
+
+- Entries tag validation, branch extraction, and list display
+- Recognize type:user/assistant transcript shape
+
+### Build
+
+- Install clast-wake and clast-brief helpers (#26)
+- Polish install.sh and add make install-local (#27)
+
 ## [0.0.2] - 2026-06-07
 
 ### CI
