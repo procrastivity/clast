@@ -28,7 +28,7 @@ in your shell profile to get the same effect as the planned TOML keys.
 
 | TOML key | Env var | Default | Meaning |
 |---|---|---|---|
-| `day_cutoff` | `CLAST_DAY_CUTOFF` | `04:00` | Sessions started before this local time on date D count as belonging to date D-1. Used by `clast stats`, `clast sessions`, and the `/day-wakeup` window. |
+| `day_cutoff` | `CLAST_DAY_CUTOFF` | `04:00` | Sessions started before this local time on date D count as belonging to date D-1. Used by `clast-plumbing stats`, `clast-plumbing sessions`, and the `/day-wakeup` window. |
 
 ### `[logging]`
 

@@ -3,7 +3,7 @@
 # systemctl --user enable --now clast-snapshot.timer
 
 [Unit]
-Description=Run clast snapshot hourly
+Description=Run clast-plumbing snapshot hourly
 
 [Timer]
 OnBootSec=5min

@@ -8,7 +8,7 @@ your projects. It ships two artifacts from one repo:
    managing a project registry.
 2. **A Claude Code plugin** that ships skills (`/day-wakeup`, `/wakeup`)
    wrapping the CLI with LLM curation, plus a `SessionStart` hook that
-   auto-invokes `clast snapshot` so capture happens unattended.
+   auto-invokes `clast-plumbing snapshot` so capture happens unattended.
 
 ## Why this exists
 

@@ -1,12 +1,12 @@
 # Repair the journal
 
-`clast doctor` sanity-checks the journal and reports issues. `clast doctor
+`clast-plumbing doctor` sanity-checks the journal and reports issues. `clast-plumbing doctor
 --fix` applies the safe, non-destructive fixes for you.
 
 ## Run a check
 
 ```sh
-clast doctor
+clast-plumbing doctor
 ```
 
 Sample output:
@@ -21,7 +21,7 @@ Sample output:
 ✓ Missing snapshots: none
 ✓ Day-bucket consistency: ok
 
-Run `clast doctor --fix` to clean up orphans.
+Run `clast-plumbing doctor --fix` to clean up orphans.
 ```
 
 ## Exit codes
@@ -34,7 +34,7 @@ Run `clast doctor --fix` to clean up orphans.
 ## What `--fix` will do
 
 ```sh
-clast doctor --fix
+clast-plumbing doctor --fix
 ```
 
 Only the safe fixes are applied without prompting:
@@ -49,7 +49,7 @@ require explicit user action — they're never auto-applied.
 
 ## Critical corruption (exit 4)
 
-If the manifest is unparseable, `clast doctor` halts before touching anything
+If the manifest is unparseable, `clast-plumbing doctor` halts before touching anything
 else. To recover:
 
 ```sh
@@ -57,10 +57,10 @@ else. To recover:
 jq . ~/.claude/journal/.manifest.jsonl >/dev/null   # shows the parse error and line
 
 # If the file is salvageable, edit the bad line out by hand, then re-check
-clast doctor
+clast-plumbing doctor
 
 # If it's not salvageable, rebuild it from the snapshot contents
-clast doctor --fix
+clast-plumbing doctor --fix
 ```
 
 `--fix` regenerates the manifest deterministically from the files actually

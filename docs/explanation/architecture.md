@@ -5,28 +5,28 @@
                                                   │
                                                   │ (CC auto-deletes eventually)
                                                   ▼
-   cron OR SessionStart hook ──invokes──►  clast snapshot
+   cron OR SessionStart hook ──invokes──►  clast-plumbing snapshot
                                                   │
                                                   ▼
                                   ~/.claude/journal/transcripts/...
                                   ~/.claude/journal/.manifest.jsonl
                                                   │
-   /day-wakeup ──invokes──► clast snapshot       │  (durable; survives CC auto-deletion)
-                ──invokes──► clast sessions --day yesterday --json
+   /day-wakeup ──invokes──► clast-plumbing snapshot       │  (durable; survives CC auto-deletion)
+                ──invokes──► clast-plumbing sessions --day yesterday --json
                           │
                           ▼
             iterates sessions → LLM-generated draft → AskUserQuestion
                           │
                           ▼ (on accept)
-                ──invokes──► clast entries write
+                ──invokes──► clast-plumbing entries write
                                                   │
                                                   ▼
                                   ~/.claude/journal/entries/...
 
-   /wakeup [project] ──invokes──► clast entries --project SLUG --json
+   /wakeup [project] ──invokes──► clast-plumbing entries --project SLUG --json
                      ──synthesizes briefing in chat
 
-   clast breadcrumb TEXT ──appends──► ~/.claude/journal/breadcrumbs/...
+   clast-plumbing breadcrumb TEXT ──appends──► ~/.claude/journal/breadcrumbs/...
 ```
 
 ## What `clast` reads (read-only)

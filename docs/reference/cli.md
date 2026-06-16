@@ -35,14 +35,14 @@ All resolved to local-time dates using the `day_cutoff` offset (default `04:00`)
 
 ---
 
-## `clast snapshot`
+## `clast-plumbing snapshot`
 
 Capture new transcripts from `~/.claude/projects/` into the journal.
 
 ### Synopsis
 
 ```
-clast snapshot [--dry-run] [--since TIMESTAMP] [--include-segment SEG]
+clast-plumbing snapshot [--dry-run] [--since TIMESTAMP] [--include-segment SEG]
 ```
 
 ### Behavior
@@ -99,14 +99,14 @@ Captured 3 sessions across 2 projects (2.4 MB).
 
 ---
 
-## `clast projects`
+## `clast-plumbing projects`
 
 List projects with activity in a window.
 
 ### Synopsis
 
 ```
-clast projects [--day DATE] [--since DATE] [--until DATE] [--unregistered]
+clast-plumbing projects [--day DATE] [--since DATE] [--until DATE] [--unregistered]
 ```
 
 ### Flags
@@ -149,15 +149,15 @@ weftlo            /home/beau/code/weftlo                   2    61   16:22
 
 ---
 
-## `clast sessions`
+## `clast-plumbing sessions`
 
 List sessions in a window, optionally filtered by project.
 
 ### Synopsis
 
 ```
-clast sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG] [--include-dismissed]
-clast sessions dismiss <session-id> [<session-id>...] [--reason TEXT]
+clast-plumbing sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG] [--include-dismissed]
+clast-plumbing sessions dismiss <session-id> [<session-id>...] [--reason TEXT]
 ```
 
 ### Flags
@@ -204,9 +204,9 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
 
 `dismissed: true` if the session has been explicitly dismissed (see below). Dismissed sessions are omitted from the listing unless `--include-dismissed` is passed, in which case they appear with this flag set.
 
-### `clast sessions dismiss <session-id>... [--reason TEXT]`
+### `clast-plumbing sessions dismiss <session-id>... [--reason TEXT]`
 
-Mark one or more sessions as dismissed so they are excluded from future `clast sessions` queries (and therefore skipped by curation workflows). Useful for throwaway or noise sessions you never intend to curate.
+Mark one or more sessions as dismissed so they are excluded from future `clast-plumbing sessions` queries (and therefore skipped by curation workflows). Useful for throwaway or noise sessions you never intend to curate.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -216,14 +216,14 @@ Each ID must be a valid session UUID. Already-dismissed IDs are skipped (idempot
 
 ---
 
-## `clast show`
+## `clast-plumbing show`
 
 Dump session metadata.
 
 ### Synopsis
 
 ```
-clast show <session-id> [--full] [--turns N]
+clast-plumbing show <session-id> [--full] [--turns N]
 ```
 
 ### Flags
@@ -256,19 +256,19 @@ With `--full`, appends `## First 5 turns` and `## Last 5 turns` sections in plai
 
 ---
 
-## `clast entries`
+## `clast-plumbing entries`
 
 List or read curated journal entries.
 
 ### Synopsis
 
 ```
-clast entries [--day DATE] [--since DATE] [--until DATE] [--project SLUG] [--tag TAG] [--limit N]
-clast entries read <entry-path>
-clast entries write [...]
+clast-plumbing entries [--day DATE] [--since DATE] [--until DATE] [--project SLUG] [--tag TAG] [--limit N]
+clast-plumbing entries read <entry-path>
+clast-plumbing entries write [...]
 ```
 
-### `clast entries` (list)
+### `clast-plumbing entries` (list)
 
 Default output:
 
@@ -297,14 +297,14 @@ JSON output:
 ]
 ```
 
-### `clast entries read <entry-path>`
+### `clast-plumbing entries read <entry-path>`
 
 Cat the entry file to stdout. Convenience over `cat` so the skill doesn't need to know the file layout. Accepts either an absolute path or just the filename (resolves under `entries/`).
 
-### `clast entries write`
+### `clast-plumbing entries write`
 
 ```
-clast entries write \
+clast-plumbing entries write \
   --session SESSION_ID \
   --slug SESSION_SLUG \
   [--tags TAG,TAG,...] \
@@ -335,16 +335,16 @@ Exit codes:
 
 ---
 
-## `clast breadcrumb`
+## `clast-plumbing breadcrumb`
 
 Append a one-line in-flight hint.
 
 ### Synopsis
 
 ```
-clast breadcrumb [--project SLUG | --global] [--date DATE] <TEXT>
-clast breadcrumb --read [--project SLUG | --global] [--day DATE]
-clast breadcrumb --list [--day DATE]
+clast-plumbing breadcrumb [--project SLUG | --global] [--date DATE] <TEXT>
+clast-plumbing breadcrumb --read [--project SLUG | --global] [--day DATE]
+clast-plumbing breadcrumb --list [--day DATE]
 ```
 
 ### Write mode (default)
@@ -366,11 +366,11 @@ List all breadcrumb files for a day. JSON output: array of `{project, path, line
 
 ---
 
-## `clast registry`
+## `clast-plumbing registry`
 
 Manage `projects.json`.
 
-### `clast registry list [--json]`
+### `clast-plumbing registry list [--json]`
 
 ```
 slug              path                              remote                                      aliases
@@ -378,7 +378,7 @@ xesapps           /home/beau/code/xesapps           git@gitlab.xes-inc.com:xes/x
 pi-coding-agent   /home/beau/code/pi-coding-agent   https://github.com/.../pi-coding-agent.git  (none)
 ```
 
-### `clast registry add <path> [--slug NAME] [--remote URL]`
+### `clast-plumbing registry add <path> [--slug NAME] [--remote URL]`
 
 1. Resolve `path` to absolute, canonicalize.
 2. Run `git -C <path> remote get-url origin` if `--remote` not given.
@@ -388,18 +388,18 @@ pi-coding-agent   /home/beau/code/pi-coding-agent   https://github.com/.../pi-co
 
 Output: confirmation line, or JSON with `--json`.
 
-### `clast registry resolve <path-or-segment>`
+### `clast-plumbing registry resolve <path-or-segment>`
 
 Given a filesystem path or a Claude Code encoded segment, return the registered slug.
 
 ```
-$ clast registry resolve /home/beau/code/xesapps
+$ clast-plumbing registry resolve /home/beau/code/xesapps
 xesapps
 
-$ clast registry resolve -home-beau-code-xesapps
+$ clast-plumbing registry resolve -home-beau-code-xesapps
 xesapps
 
-$ clast registry resolve /tmp/unknown
+$ clast-plumbing registry resolve /tmp/unknown
 (error: not registered)
 ```
 
@@ -409,20 +409,20 @@ Exit codes:
 
 JSON output: `{"slug": "..."}` on success, `{"error": "..."}` on failure.
 
-### `clast registry remove <slug>`
+### `clast-plumbing registry remove <slug>`
 
 Remove a slug from the registry. **Does not delete entries or transcripts.** Just unregisters the path mapping.
 
 ---
 
-## `clast stats`
+## `clast-plumbing stats`
 
 Token/duration/session-count stats.
 
 ### Synopsis
 
 ```
-clast stats [--day DATE] [--since DATE] [--until DATE] [--project SLUG]
+clast-plumbing stats [--day DATE] [--since DATE] [--until DATE] [--project SLUG]
 ```
 
 ### Output
@@ -443,14 +443,14 @@ Stats are derived from manifest + filesystem stat; no JSONL parsing required.
 
 ---
 
-## `clast doctor`
+## `clast-plumbing doctor`
 
 Sanity-check the journal.
 
 ### Synopsis
 
 ```
-clast doctor [--fix]
+clast-plumbing doctor [--fix]
 ```
 
 ### Checks performed
@@ -482,7 +482,7 @@ Destructive operations (removing entries, rewriting frontmatter) always require 
 ✓ Missing snapshots: none
 ✓ Day-bucket consistency: ok
 
-Run `clast doctor --fix` to clean up orphans.
+Run `clast-plumbing doctor --fix` to clean up orphans.
 ```
 
 Exit codes:
@@ -492,7 +492,7 @@ Exit codes:
 
 ---
 
-## `clast whereami`
+## `clast-plumbing whereami`
 
 Debug current state. Mostly for users to understand what `clast` sees.
 

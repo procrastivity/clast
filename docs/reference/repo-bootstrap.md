@@ -119,18 +119,20 @@ clast/
 
 ## Top-level file annotations
 
-### `bin/clast`
+### `bin/clast` (porcelain) and `bin/clast-plumbing` (plumbing)
 
-Single dispatcher script. Shape:
+Two thin dispatcher scripts. `clast-plumbing` is the deterministic core
+(snapshot/sessions/entries/…); `clast` is the LLM-aware porcelain
+(`wake`/`brief`). Both source `lib/clast/` libs and dispatch to a
+subcommand file by name.
 
 ```bash
 #!/usr/bin/env bash
-# clast — main dispatcher
+# clast-plumbing — main dispatcher
 set -euo pipefail
 
 CLAST_LIB="${CLAST_LIB:-$(dirname "$(realpath "$0")")/../lib/clast}"
 
-# Source common lib
 # shellcheck source=lib/clast/clast-lib.bash
 source "$CLAST_LIB/clast-lib.bash"
 
@@ -144,14 +146,18 @@ case "${1:-}" in
   -h|--help|help|"")
     clast_usage; exit 0 ;;
   --version)
-    echo "clast $(clast_version)"; exit 0 ;;
+    echo "clast-plumbing $(clast_version)"; exit 0 ;;
   *)
-    echo "clast: unknown subcommand '$1'" >&2
+    echo "clast-plumbing: unknown subcommand '$1'" >&2
     clast_usage >&2; exit 2 ;;
 esac
 ```
 
-The dispatcher is thin. All real logic lives in `lib/clast/`.
+The porcelain has the same shape but dispatches `wake` / `brief` from
+`lib/clast/clast-porcelain-subcommands/<name>.bash` and errors on any
+unknown verb — it does NOT proxy to plumbing.
+
+All real logic lives in `lib/clast/`.
 
 ### `lib/clast/clast-lib.bash`
 
@@ -257,7 +263,8 @@ Match xcind's pattern. Multi-channel from day one.
   "version": "0.1.0",
   "description": "Capture, curate, and surface Claude Code session history across all your projects.",
   "bin": {
-    "clast": "bin/clast"
+    "clast": "bin/clast",
+    "clast-plumbing": "bin/clast-plumbing"
   },
   "files": [
     "bin/",
@@ -270,7 +277,7 @@ Match xcind's pattern. Multi-channel from day one.
   ],
   "scripts": {
     "test": "test/test-clast.sh",
-    "lint": "shellcheck bin/clast lib/clast/**/*.bash test/*.sh"
+    "lint": "shellcheck bin/clast bin/clast-plumbing lib/clast/**/*.bash test/*.sh"
   },
   "repository": {
     "type": "git",
@@ -515,7 +522,7 @@ Each lib gets a focused test file (`test/test-<libname>.sh`). Tests are bash scr
 - `multi-project/` — three projects, varied activity
 - `ambiguous-decode/` — paths with literal dashes for collision testing
 - `worktree/` — one project, multiple worktree segments
-- `corrupt-manifest/` — for `clast doctor` tests
+- `corrupt-manifest/` — for `clast-plumbing doctor` tests
 - `empty/` — no projects at all (edge case)
 
 Tests set `CLAST_JOURNAL_DIR=.test-tmp/journal-$$` and `CLAST_PROJECTS_DIR=fixtures/<scenario>` so they don't touch the real `~/.claude/`.
@@ -548,7 +555,7 @@ All declared in `flake.nix`'s `devShells.default`.
 
 | # | Question | Default |
 |---|---|---|
-| 1 | Single dispatcher (`clast snapshot`) vs separate bins (`clast-snapshot`) | **Single dispatcher** (resolved) |
+| 1 | Single dispatcher (`clast-plumbing snapshot`) vs separate bins (`clast-snapshot`) | **Single dispatcher** (resolved) |
 | 2 | Single repo for CLI + plugin | **Single repo** (resolved) |
 | 3 | Test framework: handwritten bash or `bats` | **Handwritten bash** for v1 (matches both reference projects) |
 | 4 | Configuration format | **TOML** (`~/.config/clast/config.toml`), env vars override |

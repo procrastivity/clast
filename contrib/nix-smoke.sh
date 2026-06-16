@@ -24,13 +24,25 @@ case "$version_output" in
         printf '%s\n' "$version_output"
         ;;
     *)
-        echo "unexpected version output: $version_output" >&2
+        echo "unexpected porcelain version output: $version_output" >&2
         exit 1
         ;;
 esac
 
-echo "==> $result/bin/clast whereami --help (with CLAST_LIB unset, minimal PATH)"
-env -u CLAST_LIB PATH=/usr/bin:/bin "$result/bin/clast" whereami --help >/dev/null
+echo "==> $result/bin/clast-plumbing --version (with CLAST_LIB unset, minimal PATH)"
+plumbing_version_output=$(env -u CLAST_LIB PATH=/usr/bin:/bin "$result/bin/clast-plumbing" --version)
+case "$plumbing_version_output" in
+    clast-plumbing\ [0-9]*.[0-9]*.[0-9]*)
+        printf '%s\n' "$plumbing_version_output"
+        ;;
+    *)
+        echo "unexpected plumbing version output: $plumbing_version_output" >&2
+        exit 1
+        ;;
+esac
+
+echo "==> $result/bin/clast-plumbing whereami --help (with CLAST_LIB unset, minimal PATH)"
+env -u CLAST_LIB PATH=/usr/bin:/bin "$result/bin/clast-plumbing" whereami --help >/dev/null
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -48,17 +60,21 @@ env -u CLAST_LIB \
     PATH=/usr/bin:/bin \
     CLAST_PROJECTS_DIR="$PWD/test/fixtures/simple" \
     CLAST_JOURNAL_DIR="$tmpdir/journal" \
-    "$result/bin/clast" snapshot >/dev/null
+    "$result/bin/clast-plumbing" snapshot >/dev/null
 env -u CLAST_LIB \
     PATH=/usr/bin:/bin \
     CLAST_JOURNAL_DIR="$tmpdir/journal" \
-    "$result/bin/clast" show aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa --full >/dev/null
+    "$result/bin/clast-plumbing" show aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa --full >/dev/null
 
 echo "==> layout assertions"
 for path in \
     bin/clast \
+    bin/clast-plumbing \
     lib/clast/clast-lib.bash \
+    lib/clast/clast-porcelain-lib.bash \
     lib/clast/clast-subcommands/whereami.bash \
+    lib/clast/clast-porcelain-subcommands/wake.bash \
+    lib/clast/clast-porcelain-subcommands/brief.bash \
     share/clast/.claude-plugin/plugin.json \
     share/clast/hooks/hooks.json \
     share/clast/hooks/snapshot.sh \

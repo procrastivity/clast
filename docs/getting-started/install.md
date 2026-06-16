@@ -56,8 +56,8 @@ the installed files.
 
 ```sh
 clast --version
-clast whereami
-clast doctor
+clast-plumbing whereami
+clast-plumbing doctor
 ```
 
 `whereami` shows the journal path and current `pwd` resolution. `doctor`

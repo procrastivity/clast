@@ -34,7 +34,7 @@ OnUnitActiveSec=1h
 Persistent=true
 ```
 
-Edit `OnUnitActiveSec` to change the interval. Because `clast snapshot` is
+Edit `OnUnitActiveSec` to change the interval. Because `clast-plumbing snapshot` is
 idempotent, more frequent runs are safe — they're free no-ops when there's
 nothing new.
 
