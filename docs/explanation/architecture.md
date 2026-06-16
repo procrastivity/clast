@@ -11,7 +11,7 @@
                                   ~/.claude/journal/transcripts/...
                                   ~/.claude/journal/.manifest.jsonl
                                                   │
-   /day-wakeup ──invokes──► clast-plumbing snapshot       │  (durable; survives CC auto-deletion)
+   /wake ──invokes──► clast-plumbing snapshot       │  (durable; survives CC auto-deletion)
                 ──invokes──► clast-plumbing sessions --day yesterday --json
                           │
                           ▼
@@ -23,7 +23,7 @@
                                                   ▼
                                   ~/.claude/journal/entries/...
 
-   /wakeup [project] ──invokes──► clast-plumbing entries --project SLUG --json
+   /brief [project] ──invokes──► clast-plumbing entries --project SLUG --json
                      ──synthesizes briefing in chat
 
    clast-plumbing breadcrumb TEXT ──appends──► ~/.claude/journal/breadcrumbs/...

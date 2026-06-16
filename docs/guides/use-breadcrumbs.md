@@ -1,6 +1,6 @@
 # Use breadcrumbs
 
-Breadcrumbs are append-only one-line notes for `/wakeup` and `/day-wakeup` to
+Breadcrumbs are append-only one-line notes for `/brief` and `/wake` to
 surface later. Use them when you want to capture an in-flight thought without
 breaking flow.
 
@@ -27,8 +27,8 @@ clast-plumbing breadcrumb --list                            # all breadcrumb fil
 
 | Kind | When to use |
 |---|---|
-| `--project SLUG` (or auto-resolved) | The note is about a specific repo. `/wakeup <slug>` will surface it the next time you start working there. |
-| `--global` | The note is cross-cutting — a reminder, a meta-task, a "next time I sit down at the computer" thought. Surfaced by `/day-wakeup`. |
+| `--project SLUG` (or auto-resolved) | The note is about a specific repo. `/brief <slug>` will surface it the next time you start working there. |
+| `--global` | The note is cross-cutting — a reminder, a meta-task, a "next time I sit down at the computer" thought. Surfaced by `/wake`. |
 
 ## On disk
 

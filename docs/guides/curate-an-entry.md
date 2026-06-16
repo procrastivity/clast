@@ -1,6 +1,6 @@
 # Curate an entry by hand
 
-`/day-wakeup` (in the plugin) is the normal way to curate. This guide covers
+`/wake` (in the plugin) is the normal way to curate. This guide covers
 the CLI-only path: producing a journal entry from a captured session without
 any LLM in the loop.
 
@@ -75,4 +75,4 @@ clast-plumbing entries read <entry-filename>.md     # cat one
 - [`reference/cli.md#clast-entries`](../reference/cli.md#clast-entries) — write
   command flags and exit codes.
 - [`examples/workflows/morning-briefing.md`](../../examples/workflows/morning-briefing.md)
-  — a worked `/day-wakeup` walkthrough (uses the plugin).
+  — a worked `/wake` walkthrough (uses the plugin).

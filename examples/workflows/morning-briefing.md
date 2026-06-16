@@ -1,11 +1,11 @@
 # Morning Briefing Example
 
-This is a realistic walkthrough of one `/day-wakeup` run. Yesterday, `xesapps`
+This is a realistic walkthrough of one `/wake` run. Yesterday, `xesapps`
 finished a field-normalization fix, `notes` explored a journal template update,
 and `infra-tools` checked a flaky shell lint issue.
 
 ```bash
-# User: /day-wakeup
+# User: /wake
 clast-plumbing snapshot
 clast-plumbing --json sessions --day yesterday
 ```
@@ -43,7 +43,7 @@ AskUserQuestion presents `Accept`, `Accept + promote decision`, `Accept + promot
 common-issue`, `Accept + promote workflow`, `Edit`, `Skip`, and `Stop here`.
 
 The user chooses `Skip`. The skill writes nothing; the session remains
-uncurated and can be revisited in a later `/day-wakeup`.
+uncurated and can be revisited in a later `/wake`.
 
 ## Session 2: notes
 
@@ -123,15 +123,15 @@ clast-plumbing entries write \
 Final summary:
 
 ```text
-Day wakeup complete.
+Wake complete.
 Curated: 2 sessions across 2 projects.
 Skipped: 1 session.
 Remaining uncurated: 1.
 Promoted: 1 decision (folded into the accepted entry for v1.0).
-Run `/wakeup <project>` to start working on a specific project today.
+Run `/brief <project>` to start working on a specific project today.
 ```
 
 What this changes on disk:
 `entries/2026-05-31-1340-notes-entry-template-cleanup.md` and `entries/2026-05-31-0912-xesapps-field-normalization-fix.md` were written.
 `.manifest.jsonl` was already current from `clast-plumbing snapshot`; curation does not append to it.
-The skipped `infra-tools` session stays uncurated and remains eligible for a later `/day-wakeup`.
+The skipped `infra-tools` session stays uncurated and remains eligible for a later `/wake`.

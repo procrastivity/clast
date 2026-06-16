@@ -15,9 +15,9 @@ clast/
 ├── .claude-plugin/
 │   └── plugin.json                 # plugin manifest (ONLY this lives here)
 ├── skills/                         # sibling of .claude-plugin/, NOT inside it
-│   ├── day-wakeup/
+│   ├── wake/
 │   │   └── SKILL.md
-│   ├── wakeup/
+│   ├── brief/
 │   │   └── SKILL.md
 │   └── breadcrumb/                 # OPTIONAL v1.1; can omit in v1
 │       └── SKILL.md
@@ -35,8 +35,8 @@ clast/
 │   ├── clast-dismissed-lib.bash    # dismissed-session tracking (.dismissed.jsonl)
 │   ├── clast-porcelain-lib.bash    # porcelain-only helpers (LLM call, prompts, preflight)
 │   ├── prompts/                    # shared LLM prompt templates (plugin skills + porcelain)
-│   │   ├── day-wakeup-draft-system.md
-│   │   ├── day-wakeup-draft-user.md
+│   │   ├── wake-draft-system.md
+│   │   ├── wake-draft-user.md
 │   │   ├── brief-system.md
 │   │   └── brief-user.md
 │   ├── clast-porcelain-subcommands/
@@ -78,7 +78,7 @@ clast/
 │   ├── config/
 │   │   └── config.toml.sample
 │   └── workflows/
-│       └── morning-briefing.md     # narrative example of a /day-wakeup transcript
+│       └── morning-briefing.md     # narrative example of a /wake transcript
 ├── docs/                           # Diátaxis layout (see docs/README.md)
 │   ├── README.md                   # section index
 │   ├── explanation/                # concepts: what-is-clast, architecture, data-model, conventions

@@ -9,7 +9,7 @@ Capture, curate, and surface Claude Code session history across all your project
 - **CLI** — two binaries, porcelain over plumbing:
   - `clast` — porcelain (LLM-aware): `clast wake`, `clast brief`. See [run without Claude Code](./docs/guides/run-without-claude-code.md).
   - `clast-plumbing` — deterministic core: snapshot, browse, and query your Claude Code session JSONL history.
-- **Plugin** — installs skills (`/day-wakeup`, `/wakeup`) that surface recent session context.
+- **Plugin** — installs skills (`/wake`, `/brief`) that surface recent session context.
 - **SessionStart hook** — quietly snapshots active sessions in the background each time Claude Code starts.
 
 ## Capture your sessions
@@ -66,7 +66,7 @@ clast-plumbing breadcrumb --read --project xesapps
 clast-plumbing breadcrumb --read --global
 ```
 
-Breadcrumbs are append-only one-line notes for `/wakeup` and `/day-wakeup`.
+Breadcrumbs are append-only one-line notes for `/brief` and `/wake`.
 See [`docs/reference/cli.md#clast-breadcrumb`](./docs/reference/cli.md#clast-breadcrumb)
 for the full command contract.
 
@@ -144,21 +144,21 @@ current with zero manual effort. The hook is best-effort and silent: if the
 [`docs/reference/plugin.md#hook-sessionstart`](./docs/reference/plugin.md#hook-sessionstart)
 for the hook's design rationale.
 
-### `/day-wakeup`
+### `/wake`
 
-At the start of each day, run `/day-wakeup` inside any Claude Code session after
+At the start of each day, run `/wake` inside any Claude Code session after
 the plugin is installed. It performs once-per-day cross-project curation of
 yesterday's sessions into durable journal entries, walking each uncurated session
 through a draft you can accept, edit, skip, or mark for in-entry promotion. See
-[`docs/reference/plugin.md#skill-1-day-wakeup`](./docs/reference/plugin.md#skill-1-day-wakeup).
+[`docs/reference/plugin.md#skill-1-wake`](./docs/reference/plugin.md#skill-1-wake).
 
-### `/wakeup`
+### `/brief`
 
-When starting work on a specific project, run `/wakeup` (or `/wakeup <slug>` from
+When starting work on a specific project, run `/brief` (or `/brief <slug>` from
 anywhere) to get a per-project read-only briefing synthesized from recent curated entries,
-today's breadcrumbs, and any sessions already started today. `/wakeup` never writes — it
+today's breadcrumbs, and any sessions already started today. `/brief` never writes — it
 only reads. See
-[`docs/reference/plugin.md#skill-2-wakeup`](./docs/reference/plugin.md#skill-2-wakeup).
+[`docs/reference/plugin.md#skill-2-brief`](./docs/reference/plugin.md#skill-2-brief).
 
 ## Development
 

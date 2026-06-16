@@ -1,6 +1,6 @@
 # Install the plugin
 
-The Claude Code plugin adds two skills (`/day-wakeup`, `/wakeup`) and a
+The Claude Code plugin adds two skills (`/wake`, `/brief`) and a
 `SessionStart` hook that auto-runs `clast-plumbing snapshot` in the
 background each time a session starts.
 
@@ -28,16 +28,16 @@ claude plugin install $(npm root -g)/@procrastivity/clast
 | Surface | Purpose |
 |---|---|
 | `SessionStart` hook | Backgrounds `clast-plumbing snapshot` on every session start. Free auto-capture. |
-| `/day-wakeup` | Once-per-day cross-project curation. Walks each uncurated session through a draft you can accept, edit, or skip. |
-| `/wakeup [project]` | Per-project briefing synthesized from recent entries + today's breadcrumbs. Read-only. |
+| `/wake` | Once-per-day cross-project curation. Walks each uncurated session through a draft you can accept, edit, or skip. |
+| `/brief [project]` | Per-project briefing synthesized from recent entries + today's breadcrumbs. Read-only. |
 
 See [`reference/plugin.md`](../reference/plugin.md) for the full prompts and
 option sets.
 
 ## After installation
 
-In a Claude Code session, try `/wakeup` from inside a registered project, or
-`/day-wakeup` first thing in the morning.
+In a Claude Code session, try `/brief` from inside a registered project, or
+`/wake` first thing in the morning.
 
 If `clast-plumbing` is not on `PATH` yet, the `SessionStart` hook is silent
 and best-effort — sessions still start cleanly. Add `clast-plumbing` to your

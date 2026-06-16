@@ -67,5 +67,5 @@ just doesn't exist yet, which is fine).
 ## Next steps
 
 - [First snapshot](./first-snapshot.md) — a five-minute tour of the CLI.
-- [Install the plugin](./install-the-plugin.md) — add `/day-wakeup` and
-  `/wakeup` to Claude Code.
+- [Install the plugin](./install-the-plugin.md) — add `/wake` and
+  `/brief` to Claude Code.
