@@ -7,8 +7,8 @@ any LLM in the loop.
 ## Pick a session
 
 ```sh
-clast sessions --since -7d                                    # human-readable
-clast sessions --since -7d --json | jq -r '.[] | "\(.session_id)  \(.project)  \(.start)"'
+clast-plumbing sessions --since -7d                                    # human-readable
+clast-plumbing sessions --since -7d --json | jq -r '.[] | "\(.session_id)  \(.project)  \(.start)"'
 ```
 
 Grab the UUID of the session you want to curate.
@@ -16,8 +16,8 @@ Grab the UUID of the session you want to curate.
 ## Inspect it
 
 ```sh
-clast show <session-uuid>            # metadata only
-clast show <session-uuid> --full     # metadata + first/last turns
+clast-plumbing show <session-uuid>            # metadata only
+clast-plumbing show <session-uuid> --full     # metadata + first/last turns
 ```
 
 The `--full` view is what you'll skim while writing the entry.
@@ -41,7 +41,7 @@ One sentence describing what this session was trying to accomplish.
 - Anything still unfinished or deferred.
 EOF
 
-clast entries write \
+clast-plumbing entries write \
   --session <session-uuid> \
   --slug short-kebab-slug \
   --tags tag1,tag2 \
@@ -52,20 +52,20 @@ clast entries write \
 Or pipe via stdin:
 
 ```sh
-clast entries write --session <uuid> --slug short-slug --body-stdin < /tmp/entry.md
+clast-plumbing entries write --session <uuid> --slug short-slug --body-stdin < /tmp/entry.md
 ```
 
-`clast entries write` looks up the session in the manifest, composes the
+`clast-plumbing entries write` looks up the session in the manifest, composes the
 frontmatter from the captured snapshot and the registry, and writes
 `entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md` atomically.
 
 ## Read it back
 
 ```sh
-clast entries                              # list all
-clast entries --project <slug>             # filter
-clast entries --since -7d                  # window
-clast entries read <entry-filename>.md     # cat one
+clast-plumbing entries                              # list all
+clast-plumbing entries --project <slug>             # filter
+clast-plumbing entries --since -7d                  # window
+clast-plumbing entries read <entry-filename>.md     # cat one
 ```
 
 ## See also

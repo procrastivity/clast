@@ -5,8 +5,7 @@
   "homepage": "https://github.com/procrastivity/clast#readme",
   "bin": {
     "clast": "bin/clast",
-    "clast-wake": "bin/clast-wake",
-    "clast-brief": "bin/clast-brief"
+    "clast-plumbing": "bin/clast-plumbing"
   },
   "files": [
     "bin/",

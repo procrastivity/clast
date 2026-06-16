@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# clast-plumbing — main dispatcher (the deterministic, LLM-free core).
+#
+# Parses global flags, sources libs, dispatches to a subcommand.
+# Subcommand files live in $CLAST_LIB/clast-subcommands/<name>.bash and
+# each defines a single function `clast_cmd_<name>`. The user-facing
+# porcelain is `bin/clast` (see `clast --help` for that surface).
+set -euo pipefail
+
+CLAST_LIB="${CLAST_LIB:-$(dirname "$(realpath "$0")")/../lib/clast}"
+export CLAST_LIB
+
+# shellcheck source=lib/clast/clast-lib.bash
+source "$CLAST_LIB/clast-lib.bash"
+# shellcheck source=lib/clast/clast-decode-lib.bash
+source "$CLAST_LIB/clast-decode-lib.bash"
+# shellcheck source=lib/clast/clast-registry-lib.bash
+source "$CLAST_LIB/clast-registry-lib.bash"
+# shellcheck source=lib/clast/clast-manifest-lib.bash
+source "$CLAST_LIB/clast-manifest-lib.bash"
+
+# --- Global flag parsing -------------------------------------------------
+#
+# Walk argv before the subcommand name, peeling off any recognized global
+# flag and setting the corresponding env var. Stop at the first non-flag
+# arg (the subcommand) or at `--`. Remaining argv is passed to the
+# subcommand untouched.
+#
+# `--json` and `--journal-dir`/`--projects-dir` are forwarded to the lib
+# via env so subcommands can also accept them locally without re-parsing.
+
+declare -a _CLAST_REMAINING=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help|help)
+      clast_usage
+      exit 0
+      ;;
+    --version)
+      echo "clast-plumbing $(clast_version)"
+      exit 0
+      ;;
+    --json)
+      export CLAST_JSON=1
+      shift
+      ;;
+    -v|--verbose)
+      export CLAST_VERBOSE=1
+      shift
+      ;;
+    -q|--quiet)
+      export CLAST_QUIET=1
+      shift
+      ;;
+    --journal-dir)
+      if [[ $# -lt 2 ]]; then
+        clast_log_error "--journal-dir requires a value"
+        exit 2
+      fi
+      export CLAST_JOURNAL_DIR="$2"
+      shift 2
+      ;;
+    --journal-dir=*)
+      export CLAST_JOURNAL_DIR="${1#*=}"
+      shift
+      ;;
+    --projects-dir)
+      if [[ $# -lt 2 ]]; then
+        clast_log_error "--projects-dir requires a value"
+        exit 2
+      fi
+      export CLAST_PROJECTS_DIR="$2"
+      shift 2
+      ;;
+    --projects-dir=*)
+      export CLAST_PROJECTS_DIR="${1#*=}"
+      shift
+      ;;
+    --)
+      shift
+      _CLAST_REMAINING+=("$@")
+      break
+      ;;
+    -*)
+      clast_log_error "unknown global flag: $1"
+      clast_usage >&2
+      exit 2
+      ;;
+    *)
+      # First non-flag arg is the subcommand; stop parsing.
+      _CLAST_REMAINING+=("$@")
+      break
+      ;;
+  esac
+done
+
+if [[ ${#_CLAST_REMAINING[@]} -eq 0 ]]; then
+  clast_usage
+  exit 0
+fi
+
+set -- "${_CLAST_REMAINING[@]}"
+
+cmd="$1"; shift
+
+# --- Subcommand dispatch -------------------------------------------------
+
+# Map of stubbed subcommands → step number that will implement them.
+# Future steps replace each stub with a real `source` + dispatch below.
+_clast_stub() {
+  local name="$1" step="$2"
+  clast_log_error "$name is not yet implemented (planned for step $step)"
+  exit 2
+}
+
+case "$cmd" in
+  whereami)
+    # shellcheck source=lib/clast/clast-subcommands/whereami.bash
+    source "$CLAST_LIB/clast-subcommands/whereami.bash"
+    clast_cmd_whereami "$@"
+    ;;
+  snapshot)
+    # shellcheck source=lib/clast/clast-subcommands/snapshot.bash
+    source "$CLAST_LIB/clast-subcommands/snapshot.bash"
+    clast_cmd_snapshot "$@"
+    ;;
+  projects)
+    # shellcheck source=lib/clast/clast-subcommands/projects.bash
+    source "$CLAST_LIB/clast-subcommands/projects.bash"
+    clast_cmd_projects "$@"
+    ;;
+  sessions)
+    # shellcheck source=lib/clast/clast-subcommands/sessions.bash
+    source "$CLAST_LIB/clast-subcommands/sessions.bash"
+    clast_cmd_sessions "$@"
+    ;;
+  show)
+    # shellcheck source=lib/clast/clast-subcommands/show.bash
+    source "$CLAST_LIB/clast-subcommands/show.bash"
+    clast_cmd_show "$@"
+    ;;
+  entries)
+    # shellcheck source=lib/clast/clast-subcommands/entries.bash
+    source "$CLAST_LIB/clast-subcommands/entries.bash"
+    clast_cmd_entries "$@"
+    ;;
+  breadcrumb)
+    # shellcheck source=lib/clast/clast-subcommands/breadcrumb.bash
+    source "$CLAST_LIB/clast-subcommands/breadcrumb.bash"
+    clast_cmd_breadcrumb "$@"
+    ;;
+  registry)
+    # shellcheck source=lib/clast/clast-subcommands/registry.bash
+    source "$CLAST_LIB/clast-subcommands/registry.bash"
+    clast_cmd_registry "$@"
+    ;;
+  stats)
+    # shellcheck source=lib/clast/clast-subcommands/stats.bash
+    source "$CLAST_LIB/clast-subcommands/stats.bash"
+    clast_cmd_stats "$@"
+    ;;
+  doctor)
+    # shellcheck source=lib/clast/clast-subcommands/doctor.bash
+    source "$CLAST_LIB/clast-subcommands/doctor.bash"
+    clast_cmd_doctor "$@"
+    ;;
+  *)
+    clast_log_error "unknown subcommand '$cmd'"
+    clast_usage >&2
+    exit 2
+    ;;
+esac

@@ -23,7 +23,15 @@ if [[ -x "$PREFIX/bin/clast" ]]; then
 else
   _clast_test_fail "installed bin/clast is executable"
 fi
+if [[ -x "$PREFIX/bin/clast-plumbing" ]]; then
+  _clast_test_pass "installed bin/clast-plumbing is executable"
+else
+  _clast_test_fail "installed bin/clast-plumbing is executable"
+fi
 assert_file_exists "$PREFIX/lib/clast/clast-lib.bash" "installed clast-lib.bash"
+assert_file_exists "$PREFIX/lib/clast/clast-porcelain-lib.bash" "installed clast-porcelain-lib.bash"
+assert_file_exists "$PREFIX/lib/clast/clast-porcelain-subcommands/wake.bash" "installed wake porcelain subcommand"
+assert_file_exists "$PREFIX/lib/clast/clast-porcelain-subcommands/brief.bash" "installed brief porcelain subcommand"
 assert_file_exists "$PREFIX/lib/clast/clast-decode-lib.bash" "installed clast-decode-lib.bash"
 assert_file_exists "$PREFIX/lib/clast/clast-registry-lib.bash" "installed clast-registry-lib.bash"
 assert_file_exists "$PREFIX/lib/clast/clast-manifest-lib.bash" "installed clast-manifest-lib.bash"
@@ -47,6 +55,11 @@ assert_eq "0" "$rc" "installed clast --version exits 0"
 assert_eq "clast $expected_version" "$out" "installed clast --version prints package version"
 assert_eq "" "$(cat "$version_err")" "installed clast --version has empty stderr"
 
+out="$("$PREFIX/bin/clast-plumbing" --version 2>"$version_err")" && rc=$? || rc=$?
+assert_eq "0" "$rc" "installed clast-plumbing --version exits 0"
+assert_eq "clast-plumbing $expected_version" "$out" "installed clast-plumbing --version prints package version"
+assert_eq "" "$(cat "$version_err")" "installed clast-plumbing --version has empty stderr"
+
 out="$(./install.sh "$PREFIX")" && rc=$? || rc=$?
 assert_eq "0" "$rc" "second install exits 0"
 out="$("$PREFIX/bin/clast" --version 2>"$version_err")" && rc=$? || rc=$?
@@ -63,6 +76,7 @@ assert_file_not_exists "$obsolete" "reinstall prunes stale subcommand file"
 out="$(./uninstall.sh "$PREFIX")" && rc=$? || rc=$?
 assert_eq "0" "$rc" "uninstall exits 0"
 assert_file_not_exists "$PREFIX/bin/clast" "uninstall removes bin/clast"
+assert_file_not_exists "$PREFIX/bin/clast-plumbing" "uninstall removes bin/clast-plumbing"
 assert_file_not_exists "$PREFIX/lib/clast" "uninstall removes lib/clast"
 assert_file_not_exists "$PREFIX/share/clast" "uninstall removes share/clast"
 assert_file_exists "$PREFIX/bin" "uninstall leaves bin dir"

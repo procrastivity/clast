@@ -3,8 +3,8 @@
 # then enable the timer with: systemctl --user enable --now clast-snapshot.timer
 
 [Unit]
-Description=Capture Claude Code transcripts with clast
+Description=Capture Claude Code transcripts with clast-plumbing
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/clast snapshot
+ExecStart=/usr/local/bin/clast-plumbing snapshot

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-dispatcher.sh — `bin/clast` dispatcher behavior:
+# test-dispatcher.sh — `bin/clast-plumbing` dispatcher behavior:
 # version, help, unknown subcommand, real subcommand dispatch, global-flag
 # forwarding into the lib.
 set -uo pipefail
@@ -9,13 +9,13 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-dispatcher"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 
 # --- --version ----------------------------------------------------------
 
 expected_version="$(jq -r '.version' package.json)"
 actual_version="$("$CLAST_BIN" --version)"
-assert_eq "clast $expected_version" "$actual_version" "--version prints clast <pkg-version>"
+assert_eq "clast-plumbing $expected_version" "$actual_version" "--version prints clast-plumbing <pkg-version>"
 assert_exit_code 0 "$CLAST_BIN" --version
 
 # --- --help and no-arg --------------------------------------------------

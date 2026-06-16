@@ -10,8 +10,7 @@ echo "Installing clast to $PREFIX ..."
 install -d "$PREFIX/bin" "$PREFIX/lib/clast" "$PREFIX/share/clast"
 
 install -m755 "$SRC/bin/clast" "$PREFIX/bin/clast"
-install -m755 "$SRC/bin/clast-wake" "$PREFIX/bin/clast-wake"
-install -m755 "$SRC/bin/clast-brief" "$PREFIX/bin/clast-brief"
+install -m755 "$SRC/bin/clast-plumbing" "$PREFIX/bin/clast-plumbing"
 
 # Drop stale files from a prior install before re-copying.
 rm -rf "$PREFIX/lib/clast"
@@ -33,8 +32,9 @@ install -m644 "$SRC/LICENSE" "$PREFIX/share/clast/LICENSE"
 install -m644 "$SRC/package.json" "$PREFIX/lib/clast/package.json"
 
 echo "Installed clast to $PREFIX"
-echo "  Binary: $PREFIX/bin/clast"
-echo "  Plugin: $PREFIX/share/clast/.claude-plugin"
+echo "  Porcelain: $PREFIX/bin/clast (wake, brief)"
+echo "  Plumbing:  $PREFIX/bin/clast-plumbing"
+echo "  Plugin:    $PREFIX/share/clast/.claude-plugin"
 echo ""
 echo "Add the plugin via:"
 echo "  claude plugin install $PREFIX/share/clast"
@@ -43,3 +43,4 @@ echo "Uninstall with:"
 echo "  $SRC/uninstall.sh $PREFIX"
 echo ""
 "$PREFIX/bin/clast" --version || true
+"$PREFIX/bin/clast-plumbing" --version || true

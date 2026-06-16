@@ -6,27 +6,30 @@ Capture, curate, and surface Claude Code session history across all your project
 
 ## What it does
 
-- **CLI** (`clast`) — snapshot, browse, and query your Claude Code session JSONL history.
+- **CLI** — two binaries, porcelain over plumbing:
+  - `clast` — porcelain (LLM-aware): `clast wake`, `clast brief`. See [run without Claude Code](./docs/guides/run-without-claude-code.md).
+  - `clast-plumbing` — deterministic core: snapshot, browse, and query your Claude Code session JSONL history.
 - **Plugin** — installs skills (`/day-wakeup`, `/wakeup`) that surface recent session context.
 - **SessionStart hook** — quietly snapshots active sessions in the background each time Claude Code starts.
 
 ## Capture your sessions
 
 ```sh
-clast snapshot                       # copy any new sessions into the journal
-clast snapshot --dry-run --json | jq # preview what would be captured
+clast-plumbing snapshot                       # copy any new sessions into the journal
+clast-plumbing snapshot --dry-run --json | jq # preview what would be captured
 ```
 
-`clast snapshot` is idempotent and silent on no-op, safe to run from cron or
-a SessionStart hook. See [`docs/reference/cli.md#clast-snapshot`](./docs/reference/cli.md#clast-snapshot)
+`clast-plumbing snapshot` is idempotent and silent on no-op, safe to run from
+cron or a SessionStart hook. See
+[`docs/reference/cli.md#clast-snapshot`](./docs/reference/cli.md#clast-snapshot)
 for the full flag reference.
 
 ## Read your sessions
 
 ```sh
-clast projects                        # which projects had activity today
-clast sessions --since -7d            # sessions captured in the last week
-clast show <session-uuid> --full      # metadata + first/last turns
+clast-plumbing projects                        # which projects had activity today
+clast-plumbing sessions --since -7d            # sessions captured in the last week
+clast-plumbing show <session-uuid> --full      # metadata + first/last turns
 ```
 
 Window flags (`--day`, `--since`, `--until`) accept ISO dates and
@@ -39,14 +42,14 @@ for the full flag and output schemas.
 ## Curate an entry
 
 ```sh
-clast entries                                            # list curated entries
-clast entries read 2026-05-30-1430-xesapps-foo.md        # cat a single entry
-printf 'Notes...\n' | clast entries write \
-  --session <session-uuid> --slug short-slug --body-stdin # write a new entry
+clast-plumbing entries                                            # list curated entries
+clast-plumbing entries read 2026-05-30-1430-xesapps-foo.md        # cat a single entry
+printf 'Notes...\n' | clast-plumbing entries write \
+  --session <session-uuid> --slug short-slug --body-stdin          # write a new entry
 ```
 
-`clast entries write` looks up the session in the manifest, composes the
-documented frontmatter from the captured snapshot + registry, and writes
+`clast-plumbing entries write` looks up the session in the manifest, composes
+the documented frontmatter from the captured snapshot + registry, and writes
 `entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md` atomically. See
 [`docs/reference/cli.md#entry-frontmatter`](./docs/reference/cli.md#entry-frontmatter)
 for the full frontmatter schema and
@@ -56,11 +59,11 @@ for the flag reference.
 ## Leave a breadcrumb
 
 ```sh
-clast breadcrumb --project xesapps 'check migration before deploy'
-clast breadcrumb --global 'remember to bump the cache version'
+clast-plumbing breadcrumb --project xesapps 'check migration before deploy'
+clast-plumbing breadcrumb --global 'remember to bump the cache version'
 
-clast breadcrumb --read --project xesapps
-clast breadcrumb --read --global
+clast-plumbing breadcrumb --read --project xesapps
+clast-plumbing breadcrumb --read --global
 ```
 
 Breadcrumbs are append-only one-line notes for `/wakeup` and `/day-wakeup`.
@@ -70,17 +73,17 @@ for the full command contract.
 ## Inspect and audit the journal
 
 ```sh
-clast stats                          # one-line activity summary for today
-clast stats --since -7d              # rollup over the last week
+clast-plumbing stats                          # one-line activity summary for today
+clast-plumbing stats --since -7d              # rollup over the last week
 
-clast doctor                         # check manifest, registry, snapshots
-clast doctor --fix                   # rebuild a broken manifest, prune orphans
+clast-plumbing doctor                         # check manifest, registry, snapshots
+clast-plumbing doctor --fix                   # rebuild a broken manifest, prune orphans
 ```
 
 See [`docs/reference/cli.md#clast-stats`](./docs/reference/cli.md#clast-stats)
 and [`docs/reference/cli.md#clast-doctor`](./docs/reference/cli.md#clast-doctor)
-for the contract reference, and `clast stats --help` / `clast doctor --help`
-for the current set of flags.
+for the contract reference, and `clast-plumbing stats --help` /
+`clast-plumbing doctor --help` for the current set of flags.
 
 ## Install to a prefix
 
@@ -102,9 +105,9 @@ for the rationale.
 With Nix flakes enabled, you can use `clast` directly from the public flake:
 
 ```sh
-nix run github:procrastivity/clast -- whereami
 nix profile install github:procrastivity/clast
-nix build .#default && ./result/bin/clast --version
+nix build .#default && ./result/bin/clast --version       # porcelain
+nix build .#default && ./result/bin/clast-plumbing --help # plumbing
 ```
 
 For Home Manager or nix-darwin users, `overlays.default` exposes `pkgs.clast`.
@@ -135,9 +138,9 @@ The plugin can be installed from any local checkout, or via `npm install -g`
 (which puts `.claude-plugin/` under `npm root -g`); a centralized marketplace
 listing is a separate distribution channel deliberately not pursued for v1.
 Today the plugin ships a single `SessionStart` hook: every time a Claude Code
-session starts it backgrounds `clast snapshot`, so your journal stays current
-with zero manual effort. The hook is best-effort and silent: if the `clast` CLI
-isn't on your `PATH` yet, sessions still start cleanly. See
+session starts it backgrounds `clast-plumbing snapshot`, so your journal stays
+current with zero manual effort. The hook is best-effort and silent: if the
+`clast-plumbing` CLI isn't on your `PATH` yet, sessions still start cleanly. See
 [`docs/reference/plugin.md#hook-sessionstart`](./docs/reference/plugin.md#hook-sessionstart)
 for the hook's design rationale.
 

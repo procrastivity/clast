@@ -7,8 +7,8 @@ breaking flow.
 ## Write
 
 ```sh
-clast breadcrumb --project xesapps 'check migration before deploy'
-clast breadcrumb --global 'remember to bump the cache version'
+clast-plumbing breadcrumb --project xesapps 'check migration before deploy'
+clast-plumbing breadcrumb --global 'remember to bump the cache version'
 ```
 
 If you omit both `--project` and `--global`, clast tries to resolve the project
@@ -17,10 +17,10 @@ from `pwd` via the registry. If that fails it asks you which to use.
 ## Read
 
 ```sh
-clast breadcrumb --read --project xesapps          # today's, for one project
-clast breadcrumb --read --global                   # today's, global
-clast breadcrumb --read --project xesapps --day yesterday
-clast breadcrumb --list                            # all breadcrumb files for today
+clast-plumbing breadcrumb --read --project xesapps          # today's, for one project
+clast-plumbing breadcrumb --read --global                   # today's, global
+clast-plumbing breadcrumb --read --project xesapps --day yesterday
+clast-plumbing breadcrumb --list                            # all breadcrumb files for today
 ```
 
 ## Project vs global

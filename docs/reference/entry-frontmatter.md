@@ -1,7 +1,7 @@
 # Entry frontmatter
 
 Every curated entry is a Markdown file with a YAML frontmatter block written by
-`clast entries write`. The body that follows is free-form Markdown.
+`clast-plumbing entries write`. The body that follows is free-form Markdown.
 
 ## Frontmatter schema
 
@@ -39,7 +39,7 @@ curated_source_mtime: 2026-05-30T14:30:30Z
 | `session_slug` | required write arg | short kebab-case identifier |
 | `snapshot_path` | manifest | relative to the journal root |
 | `machine` | `hostname` at write time | useful when syncing journals across machines |
-| `curated_source_mtime` | manifest `source_mtime` at write time | drives stale detection — `clast sessions` flags `stale: true` when the transcript is modified after this; legacy entries without it are treated as not stale |
+| `curated_source_mtime` | manifest `source_mtime` at write time | drives stale detection — `clast-plumbing sessions` flags `stale: true` when the transcript is modified after this; legacy entries without it are treated as not stale |
 
 ## Body conventions
 
@@ -68,7 +68,7 @@ One sentence describing what this session was trying to accomplish.
 ```
 
 Filenames are written as
-`entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md`. `clast entries write`
+`entries/YYYY-MM-DD-HHMM-<project-slug>-<session-slug>.md`. `clast-plumbing entries write`
 refuses to overwrite an existing file with the same name and falls back to a
 `-2`, `-3`, … suffix.
 

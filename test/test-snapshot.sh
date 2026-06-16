@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.." || exit 1
 source test/helpers.sh
 _CLAST_TEST_NAME="test-snapshot"
 
-CLAST_BIN="$PWD/bin/clast"
+CLAST_BIN="$PWD/bin/clast-plumbing"
 
 # --- empty fixture, default mode → silent no-op ------------------------------
 setup_test_journal >/dev/null

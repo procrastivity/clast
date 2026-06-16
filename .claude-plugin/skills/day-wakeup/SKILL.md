@@ -1,6 +1,6 @@
 ---
 name: day-wakeup
-description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.'
+description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.'
 ---
 
 # Day Wakeup
@@ -13,28 +13,30 @@ Curation at end-of-session has high friction (the user wants to stop, not summar
 
 The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/day-wakeup` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
 
-## Step 0: Resolve the clast binary
+## Step 0: Resolve the clast-plumbing binary
 
-Before running any `clast` command, determine which binary to use. Run this
-once at the start and reuse the result for all commands in this skill:
+This skill calls the deterministic core (`clast-plumbing`), not the
+LLM-aware porcelain (`clast`). Determine the binary to use once at the
+start and reuse the result for all commands in this skill:
 
 ```bash
-if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast" ]]; then
-  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast"
-elif command -v clast >/dev/null 2>&1; then
-  CLAST_BIN="clast"
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast-plumbing" ]]; then
+  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast-plumbing"
+elif command -v clast-plumbing >/dev/null 2>&1; then
+  CLAST_BIN="clast-plumbing"
 else
   _pdir="$(find ~/.claude -maxdepth 5 -name plugin.json -path '*/clast/.claude-plugin/*' -print -quit 2>/dev/null)"
   if [[ -n "$_pdir" ]]; then
-    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast"
+    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast-plumbing"
   fi
 fi
 ```
 
-If `CLAST_BIN` is still empty, tell the user: "clast CLI not found. Install it
-with `npm i -g @procrastivity/clast` or see the README for other options."
+If `CLAST_BIN` is still empty, tell the user: "clast-plumbing CLI not found.
+Install it with `npm i -g @procrastivity/clast` or see the README for other
+options."
 
-Use `$CLAST_BIN` in place of bare `clast` for all commands in this skill.
+Use `$CLAST_BIN` in place of bare `clast-plumbing` for all commands in this skill.
 
 ## Step 1: Ensure fresh data
 
@@ -108,7 +110,7 @@ For each session in the list:
 5. Present the **promotion question** (see below) via AskUserQuestion.
 
 6. Handle the response:
-   - **Accept** (any combination of accept-flavored options): pipe the draft to `clast entries write` via stdin.
+   - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
    - **Stop here**: end the entire `/day-wakeup` flow, leaving remaining sessions uncurated (user can resume tomorrow).
@@ -133,7 +135,7 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 ## Draft generation prompt
 
-The prompt templates live in `lib/clast/prompts/` so they are shared with the standalone `clast-wake` script:
+The prompt templates live in `lib/clast/prompts/` so they are shared with the porcelain `clast wake` subcommand:
 
 - **System prompt:** `lib/clast/prompts/day-wakeup-draft-system.md`
 - **User prompt template:** `lib/clast/prompts/day-wakeup-draft-user.md` (uses `{{placeholder}}` syntax)
@@ -175,7 +177,7 @@ If the user selects `Edit`:
 When the user accepts:
 
 1. Extract the suggested tags from the draft (the user may have edited them).
-2. Pipe the entry body (without the suggested-tags trailer) to `clast entries write`:
+2. Pipe the entry body (without the suggested-tags trailer) to `clast-plumbing entries write`:
 
 ```bash
 $CLAST_BIN entries write \
@@ -190,14 +192,14 @@ $CLAST_BIN entries write \
 
 3. If the write succeeds, append a one-line confirmation to the running summary.
 
-For promoted items (decisions, common-issues, workflows): currently these are tracked inside the entry's body for v1. **TODO for v1.1: separate `clast decisions write` / `clast common-issues write` / `clast workflows write` subcommands and a directory structure to match.** Note this in the user-facing summary so the user knows they're folded into the entry for now.
+For promoted items (decisions, common-issues, workflows): currently these are tracked inside the entry's body for v1. **TODO for v1.1: separate `clast-plumbing decisions write` / `clast-plumbing common-issues write` / `clast-plumbing workflows write` subcommands and a directory structure to match.** Note this in the user-facing summary so the user knows they're folded into the entry for now.
 
-<!-- step-12 addition: v1 promotion section convention --> When folding promoted items into the accepted entry body, append `## Decision`, `## Common issue`, or `## Workflow` (h2, singular, capitalized), each followed by the prompted-for title (h3) and body before invoking `clast entries write`.
+<!-- step-12 addition: v1 promotion section convention --> When folding promoted items into the accepted entry body, append `## Decision`, `## Common issue`, or `## Workflow` (h2, singular, capitalized), each followed by the prompted-for title (h3) and body before invoking `clast-plumbing entries write`.
 
 ## Edge cases
 
 - **No uncurated sessions**: print "Nothing to curate — all sessions are curated or dismissed." and stop.
 - **Multi-day backlog**: present the triage step (Step 2) so the user can choose scope before processing.
-- **`clast snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
-- **`clast show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
+- **`clast-plumbing snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
+- **`clast-plumbing show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
 - **User says "do them all without prompting"**: not a v1 feature. Each session gets its own AskUserQuestion. The friction is intentional — it's where curation happens.

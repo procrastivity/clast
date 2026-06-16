@@ -12,28 +12,30 @@ Synthesize a briefing for the current (or named) project so the user can resume 
 
 `/day-wakeup` curates yesterday's work into entries. `/wakeup` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
 
-## Step 0: Resolve the clast binary
+## Step 0: Resolve the clast-plumbing binary
 
-Before running any `clast` command, determine which binary to use. Run this
-once at the start and reuse the result for all commands in this skill:
+This skill calls the deterministic core (`clast-plumbing`), not the
+LLM-aware porcelain (`clast`). Determine the binary to use once at the
+start and reuse the result for all commands in this skill:
 
 ```bash
-if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast" ]]; then
-  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast"
-elif command -v clast >/dev/null 2>&1; then
-  CLAST_BIN="clast"
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -x "$CLAUDE_PLUGIN_ROOT/bin/clast-plumbing" ]]; then
+  CLAST_BIN="$CLAUDE_PLUGIN_ROOT/bin/clast-plumbing"
+elif command -v clast-plumbing >/dev/null 2>&1; then
+  CLAST_BIN="clast-plumbing"
 else
   _pdir="$(find ~/.claude -maxdepth 5 -name plugin.json -path '*/clast/.claude-plugin/*' -print -quit 2>/dev/null)"
   if [[ -n "$_pdir" ]]; then
-    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast"
+    CLAST_BIN="$(cd "$(dirname "$_pdir")/../.." && pwd)/bin/clast-plumbing"
   fi
 fi
 ```
 
-If `CLAST_BIN` is still empty, tell the user: "clast CLI not found. Install it
-with `npm i -g @procrastivity/clast` or see the README for other options."
+If `CLAST_BIN` is still empty, tell the user: "clast-plumbing CLI not found.
+Install it with `npm i -g @procrastivity/clast` or see the README for other
+options."
 
-Use `$CLAST_BIN` in place of bare `clast` for all commands in this skill.
+Use `$CLAST_BIN` in place of bare `clast-plumbing` for all commands in this skill.
 
 ## Step 1: Resolve the project
 
@@ -43,7 +45,7 @@ If the user passed a slug as an argument (`/wakeup xesapps`), use it directly. O
 $CLAST_BIN registry resolve "$(pwd)"
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast registry add .` first, or invoke as `/wakeup <slug>`." and stop.
+If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/wakeup <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -103,7 +105,7 @@ Wakeup is read-only. Never invoke write-form subcommands (`entries write`, `brea
 
 ## Edge cases
 
-- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast sessions --project <slug>` to see what's available." and stop.
+- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 

@@ -7,6 +7,7 @@ PREFIX="${1:-/usr/local}"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 
 rm -f "$PREFIX/bin/clast"
+rm -f "$PREFIX/bin/clast-plumbing"
 rm -rf "$PREFIX/lib/clast"
 rm -rf "$PREFIX/share/clast"
 

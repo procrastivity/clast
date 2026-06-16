@@ -6,8 +6,8 @@ and `infra-tools` checked a flaky shell lint issue.
 
 ```bash
 # User: /day-wakeup
-clast snapshot
-clast --json sessions --day yesterday
+clast-plumbing snapshot
+clast-plumbing --json sessions --day yesterday
 ```
 
 It filters to `curated: false`, groups by project, and shows:
@@ -23,8 +23,8 @@ xesapps      09:12  feature/field-normalize  58 messages
 The skill reads session details and breadcrumbs:
 
 ```bash
-clast --json show 33333333-3333-4333-8333-333333333333 --full --turns 8
-clast breadcrumb --read --project infra-tools --day yesterday
+clast-plumbing --json show 33333333-3333-4333-8333-333333333333 --full --turns 8
+clast-plumbing breadcrumb --read --project infra-tools --day yesterday
 ```
 
 It drafts a short entry:
@@ -50,8 +50,8 @@ uncurated and can be revisited in a later `/day-wakeup`.
 The skill reads the next transcript:
 
 ```bash
-clast --json show 22222222-2222-4222-8222-222222222222 --full --turns 8
-clast breadcrumb --read --project notes --day yesterday
+clast-plumbing --json show 22222222-2222-4222-8222-222222222222 --full --turns 8
+clast-plumbing breadcrumb --read --project notes --day yesterday
 ```
 
 The user asks for a revision:
@@ -76,7 +76,7 @@ Tighten the note-entry template before using it for project briefings.
 The skill writes through stdin:
 
 ```bash
-clast entries write \
+clast-plumbing entries write \
   --session 22222222-2222-4222-8222-222222222222 \
   --slug entry-template-cleanup \
   --tags notes,template \
@@ -89,8 +89,8 @@ clast entries write \
 The skill reads the session and breadcrumbs:
 
 ```bash
-clast --json show 11111111-1111-4111-8111-111111111111 --full --turns 8
-clast breadcrumb --read --project xesapps --day yesterday
+clast-plumbing --json show 11111111-1111-4111-8111-111111111111 --full --turns 8
+clast-plumbing breadcrumb --read --project xesapps --day yesterday
 ```
 
 The user chooses `Accept + promote decision` for this draft:
@@ -112,7 +112,7 @@ items are folded into the entry body rather than written to separate decision,
 common-issue, or workflow files.
 
 ```bash
-clast entries write \
+clast-plumbing entries write \
   --session 11111111-1111-4111-8111-111111111111 \
   --slug field-normalization-fix \
   --tags xesapps,fields,regression \
@@ -133,5 +133,5 @@ Run `/wakeup <project>` to start working on a specific project today.
 
 What this changes on disk:
 `entries/2026-05-31-1340-notes-entry-template-cleanup.md` and `entries/2026-05-31-0912-xesapps-field-normalization-fix.md` were written.
-`.manifest.jsonl` was already current from `clast snapshot`; curation does not append to it.
+`.manifest.jsonl` was already current from `clast-plumbing snapshot`; curation does not append to it.
 The skipped `infra-tools` session stays uncurated and remains eligible for a later `/day-wakeup`.

@@ -33,7 +33,7 @@ full date-input grammar (`today`, `yesterday`, `-1d`, etc.).
 
 ## Naming
 
-- Subcommands: lowercase, single word (or hyphen-joined). `clast snapshot`, not
+- Subcommands: lowercase, single word (or hyphen-joined). `clast-plumbing snapshot`, not
   `clast Snapshot` or `clast take-snapshot`.
 - Flags: kebab-case long flags (`--day`, `--project`); single-letter shorts only
   where unambiguous and well-known (`-v` for verbose, `-h` for help).
@@ -50,6 +50,6 @@ full date-input grammar (`today`, `yesterday`, `-1d`, etc.).
 
 ## Idempotence
 
-`clast snapshot` is idempotent and silent on no-op — safe to run from cron, a
+`clast-plumbing snapshot` is idempotent and silent on no-op — safe to run from cron, a
 `SessionStart` hook, or by hand as often as you like. Re-running it never
 duplicates a manifest entry or overwrites an existing snapshot.
