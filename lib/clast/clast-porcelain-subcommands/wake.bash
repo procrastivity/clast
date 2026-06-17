@@ -317,7 +317,10 @@ clast_cmd_wake() {
 
     local show_json
     show_json="$(clast-plumbing --json show "$sid" --full --turns 8 2>/dev/null)" || {
-      clast_porcelain_warn "failed to read session $sid — skipping"
+      local rc=$? reason
+      reason="$(jq -r '.error // empty' <<<"$show_json" 2>/dev/null || true)"
+      [[ -z "$reason" ]] && reason="exit $rc"
+      clast_porcelain_warn "failed to read session $sid ($reason) — skipping"
       skipped_count=$(( skipped_count + 1 ))
       i=$(( i + 1 ))
       continue

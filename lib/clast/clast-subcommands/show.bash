@@ -118,9 +118,11 @@ clast_cmd_show() {
   # routine, and the fields are explicitly documented as best-effort.
   local first_prompt last_prompt user_msgs=""
   user_msgs="$(_clast_show_user_messages "$abs_path" 2>/dev/null || true)"
-  first_prompt="$(printf '%s\n' "$user_msgs" | head -n1)"
-  last_prompt="$(printf '%s\n' "$user_msgs" | tail -n1)"
-  # If the stream was empty the head/tail of '\n' is empty — keep as ''.
+  # Pure parameter expansion — no subshell/pipe, so a >64KB multi-line
+  # $user_msgs can never SIGPIPE a `printf | head` and abort under pipefail.
+  first_prompt="${user_msgs%%$'\n'*}"   # text up to the first newline
+  last_prompt="${user_msgs##*$'\n'}"    # text after the last newline
+  # If the stream was empty the expansions yield '' anyway — keep as ''.
   [[ -z "$user_msgs" ]] && first_prompt="" && last_prompt=""
   first_prompt="$(_clast_show_truncate "$first_prompt")"
   last_prompt="$(_clast_show_truncate "$last_prompt")"
