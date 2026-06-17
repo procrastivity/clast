@@ -120,26 +120,37 @@ clast_porcelain_llm_chat() {
   local system_msg="$1"
   local user_msg="$2"
 
-  local payload
-  payload="$(jq -cn \
-    --arg model "$CLAST_LLM_MODEL" \
-    --arg system "$system_msg" \
-    --arg user "$user_msg" \
-    '{
-      model: $model,
-      messages: [
-        {role: "system", content: $system},
-        {role: "user", content: $user}
-      ],
-      temperature: 0.3
-    }')"
+  # Build and send the request without ever passing the (possibly hundreds of
+  # KB) prompt through argv: a single argument above MAX_ARG_STRLEN (128KB on
+  # Linux) fails with "Argument list too long", even well under total ARG_MAX.
+  # jq reads the strings via --rawfile (process substitution; printf is a
+  # builtin with no argv limit) and curl reads the body from a file with @.
+  local payload_file
+  payload_file="$(mktemp)" || { clast_porcelain_warn "failed to create temp file"; return 1; }
+  if ! jq -cn \
+      --arg model "$CLAST_LLM_MODEL" \
+      --rawfile system <(printf '%s' "$system_msg") \
+      --rawfile user <(printf '%s' "$user_msg") \
+      '{
+        model: $model,
+        messages: [
+          {role: "system", content: $system},
+          {role: "user", content: $user}
+        ],
+        temperature: 0.3
+      }' >"$payload_file"; then
+    rm -f "$payload_file"
+    clast_porcelain_warn "failed to build LLM request payload"
+    return 1
+  fi
 
   local response http_code body
   response="$(curl -s -w '\n%{http_code}' \
     "${CLAST_LLM_BASE_URL}/chat/completions" \
     -H "Authorization: Bearer $CLAST_LLM_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$payload" 2>&1)" || true
+    --data-binary @"$payload_file" 2>&1)" || true
+  rm -f "$payload_file"
 
   http_code="$(tail -n1 <<<"$response")"
   body="$(sed '$d' <<<"$response")"
