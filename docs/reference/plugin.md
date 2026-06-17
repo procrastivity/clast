@@ -2,7 +2,7 @@
 
 > Reference doc. Read [What is clast?](../explanation/what-is-clast.md) first. This doc spec's the Claude Code plugin: the three skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
 
-Three skills total: `day-wakeup`, `wakeup`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
+Three skills total: `wake`, `brief`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
 
 The core principle: skills are **thin LLM layers over the CLI**. Every skill follows the same shape: gather data via `clast-plumbing` subcommands, do the LLM work (drafting, synthesis, prompting), then write back via `clast-plumbing` subcommands. Skills never read or write the journal directly.
 
@@ -14,9 +14,9 @@ A `SKILL.md` file has YAML frontmatter (name + description) and a body that beco
 
 ---
 
-## Skill 1: `day-wakeup`
+## Skill 1: `wake`
 
-**Location:** `.claude-plugin/skills/day-wakeup/SKILL.md`
+**Location:** `skills/wake/SKILL.md`
 
 **Purpose:** The primary curation point. Snapshot fresh transcripts, iterate yesterday's sessions, generate a draft entry per session, prompt the user to accept/edit/promote, write accepted entries via `clast-plumbing entries write`.
 
@@ -24,19 +24,19 @@ A `SKILL.md` file has YAML frontmatter (name + description) and a body that beco
 
 ```markdown
 ---
-name: day-wakeup
-description: Generate curated journal entries from yesterday's Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday's sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.
+name: wake
+description: Generate curated journal entries from yesterday's Claude Code sessions across all projects. Use when the user says "/wake", "wake", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday's sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /brief; for mid-session pivots use session-brief.
 ---
 
-# Day Wakeup
+# Wake
 
 Process yesterday's Claude Code sessions across all projects. For each session, generate a draft journal entry and walk the user through accepting/editing/skipping it.
 
 ## Why this exists
 
-Curation at end-of-session has high friction (the user wants to stop, not summarize). Curation at start-of-next-day has lower friction (fresh eyes, easier to decide what's worth keeping). `/day-wakeup` is that start-of-next-day flow.
+Curation at end-of-session has high friction (the user wants to stop, not summarize). Curation at start-of-next-day has lower friction (fresh eyes, easier to decide what's worth keeping). `/wake` is that start-of-next-day flow.
 
-The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/day-wakeup` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
+The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/wake` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
 
 ## Step 1: Ensure fresh data
 
@@ -85,14 +85,14 @@ For each session in the list:
    - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
-   - **Stop here**: end the entire `/day-wakeup` flow, leaving remaining sessions uncurated (user can resume tomorrow).
+   - **Stop here**: end the entire `/wake` flow, leaving remaining sessions uncurated (user can resume tomorrow).
 
 ## Step 4: Final summary
 
 After all sessions are processed (or user stopped early), print a summary:
 
 ```
-Day wakeup complete.
+Wake complete.
 Curated: 3 sessions across 2 projects.
 Skipped: 1 session.
 Remaining uncurated: 0.
@@ -102,15 +102,15 @@ Promoted:
   Common-issues: 0
   Workflows: 1
 
-Run `/wakeup <project>` to start working on a specific project today.
+Run `/brief <project>` to start working on a specific project today.
 ```
 
 ## Draft generation prompt
 
 The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the porcelain `clast wake` subcommand:
 
-- **System prompt:** [`lib/clast/prompts/day-wakeup-draft-system.md`](../../lib/clast/prompts/day-wakeup-draft-system.md)
-- **User prompt template:** [`lib/clast/prompts/day-wakeup-draft-user.md`](../../lib/clast/prompts/day-wakeup-draft-user.md)
+- **System prompt:** [`lib/clast/prompts/wake-draft-system.md`](../../lib/clast/prompts/wake-draft-system.md)
+- **User prompt template:** [`lib/clast/prompts/wake-draft-user.md`](../../lib/clast/prompts/wake-draft-user.md)
 
 The user prompt template uses `{{placeholder}}` syntax: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 
@@ -130,7 +130,7 @@ After showing the draft, present:
   - `Accept + promote workflow` — also write a workflow file
   - `Edit` — user wants to revise; will prompt for changes
   - `Skip` — do not write this entry
-  - `Stop here` — end /day-wakeup entirely, leave remaining sessions uncurated
+  - `Stop here` — end /wake entirely, leave remaining sessions uncurated
 
 If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting).
 
@@ -187,9 +187,9 @@ A few intentional choices in the prompt template above worth flagging:
 
 ---
 
-## Skill 2: `wakeup`
+## Skill 2: `brief`
 
-**Location:** `.claude-plugin/skills/wakeup/SKILL.md`
+**Location:** `skills/brief/SKILL.md`
 
 **Purpose:** Per-project briefing synthesized from recent entries + today's breadcrumbs. Fast, read-only. Used when starting work in a specific repo today.
 
@@ -197,27 +197,27 @@ A few intentional choices in the prompt template above worth flagging:
 
 ```markdown
 ---
-name: wakeup
-description: Synthesize a briefing for the current project (or a named one) so the user can resume work without re-explaining context. Use when the user says "/wakeup", "wakeup", "wake up", "catch me up", "where was I", "what was I working on", "load last session", "resume", or otherwise signals they want prior context for the project they're about to work on. Optionally accepts a project slug like "/wakeup xesapps". Reads recent curated entries and today's breadcrumbs from `~/.claude/journal/` and produces a 2–5k-token briefing. This is the per-project read flow; for cross-project daily curation use /day-wakeup; for mid-session pivots use session-brief.
+name: brief
+description: Synthesize a briefing for the current project (or a named one) so the user can resume work without re-explaining context. Use when the user says "/brief", "brief me", "catch me up", "where was I", "what was I working on", "load last session", "resume", or otherwise signals they want prior context for the project they're about to work on. Optionally accepts a project slug like "/brief xesapps". Reads recent curated entries and today's breadcrumbs from `~/.claude/journal/` and produces a 2–5k-token briefing. This is the per-project read flow; for cross-project daily curation use /wake; for mid-session pivots use session-brief.
 ---
 
-# Wakeup
+# Brief
 
 Synthesize a briefing for the current (or named) project so the user can resume without re-explaining context.
 
 ## Why this exists
 
-`/day-wakeup` curates yesterday's work into entries. `/wakeup` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
+`/wake` curates yesterday's work into entries. `/brief` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
 
 ## Step 1: Resolve the project
 
-If the user passed a slug as an argument (`/wakeup xesapps`), use it directly. Otherwise resolve from current working directory:
+If the user passed a slug as an argument (`/brief xesapps`), use it directly. Otherwise resolve from current working directory:
 
 ```bash
 clast-plumbing registry resolve "$(pwd)"
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/wakeup <slug>`." and stop.
+If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -245,7 +245,7 @@ clast-plumbing entries read <entry-path>
 Using the **synthesis prompt** (see below), produce a briefing of 2–5k tokens. Structure:
 
 ```
-## Wakeup briefing — <project>
+## Brief — <project>
 
 **Active thread:** <one-line from most recent entry's "Open threads" section, or "None">
 
@@ -273,18 +273,18 @@ End with one of:
 
 ## Step 4: Don't write anything
 
-Wakeup is read-only. Never invoke `clast-plumbing entries write` or `clast-plumbing breadcrumb` from this skill.
+Brief is read-only. Never invoke `clast-plumbing entries write` or `clast-plumbing breadcrumb` from this skill.
 
 ## Edge cases
 
-- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
+- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/wake` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 ```
 
 ### Synthesis prompt — internal
 
-The shared templates for this briefing live alongside the day-wakeup prompts in `lib/clast/prompts/` so the plugin skill and the porcelain [`clast brief`](../guides/run-without-claude-code.md) script stay in sync:
+The shared templates for this briefing live alongside the wake prompts in `lib/clast/prompts/` so the plugin skill and the porcelain [`clast brief`](../guides/run-without-claude-code.md) script stay in sync:
 
 - **System prompt:** [`lib/clast/prompts/brief-system.md`](../../lib/clast/prompts/brief-system.md)
 - **User prompt template:** [`lib/clast/prompts/brief-user.md`](../../lib/clast/prompts/brief-user.md)
@@ -325,7 +325,7 @@ If shipped:
 ```markdown
 ---
 name: breadcrumb
-description: Leave a quick in-flight note for tomorrow's day-wakeup to surface. Use when the user says "/breadcrumb", "leave a breadcrumb", "note for tomorrow", "remind me", "make a note", or otherwise signals they want to capture a one-line hint without breaking flow. The hint is appended to today's breadcrumb file for the current project. Different from /handoff (which doesn't exist in clast) and from session-brief (which generates a copy-to-clipboard brief for /clear pivots).
+description: Leave a quick in-flight note for tomorrow's wake to surface. Use when the user says "/breadcrumb", "leave a breadcrumb", "note for tomorrow", "remind me", "make a note", or otherwise signals they want to capture a one-line hint without breaking flow. The hint is appended to today's breadcrumb file for the current project. Different from /handoff (which doesn't exist in clast) and from session-brief (which generates a copy-to-clipboard brief for /clear pivots).
 ---
 
 # Breadcrumb
@@ -432,7 +432,7 @@ For systemd-timer users: `examples/cron/systemd-timer.sample` should provide a `
 
 Pulled forward from the plan doc; resolve when implementing:
 
-1. **Should `/day-wakeup` accept a `--day` argument** (e.g., `/day-wakeup last-week` to process the whole week)? Recommendation: yes, but lower priority. Default stays "yesterday".
+1. **Should `/wake` accept a `--day` argument** (e.g., `/wake last-week` to process the whole week)? Recommendation: yes, but lower priority. Default stays "yesterday".
 2. **Should the draft generation prompt be exposed for user override** (e.g., a config file with their preferred entry template)? Recommendation: defer to v1.1. Iterate on the default first.
-3. **What happens if `AskUserQuestion` is interrupted partway through `/day-wakeup`** (user kills Claude)? Recommendation: nothing — accepted entries are already written, skipped ones can be revisited tomorrow.
-4. **Should `/wakeup` print to a file** for easy copy-paste, or just to chat? Recommendation: chat only. Add a `clast briefing --project <slug>` CLI command in v1.1 if file output is wanted.
+3. **What happens if `AskUserQuestion` is interrupted partway through `/wake`** (user kills Claude)? Recommendation: nothing — accepted entries are already written, skipped ones can be revisited tomorrow.
+4. **Should `/brief` print to a file** for easy copy-paste, or just to chat? Recommendation: chat only. Add a `clast briefing --project <slug>` CLI command in v1.1 if file output is wanted.

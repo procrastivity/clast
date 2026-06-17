@@ -1,6 +1,6 @@
 # clast wake — LLM-powered interactive day curation.
 #
-# Replicates the /day-wakeup plugin skill using an OpenAI-compatible chat
+# Replicates the /wake plugin skill using an OpenAI-compatible chat
 # completions endpoint. Calls clast-plumbing for data, assembles prompts,
 # calls the LLM via curl, presents drafts interactively.
 #
@@ -43,7 +43,7 @@ _clast_wake_build_user_prompt() {
   local first_turns="$6" last_turns="$7" breadcrumbs="$8"
 
   local template_file template
-  template_file="$(clast_porcelain_user_prompt_file day-wakeup-draft-user)"
+  template_file="$(clast_porcelain_user_prompt_file wake-draft-user)"
 
   if [[ -n "$template_file" ]]; then
     template="$(cat "$template_file")"
@@ -57,7 +57,7 @@ _clast_wake_build_user_prompt() {
     template="${template//\{\{breadcrumbs\}\}/${breadcrumbs:-None.}}"
     printf '%s' "$template"
   else
-    clast_porcelain_warn "user prompt template not found: day-wakeup-draft-user.md — using inline fallback"
+    clast_porcelain_warn "user prompt template not found: wake-draft-user.md — using inline fallback"
     cat <<EOF
 Session metadata:
 - Project: ${project}
@@ -342,7 +342,7 @@ clast_cmd_wake() {
       "$first_turns" "$last_turns" "$breadcrumbs")"
 
     local system_prompt
-    system_prompt="$(clast_porcelain_load_system_prompt day-wakeup-draft-system)"
+    system_prompt="$(clast_porcelain_load_system_prompt wake-draft-system)"
 
     local draft="" edit_extra=""
     local drafting=1

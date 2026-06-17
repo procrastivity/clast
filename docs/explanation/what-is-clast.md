@@ -6,7 +6,7 @@ your projects. It ships two artifacts from one repo:
 1. **A CLI** (`clast`) that does the deterministic, LLM-free work — capturing
    transcripts, listing projects and sessions, writing curated entries, and
    managing a project registry.
-2. **A Claude Code plugin** that ships skills (`/day-wakeup`, `/wakeup`)
+2. **A Claude Code plugin** that ships skills (`/wake`, `/brief`)
    wrapping the CLI with LLM curation, plus a `SessionStart` hook that
    auto-invokes `clast-plumbing snapshot` so capture happens unattended.
 
@@ -28,7 +28,7 @@ breadcrumbs — and gives you a CLI and two plugin skills to read it back.
    explicitly-named subcommand.
 2. **Capture is automatic; curation is deferred.** Snapshots run unattended (via
    `SessionStart` hook and/or cron). Curation runs when you want it (typically
-   at start-of-day via `/day-wakeup`).
+   at start-of-day via `/wake`).
 
 ## What this design explicitly does not address
 

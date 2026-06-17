@@ -1,17 +1,17 @@
 ---
-name: day-wakeup
-description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/day-wakeup", "day wakeup", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /wakeup; for mid-session pivots use session-brief.'
+name: wake
+description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/wake", "wake", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /brief; for mid-session pivots use session-brief.'
 ---
 
-# Day Wakeup
+# Wake
 
 Process yesterday's Claude Code sessions across all projects. For each session, generate a draft journal entry and walk the user through accepting/editing/skipping it.
 
 ## Why this exists
 
-Curation at end-of-session has high friction (the user wants to stop, not summarize). Curation at start-of-next-day has lower friction (fresh eyes, easier to decide what's worth keeping). `/day-wakeup` is that start-of-next-day flow.
+Curation at end-of-session has high friction (the user wants to stop, not summarize). Curation at start-of-next-day has lower friction (fresh eyes, easier to decide what's worth keeping). `/wake` is that start-of-next-day flow.
 
-The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/day-wakeup` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
+The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/wake` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
 
 ## Step 0: Resolve the clast-plumbing binary
 
@@ -113,14 +113,14 @@ For each session in the list:
    - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
-   - **Stop here**: end the entire `/day-wakeup` flow, leaving remaining sessions uncurated (user can resume tomorrow).
+   - **Stop here**: end the entire `/wake` flow, leaving remaining sessions uncurated (user can resume tomorrow).
 
 ## Step 4: Final summary
 
 After all sessions are processed (or user stopped early), print a summary:
 
 ```
-Day wakeup complete.
+Wake complete.
 Curated: 3 sessions across 2 projects.
 Skipped: 1 session.
 Remaining uncurated: 0.
@@ -130,15 +130,15 @@ Promoted:
   Common-issues: 0
   Workflows: 1
 
-Run `/wakeup <project>` to start working on a specific project today.
+Run `/brief <project>` to start working on a specific project today.
 ```
 
 ## Draft generation prompt
 
-The prompt templates live in `lib/clast/prompts/` so they are shared with the porcelain `clast wake` subcommand:
+The prompt templates are installed alongside the plugin under `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/`:
 
-- **System prompt:** `lib/clast/prompts/day-wakeup-draft-system.md`
-- **User prompt template:** `lib/clast/prompts/day-wakeup-draft-user.md` (uses `{{placeholder}}` syntax)
+- **System prompt:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/wake-draft-system.md`
+- **User prompt template:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/wake-draft-user.md` (uses `{{placeholder}}` syntax)
 
 When generating each draft, read those files and substitute the placeholders with session data. The user prompt template uses these placeholders: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
 
@@ -156,7 +156,7 @@ After showing the draft, present:
   - `Accept + promote workflow` — also write a workflow file
   - `Edit` — user wants to revise; will prompt for changes
   - `Skip` — do not write this entry
-  - `Stop here` — end /day-wakeup entirely, leave remaining sessions uncurated
+  - `Stop here` — end /wake entirely, leave remaining sessions uncurated
 
 If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting).
 

@@ -52,8 +52,8 @@ Usage:
   clast [GLOBAL FLAGS] <subcommand> [ARGS...]
 
 Subcommands:
-  wake          Interactive day curation (standalone equivalent of /day-wakeup)
-  brief         Project briefing (standalone equivalent of /wakeup)
+  wake          Interactive day curation (standalone equivalent of /wake)
+  brief         Project briefing (standalone equivalent of /brief)
 
 Global flags:
   -h, --help    Print this usage and exit

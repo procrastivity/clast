@@ -28,7 +28,7 @@ The docs are split four ways, modeled on the
 ## Reference
 
 - [CLI](./reference/cli.md) — every subcommand, flag, and JSON schema.
-- [Plugin](./reference/plugin.md) — `SessionStart` hook, `/day-wakeup`, `/wakeup`.
+- [Plugin](./reference/plugin.md) — `SessionStart` hook, `/wake`, `/brief`.
 - [Entry frontmatter](./reference/entry-frontmatter.md) — field-by-field.
 - [Config](./reference/config.md) — env vars today, TOML in v1.x.
 - [Repo bootstrap](./reference/repo-bootstrap.md) — directory layout, packaging, CI.

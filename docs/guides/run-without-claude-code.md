@@ -1,12 +1,12 @@
 # Run curation without Claude Code
 
-The [`/day-wakeup` and `/wakeup` plugin skills](../reference/plugin.md) run *inside*
+The [`/wake` and `/brief` plugin skills](../reference/plugin.md) run *inside*
 Claude Code. If you want the same LLM-assisted curation and briefing from a plain
 terminal — a cron job, a remote box, or just a shell without Claude Code — use the
 two porcelain subcommands that ship with the CLI:
 
-- **`clast wake`** — interactive day curation. The standalone equivalent of `/day-wakeup`.
-- **`clast brief`** — a project briefing. The standalone equivalent of `/wakeup`.
+- **`clast wake`** — interactive day curation. The standalone equivalent of `/wake`.
+- **`clast brief`** — a project briefing. The standalone equivalent of `/brief`.
 
 Both call an OpenAI-compatible chat-completions endpoint directly (via `curl`) and
 reuse the same prompt templates as the plugin skills, so the output stays in sync.
@@ -77,14 +77,14 @@ With no argument it resolves the project from the current directory via
 tells you to run `clast-plumbing registry add .` or pass a slug.) It then reads
 recent curated entries, today's breadcrumbs, and today's sessions for that project
 and prints a synthesized briefing. It writes nothing — it's read-only, same as
-`/wakeup`.
+`/brief`.
 
 ## Customizing the prompts
 
 Both subcommands read their prompt templates from `lib/clast/prompts/` — the same
 files the plugin skills use:
 
-- `day-wakeup-draft-system.md` / `day-wakeup-draft-user.md` (used by `clast wake`)
+- `wake-draft-system.md` / `wake-draft-user.md` (used by `clast wake`)
 - `brief-system.md` / `brief-user.md` (used by `clast brief`)
 
 Edit those files to change tone or structure once for both the porcelain and the

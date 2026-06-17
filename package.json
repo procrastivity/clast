@@ -11,6 +11,7 @@
     "bin/",
     "lib/",
     ".claude-plugin/",
+    "skills/",
     "hooks/",
     "examples/",
     "README.md",

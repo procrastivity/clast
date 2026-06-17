@@ -60,7 +60,7 @@ end-to-end curation workflow.
 ## 5. Drop a breadcrumb (lightweight, append-only)
 
 ```sh
-clast-plumbing breadcrumb --project clast 'try the wakeup skill next'
+clast-plumbing breadcrumb --project clast 'try the brief skill next'
 clast-plumbing breadcrumb --global 'clast first impressions: snappy'
 clast-plumbing breadcrumb --read --project clast
 clast-plumbing breadcrumb --read --global

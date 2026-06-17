@@ -1,16 +1,16 @@
 ---
-name: wakeup
+name: brief
 description: |
-  Synthesize a briefing for the current project (or a named one) so the user can resume work without re-explaining context. Use when the user says "/wakeup", "wakeup", "wake up", "catch me up", "where was I", "what was I working on", "load last session", "resume", or otherwise signals they want prior context for the project they're about to work on. Optionally accepts a project slug like "/wakeup xesapps". Reads recent curated entries and today's breadcrumbs from `~/.claude/journal/` and produces a 2–5k-token briefing. This is the per-project read flow; for cross-project daily curation use /day-wakeup; for mid-session pivots use session-brief.
+  Synthesize a briefing for the current project (or a named one) so the user can resume work without re-explaining context. Use when the user says "/brief", "brief me", "catch me up", "where was I", "what was I working on", "load last session", "resume", or otherwise signals they want prior context for the project they're about to work on. Optionally accepts a project slug like "/brief xesapps". Reads recent curated entries and today's breadcrumbs from `~/.claude/journal/` and produces a 2–5k-token briefing. This is the per-project read flow; for cross-project daily curation use /wake; for mid-session pivots use session-brief.
 ---
 
-# Wakeup
+# Brief
 
 Synthesize a briefing for the current (or named) project so the user can resume without re-explaining context.
 
 ## Why this exists
 
-`/day-wakeup` curates yesterday's work into entries. `/wakeup` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
+`/wake` curates yesterday's work into entries. `/brief` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
 
 ## Step 0: Resolve the clast-plumbing binary
 
@@ -39,13 +39,13 @@ Use `$CLAST_BIN` in place of bare `clast-plumbing` for all commands in this skil
 
 ## Step 1: Resolve the project
 
-If the user passed a slug as an argument (`/wakeup xesapps`), use it directly. Otherwise resolve from current working directory:
+If the user passed a slug as an argument (`/brief xesapps`), use it directly. Otherwise resolve from current working directory:
 
 ```bash
 $CLAST_BIN registry resolve "$(pwd)"
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/wakeup <slug>`." and stop.
+If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -73,7 +73,7 @@ $CLAST_BIN entries read <entry-path>
 Using the **synthesis prompt** (see below), produce a briefing of 2–5k tokens. Structure:
 
 ```
-## Wakeup briefing — <project>
+## Brief — <project>
 
 **Active thread:** <one-line from most recent entry's "Open threads" section, or "None">
 
@@ -101,11 +101,11 @@ End with one of:
 
 ## Step 4: Don't write anything
 
-Wakeup is read-only. Never invoke write-form subcommands (`entries write`, `breadcrumb '<text>'`, `snapshot`) from this skill.
+Brief is read-only. Never invoke write-form subcommands (`entries write`, `breadcrumb '<text>'`, `snapshot`) from this skill.
 
 ## Edge cases
 
-- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/day-wakeup` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
+- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/wake` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 

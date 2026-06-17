@@ -1,6 +1,6 @@
 # clast brief — LLM-powered project briefing.
 #
-# Replicates the /wakeup plugin skill using an OpenAI-compatible chat
+# Replicates the /brief plugin skill using an OpenAI-compatible chat
 # completions endpoint. Reads curated entries, breadcrumbs, and today's
 # sessions for a project (via clast-plumbing), then synthesizes a briefing.
 #

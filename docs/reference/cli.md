@@ -198,7 +198,7 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
 ]
 ```
 
-`curated: true` if there's a corresponding entry in `entries/` (joined on `session_id` via entry frontmatter). The plugin's `/day-wakeup` uses this field to iterate only uncurated sessions.
+`curated: true` if there's a corresponding entry in `entries/` (joined on `session_id` via entry frontmatter). The plugin's `/wake` uses this field to iterate only uncurated sessions.
 
 `stale: true` when a session has been curated but its transcript was updated after the entry was written (detected by comparing the entry's `curated_source_mtime` frontmatter field against the manifest's current `source_mtime`). Legacy entries without `curated_source_mtime` are conservatively treated as not stale.
 
@@ -358,7 +358,7 @@ Output: silent on success unless `--verbose`.
 
 ### `--read` mode
 
-Cat the breadcrumb file for the given project + day. Used by `/wakeup` and `/day-wakeup` to read in-flight hints.
+Cat the breadcrumb file for the given project + day. Used by `/brief` and `/wake` to read in-flight hints.
 
 ### `--list` mode
 
