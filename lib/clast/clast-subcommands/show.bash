@@ -192,8 +192,13 @@ clast_cmd_show() {
          last_prompt: (if $last_prompt == "" then null else $last_prompt end)
        }')"
     if (( include_turns == 1 )); then
-      obj="$(jq -c --argjson f "$first_turns_json" --argjson l "$last_turns_json" \
-        '. + {first_turns:$f, last_turns:$l}' <<<"$obj")"
+      # Feed the (potentially multi-hundred-KB) turn arrays via stdin, not as
+      # --argjson argv: a single argument >128KB (MAX_ARG_STRLEN) fails with
+      # "Argument list too long" even when total ARG_MAX is far larger. printf
+      # is a builtin, so it has no argv size limit; jq reads three JSON values.
+      obj="$(printf '%s\n%s\n%s\n' "$obj" "$first_turns_json" "$last_turns_json" \
+        | jq -cn 'input as $o | input as $f | input as $l
+                  | $o + {first_turns:$f, last_turns:$l}')"
     fi
     printf '%s\n' "$obj"
     return 0
