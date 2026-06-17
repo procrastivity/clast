@@ -33,7 +33,7 @@ cp -R "$SRC/examples" "$PREFIX/share/clast/"
 # Expose clast-plumbing inside the plugin root so Claude adds it to PATH
 # when the plugin is installed from share/clast (see plugin bin/ convention).
 install -d "$PREFIX/share/clast/bin"
-ln -sf "$PREFIX/bin/clast-plumbing" "$PREFIX/share/clast/bin/clast-plumbing"
+ln -sf ../../../bin/clast-plumbing "$PREFIX/share/clast/bin/clast-plumbing"
 # Copy prompt templates into the plugin root so skills can read them at
 # $CLAUDE_PLUGIN_ROOT/lib/clast/prompts/ regardless of whether $PREFIX/bin
 # is on PATH.
