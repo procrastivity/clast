@@ -317,21 +317,30 @@ clast_cmd_wake() {
 
     local show_json
     show_json="$(clast-plumbing --json show "$sid" --full --turns 8 2>/dev/null)" || {
-      clast_porcelain_warn "failed to read session $sid — skipping"
+      local rc=$? reason
+      reason="$(jq -r '.error // empty' <<<"$show_json" 2>/dev/null || true)"
+      [[ -z "$reason" ]] && reason="exit $rc"
+      clast_porcelain_warn "failed to read session $sid ($reason) — skipping"
       skipped_count=$(( skipped_count + 1 ))
       i=$(( i + 1 ))
       continue
     }
 
-    local first_turns last_turns
-    first_turns="$(jq -r '
+    # Cap each turn's text: a single pathological turn (e.g. a huge pasted
+    # blob or tool dump) would otherwise bloat the prompt — costly and liable
+    # to exceed the model's context. show --full keeps the full text; only the
+    # LLM-bound copy is bounded.
+    local first_turns last_turns turn_cap=2000
+    first_turns="$(jq -r --argjson cap "$turn_cap" '
       .first_turns // [] | .[] |
-      "[\(.role)] \(.text)"
+      (.text // "") as $t | ($t | length) as $n |
+      "[\(.role)] \(if $n > $cap then $t[0:$cap] + "… [\($n - $cap) more chars truncated]" else $t end)"
     ' <<<"$show_json" 2>/dev/null)" || true
 
-    last_turns="$(jq -r '
+    last_turns="$(jq -r --argjson cap "$turn_cap" '
       .last_turns // [] | .[] |
-      "[\(.role)] \(.text)"
+      (.text // "") as $t | ($t | length) as $n |
+      "[\(.role)] \(if $n > $cap then $t[0:$cap] + "… [\($n - $cap) more chars truncated]" else $t end)"
     ' <<<"$show_json" 2>/dev/null)" || true
 
     local breadcrumbs=""

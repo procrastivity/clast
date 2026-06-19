@@ -118,9 +118,11 @@ clast_cmd_show() {
   # routine, and the fields are explicitly documented as best-effort.
   local first_prompt last_prompt user_msgs=""
   user_msgs="$(_clast_show_user_messages "$abs_path" 2>/dev/null || true)"
-  first_prompt="$(printf '%s\n' "$user_msgs" | head -n1)"
-  last_prompt="$(printf '%s\n' "$user_msgs" | tail -n1)"
-  # If the stream was empty the head/tail of '\n' is empty — keep as ''.
+  # Pure parameter expansion — no subshell/pipe, so a >64KB multi-line
+  # $user_msgs can never SIGPIPE a `printf | head` and abort under pipefail.
+  first_prompt="${user_msgs%%$'\n'*}"   # text up to the first newline
+  last_prompt="${user_msgs##*$'\n'}"    # text after the last newline
+  # If the stream was empty the expansions yield '' anyway — keep as ''.
   [[ -z "$user_msgs" ]] && first_prompt="" && last_prompt=""
   first_prompt="$(_clast_show_truncate "$first_prompt")"
   last_prompt="$(_clast_show_truncate "$last_prompt")"
@@ -190,8 +192,13 @@ clast_cmd_show() {
          last_prompt: (if $last_prompt == "" then null else $last_prompt end)
        }')"
     if (( include_turns == 1 )); then
-      obj="$(jq -c --argjson f "$first_turns_json" --argjson l "$last_turns_json" \
-        '. + {first_turns:$f, last_turns:$l}' <<<"$obj")"
+      # Feed the (potentially multi-hundred-KB) turn arrays via stdin, not as
+      # --argjson argv: a single argument >128KB (MAX_ARG_STRLEN) fails with
+      # "Argument list too long" even when total ARG_MAX is far larger. printf
+      # is a builtin, so it has no argv size limit; jq reads three JSON values.
+      obj="$(printf '%s\n%s\n%s\n' "$obj" "$first_turns_json" "$last_turns_json" \
+        | jq -cn 'input as $o | input as $f | input as $l
+                  | $o + {first_turns:$f, last_turns:$l}')"
     fi
     printf '%s\n' "$obj"
     return 0

@@ -226,6 +226,58 @@ fi
 assert_eq "1" "$(jq '.first_turns | length' <<<"$out")" "show --json --full: first_turns length 1"
 assert_eq "1" "$(jq '.last_turns | length' <<<"$out")" "show --json --full: last_turns length 1"
 assert_eq "user" "$(jq -r '.first_turns[0].role' <<<"$out")" "show --json --full: first turn role"
+
+# --- large multi-line session: must not SIGPIPE under pipefail (regression) -
+# A session whose concatenated user-message text exceeds the 64KB pipe buffer
+# across many lines used to abort `show` with exit 141 (SIGPIPE) via a
+# `printf "$user_msgs" | head -n1` pipeline. See show.bash first_prompt/last_prompt.
+big_uuid="99999999-9999-4999-8999-999999999999"
+big_snap="transcripts/2026-05-30/-tmp-proj-xesapps/$big_uuid.jsonl"
+big_abs="$CLAST_JOURNAL_DIR/$big_snap"
+mkdir -p "$(dirname "$big_abs")"
+big_pad="$(printf 'x%.0s' {1..300})"   # ~300-byte payload per message
+{
+  printf '{"type":"summary","timestamp":"2026-05-30T13:00:00Z","session_id":"%s"}\n' "$big_uuid"
+  for (( bn=1; bn<=300; bn++ )); do    # 300 lines × ~300 bytes ≫ 64KB
+    printf '{"type":"user","timestamp":"2026-05-30T13:00:00Z","content":"msg %d %s"}\n' "$bn" "$big_pad"
+  done
+} >"$big_abs"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/9999.jsonl","snapshot":"%s","captured_at":"2026-05-30T13:30:00Z","source_mtime":"2026-05-30T13:25:00Z","source_size":99999,"day_bucket":"2026-05-30"}\n' \
+  "$big_uuid" "$big_snap" >>"$CLAST_JOURNAL_DIR/.manifest.jsonl"
+out="$("$CLAST_BIN" --json show "$big_uuid" --full --turns 1 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "show large multi-line session: exits 0 (no SIGPIPE)"
+case "$(jq -r '.first_prompt // empty' <<<"$out")" in
+  "msg 1 "*) _clast_test_pass "show large session: first_prompt is first user message" ;;
+  *) _clast_test_fail "show large session: first_prompt is first user message"; printf '%s\n' "$out" >&2 ;;
+esac
+
+# --- session with a >128KB turn: must not blow ARG_MAX (regression) ---------
+# `--full` grafts turn arrays onto the JSON. Passing a >128KB turn array as a
+# jq --argjson argv value used to fail with exit 126 "Argument list too long"
+# (MAX_ARG_STRLEN), even well under total ARG_MAX. show.bash now feeds the
+# arrays via stdin. The huge turn must be the LAST turn so --turns 1 keeps it.
+# NB: the >128KB blob is streamed straight to disk and show's output is read
+# back from a file — never held in a shell variable, which would itself bust
+# MAX_ARG_STRLEN on the next exec (the env string would exceed the cap).
+huge_uuid="88888888-8888-4888-8888-888888888888"
+huge_snap="transcripts/2026-05-30/-tmp-proj-xesapps/$huge_uuid.jsonl"
+huge_abs="$CLAST_JOURNAL_DIR/$huge_snap"
+huge_out="$CLAST_JOURNAL_DIR/../huge-show.json"
+mkdir -p "$(dirname "$huge_abs")"
+{
+  printf '{"type":"summary","timestamp":"2026-05-30T13:00:00Z","session_id":"%s"}\n' "$huge_uuid"
+  printf '{"type":"user","timestamp":"2026-05-30T13:00:00Z","content":"small first prompt"}\n'
+  # 200KB all-ASCII 'x' (needs no JSON escaping), streamed inline — never a var.
+  printf '{"type":"assistant","timestamp":"2026-05-30T13:01:00Z","content":"'
+  head -c 200000 /dev/zero | tr '\0' x
+  printf '"}\n'
+} >"$huge_abs"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps/8888.jsonl","snapshot":"%s","captured_at":"2026-05-30T13:30:00Z","source_mtime":"2026-05-30T13:25:00Z","source_size":200500,"day_bucket":"2026-05-30"}\n' \
+  "$huge_uuid" "$huge_snap" >>"$CLAST_JOURNAL_DIR/.manifest.jsonl"
+"$CLAST_BIN" --json show "$huge_uuid" --full --turns 1 >"$huge_out" 2>/dev/null && rc=$? || rc=$?
+assert_eq "0" "$rc" "show >128KB turn: exits 0 (no ARG_MAX overflow)"
+assert_eq "1" "$(jq '.last_turns | length' "$huge_out")" "show >128KB turn: last_turns length 1"
+assert_eq "200000" "$(jq -r '.last_turns[0].text | length' "$huge_out")" "show >128KB turn: huge turn text intact"
 teardown_test_journal
 
 # --- unknown UUID ----------------------------------------------------------
