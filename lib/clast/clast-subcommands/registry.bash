@@ -132,6 +132,9 @@ _clast_registry_op_resolve() {
       -h|--help)
         cat <<'EOF'
 Usage: clast registry resolve <path-or-segment> [--json]
+
+Prints the resolved slug. With --json, also includes the directory's
+`label` when the matched line has one.
 EOF
         return 0
         ;;
@@ -150,10 +153,16 @@ EOF
     return 2
   fi
 
-  local slug
-  if slug="$(clast_registry_resolve "$input")" && [[ -n "$slug" ]]; then
+  # Resolve to the specific line so --json can surface the per-directory
+  # label (not just the slug). Human output stays slug-only.
+  local line
+  if line="$(clast_registry_line_for_path "$input")" && [[ -n "$line" ]]; then
+    local slug label
+    slug="$(jq -r '.slug // empty' <<<"$line")"
+    label="$(jq -r '.label // empty' <<<"$line")"
     if [[ -n "$json" ]]; then
-      jq -cn --arg slug "$slug" '{slug: $slug}'
+      jq -cn --arg slug "$slug" --arg label "$label" \
+        '{slug: $slug} + (if $label == "" then {} else {label: $label} end)'
     else
       printf '%s\n' "$slug"
     fi

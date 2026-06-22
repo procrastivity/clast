@@ -61,7 +61,7 @@ _seed_full
 out="$("$CLAST_BIN" --json entries 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "entries --json: exits 0"
 assert_eq "3" "$(jq 'length' <<<"$out")" "entries --json: 3 rows"
-for k in path date time day_bucket project session_id session_slug branch tags title; do
+for k in path date time day_bucket project label session_id session_slug branch tags title; do
   present="$(jq --arg k "$k" '.[0] | has($k)' <<<"$out")"
   assert_eq "true" "$present" "entries --json: row has $k"
 done
@@ -190,8 +190,12 @@ content="$(cat "$target")"
 # Frontmatter key-order assertion: extract keys (text before colon) from the
 # frontmatter block, in order, and compare to the documented sequence.
 fm_keys="$(awk 'BEGIN{in_fm=0;seen=0} /^---$/{if(!seen){in_fm=1;seen=1;next} if(in_fm)exit} in_fm{sub(/:.*$/,""); print}' <<<"$content" | paste -sd, -)"
-expected_keys="date,time,day_bucket,project,project_path,project_remote,branch,author,tags,session_id,session_slug,snapshot_path,machine,curated_source_mtime"
+expected_keys="date,time,day_bucket,project,project_path,label,project_remote,branch,author,tags,session_id,session_slug,snapshot_path,machine,curated_source_mtime"
 assert_eq "$expected_keys" "$fm_keys" "entries write stdin: frontmatter key order"
+case "$content" in
+  *"label: null"*) _clast_test_pass "entries write stdin: label null when registry line has none" ;;
+  *) _clast_test_fail "entries write stdin: label null when registry line has none"; printf '%s\n' "$content" >&2 ;;
+esac
 case "$content" in
   *"author: test-user"*) _clast_test_pass "entries write stdin: author=test-user" ;;
   *) _clast_test_fail "entries write stdin: author=test-user" ;;
@@ -244,6 +248,29 @@ assert_eq "Hello" "$body" "entries write stdin: body == Hello"
 sess_out="$("$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
 curated="$(jq -r --arg s "$KNOWN_SID" '.[] | select(.session_id == $s) | .curated' <<<"$sess_out")"
 assert_eq "true" "$curated" "sessions curated probe finds entries-step write"
+teardown_test_journal
+
+# --- write: shared-slug, multi-directory → resolves by PATH not slug-first --
+# Regression guard: a slug spanning several directories must stamp the entry
+# with THIS session's directory (path-matched), not the first line that
+# happens to share the slug. Decoy line is first on purpose.
+_seed_manifest_only
+cat > "$CLAST_JOURNAL_DIR/projects.json" <<'EOF'
+{"path":"/tmp/proj-decoy-xesapps","slug":"xesapps","label":"decoy","remote":"git@example.com:xes/xesapps.git","first_seen":"2026-05-01","aliases":[]}
+{"path":"/tmp/proj-xesapps","slug":"xesapps","label":"dev","remote":"git@example.com:xes/xesapps.git","first_seen":"2026-05-02","aliases":[]}
+EOF
+out="$(printf 'Hi\n' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug multidir --body-stdin 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "entries write multidir: exits 0"
+content="$(cat "$CLAST_JOURNAL_DIR/entries/2026-05-30-1430-xesapps-multidir.md")"
+case "$content" in
+  *"project_path: /tmp/proj-xesapps"*) _clast_test_pass "entries write multidir: project_path is the session's dir (not slug-first)" ;;
+  *) _clast_test_fail "entries write multidir: project_path is the session's dir (not slug-first)"; printf '%s\n' "$content" >&2 ;;
+esac
+case "$content" in
+  *"label: dev"*) _clast_test_pass "entries write multidir: label from the matched line" ;;
+  *) _clast_test_fail "entries write multidir: label from the matched line"; printf '%s\n' "$content" >&2 ;;
+esac
 teardown_test_journal
 
 # --- write --tags --title --body-from --------------------------------------

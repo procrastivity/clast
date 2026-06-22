@@ -12,6 +12,7 @@ time: 14:30
 day_bucket: 2026-05-30
 project: xesapps
 project_path: /home/beau/code/xesapps
+label: dev
 project_remote: git@gitlab.xes-inc.com:xes/xesapps.git
 branch: feature/canonical-field
 author: beau
@@ -30,7 +31,8 @@ curated_source_mtime: 2026-05-30T14:30:30Z
 | `time` | session start, local time | `HH:MM` |
 | `day_bucket` | adjusted by `day_cutoff` | may differ from `date` for late-night sessions |
 | `project` | resolved via registry from session's segment | the slug |
-| `project_path` | registry | absolute path |
+| `project_path` | registry line for the session's directory | absolute path |
+| `label` | registry line for the session's directory | per-directory distinguisher when a slug spans multiple clones/worktrees; `null` when the line has none |
 | `project_remote` | registry, may be omitted | `git remote get-url origin` at registration time |
 | `branch` | session metadata at start | best effort |
 | `author` | `$USER` at write time | |

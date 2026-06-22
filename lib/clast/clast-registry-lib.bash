@@ -95,6 +95,58 @@ clast_registry_resolve() {
   printf '%s\n' "$slug"
 }
 
+# clast_registry_line_for_path <path-or-segment>
+#   Like clast_registry_resolve, but prints the FULL matching registry line
+#   (the JSON object) instead of just the slug; empty + return 1 on miss.
+#   Use this to recover the per-directory path/label/remote for a specific
+#   session — slug-first-match collapses a multi-directory project onto its
+#   first line, which is wrong once a slug spans several directories.
+clast_registry_line_for_path() {
+  local input="${1:-}"
+  if [[ -z "$input" ]]; then
+    return 1
+  fi
+
+  local arr
+  arr="$(clast_registry_list_json)"
+
+  local -a candidates=()
+  if [[ "$input" == -* ]]; then
+    candidates=("$input")
+    local -a decoded=()
+    mapfile -t decoded < <(clast_decode_candidates "$input")
+    candidates+=("${decoded[@]}")
+  else
+    local canon
+    canon="$(realpath -m "$input" 2>/dev/null || printf '%s' "$input")"
+    candidates=("$canon")
+  fi
+
+  local cands_json line
+  cands_json="$(printf '%s\n' "${candidates[@]}" | jq -Rn '[inputs]')"
+  line="$(_clast_registry_lookup_line "$cands_json" "$arr" 2>/dev/null)" || true
+  if [[ -z "$line" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$line"
+}
+
+# _clast_registry_lookup_line <candidates-json-array> <registry-json-array>
+#   Like _clast_registry_lookup_paths but returns the FIRST matching line's
+#   whole object (path before alias). Print the compact JSON object or empty.
+_clast_registry_lookup_line() {
+  local cands_json="$1" arr="$2"
+  jq -c --argjson cands "$cands_json" '
+    . as $arr
+    | first(
+        $cands[] as $c
+        | ( ($arr | map(select(.path == $c)) | .[0])
+            // ($arr | map(select((.aliases? // []) | index($c) != null)) | .[0]) )
+        | select(. != null)
+      ) // empty
+  ' <<<"$arr"
+}
+
 # _clast_registry_lookup_path <path> <registry-json-array>
 #   First match wins: scan .path, then .aliases[]. Print slug or empty.
 _clast_registry_lookup_path() {
