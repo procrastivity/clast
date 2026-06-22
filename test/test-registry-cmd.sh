@@ -14,7 +14,7 @@ setup_test_journal >/dev/null
 make_fixture_journal_tree multi-project
 human="$("$CLAST_BIN" registry list)"
 case "$human" in
-  *"slug"*"path"*"remote"*"aliases"*) _clast_test_pass "list: header row present" ;;
+  *"slug"*"label"*"path"*"remote"*"aliases"*) _clast_test_pass "list: header row present" ;;
   *) _clast_test_fail "list: header row present"; printf '%s\n' "$human" >&2 ;;
 esac
 case "$human" in
@@ -36,18 +36,21 @@ assert_eq "3" "$(jq 'length' <<<"$arr")" "list --json: 3 entries"
 teardown_test_journal
 
 # --- registry add (human) ----------------------------------------------------
+# /tmp/proj-new auto-derives label "tmp" from its parent dir, shown in the
+# confirmation line.
 setup_test_journal >/dev/null
 expected_path="$(realpath -m /tmp/proj-new)"
 out="$("$CLAST_BIN" registry add /tmp/proj-new --slug proj-new)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "add: exits 0"
-assert_eq "registered proj-new → $expected_path" "$out" "add: confirmation line"
+assert_eq "registered proj-new (tmp) → $expected_path" "$out" "add: confirmation line with label"
 teardown_test_journal
 
 # --- registry add --json -----------------------------------------------------
 setup_test_journal >/dev/null
-out="$("$CLAST_BIN" registry add /tmp/proj-new --slug proj-new --json)" && rc=$? || rc=$?
+out="$("$CLAST_BIN" registry add /tmp/proj-new --slug proj-new --label demo --json)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "add --json: exits 0"
 assert_eq "proj-new" "$(jq -r .slug <<<"$out")" "add --json: slug field"
+assert_eq "demo" "$(jq -r .label <<<"$out")" "add --json: label field"
 assert_eq "$(realpath -m /tmp/proj-new)" "$(jq -r .path <<<"$out")" "add --json: path field"
 teardown_test_journal
 

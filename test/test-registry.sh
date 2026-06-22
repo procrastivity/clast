@@ -117,20 +117,49 @@ out="$(clast_registry_resolve /tmp/proj-x)"
 assert_eq "proj-x" "$out" "resolve after add"
 teardown_test_journal
 
-# --- add: remote match overrides --slug to existing entry's slug -------------
+# --- add: explicit --slug is honored even when the remote matches -----------
+# The remote is a grouping hint, not an identity. A divergent explicit slug
+# registers a separate project (and warns); aliases are never rolled up.
 setup_test_journal >/dev/null
-foo_path="$(realpath -m /tmp/proj-foo)"
 foo2_path="$(realpath -m /tmp/proj-foo-2)"
 clast_registry_add /tmp/proj-foo --slug foo --remote R >/dev/null
-line="$(clast_registry_add /tmp/proj-foo-2 --slug ignored --remote R)"
-# Why: docs/reference/cli.md#clast-registry add step 4 — remote match merges
-# into the existing slug rather than creating a new one. The caller's
-# --slug is overridden on purpose.
-assert_eq "foo" "$(jq -r .slug <<<"$line")" "add: remote match overrides --slug"
+line="$(clast_registry_add /tmp/proj-foo-2 --slug distinct --remote R 2>/dev/null)"
+assert_eq "distinct" "$(jq -r .slug <<<"$line")" "add: explicit --slug honored over remote match"
 assert_eq "$foo2_path" "$(jq -r .path <<<"$line")" "add: new path recorded"
-# Aliases roll-up: the prior known path for slug=foo lives in aliases.
-has_alias="$(jq -r --arg p "$foo_path" '.aliases | index($p) != null' <<<"$line")"
-assert_eq "true" "$has_alias" "add: prior path rolled into aliases"
+assert_eq "[]" "$(jq -c .aliases <<<"$line")" "add: no alias roll-up"
+# The divergence warns on stderr.
+warn="$(clast_registry_add /tmp/proj-foo-3 --slug other --remote R 2>&1 1>/dev/null)"
+case "$warn" in
+  *"already registered under slug 'foo'"*) _clast_test_pass "add: divergent slug warns" ;;
+  *) _clast_test_fail "add: divergent slug warns (got: $warn)" ;;
+esac
+teardown_test_journal
+
+# --- add: default slug (no --slug) adopts a matching remote's slug ----------
+setup_test_journal >/dev/null
+clast_registry_add /tmp/proj-grp --slug grp --remote RG >/dev/null
+line="$(clast_registry_add /tmp/proj-grp-2 --remote RG 2>/dev/null)"
+assert_eq "grp" "$(jq -r .slug <<<"$line")" "add: default slug adopts matched remote slug"
+assert_eq "[]" "$(jq -c .aliases <<<"$line")" "add: adopted line has empty aliases"
+notice="$(clast_registry_add /tmp/proj-grp-3 --remote RG 2>&1 1>/dev/null)"
+case "$notice" in
+  *"grouping"*"grp"*) _clast_test_pass "add: adoption emits info notice" ;;
+  *) _clast_test_fail "add: adoption emits info notice (got: $notice)" ;;
+esac
+teardown_test_journal
+
+# --- add: label — explicit, auto-derived, and validated ---------------------
+setup_test_journal >/dev/null
+line="$(clast_registry_add /tmp/workspaces/performance/xesapps --slug xesapps)"
+assert_eq "performance" "$(jq -r .label <<<"$line")" "add: label auto-derived from parent dir"
+line="$(clast_registry_add /tmp/workspaces/dev/xesapps --slug xesapps --label custom)"
+assert_eq "custom" "$(jq -r .label <<<"$line")" "add: explicit --label honored"
+err="$(clast_registry_add /tmp/proj-badlabel --slug x --label 'Bad Label' 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add: invalid --label exits 2"
+case "$err" in
+  *invalid*label*) _clast_test_pass "add: invalid --label error message" ;;
+  *) _clast_test_fail "add: invalid --label error message (got: $err)" ;;
+esac
 teardown_test_journal
 
 # --- add: rejects empty path -------------------------------------------------

@@ -63,15 +63,16 @@ EOF
     return 0
   fi
 
-  printf '%-17s %-33s %-43s %s\n' slug path remote aliases
-  local n i slug path remote aliases
+  printf '%-17s %-13s %-33s %-43s %s\n' slug label path remote aliases
+  local n i slug label path remote aliases
   n="$(jq 'length' <<<"$arr")"
   for (( i = 0; i < n; i++ )); do
     slug="$(jq -r ".[$i].slug // \"\"" <<<"$arr")"
+    label="$(jq -r ".[$i].label // \"\" | if . == \"\" then \"(none)\" else . end" <<<"$arr")"
     path="$(jq -r ".[$i].path // \"\"" <<<"$arr")"
     remote="$(jq -r ".[$i].remote // \"\"" <<<"$arr")"
     aliases="$(jq -r ".[$i].aliases // [] | if length == 0 then \"(none)\" else join(\",\") end" <<<"$arr")"
-    printf '%-17s %-33s %-43s %s\n' "$slug" "$path" "$remote" "$aliases"
+    printf '%-17s %-13s %-33s %-43s %s\n' "$slug" "$label" "$path" "$remote" "$aliases"
   done
 }
 
@@ -83,18 +84,18 @@ _clast_registry_op_add() {
       --json) json=1; shift ;;
       -h|--help)
         cat <<'EOF'
-Usage: clast registry add <path> [--slug NAME] [--remote URL] [--json]
+Usage: clast registry add <path> [--slug NAME] [--label NAME] [--remote URL] [--json]
 EOF
         return 0
         ;;
       # TODO(v1.1): interactive --slug prompt when stdin is a TTY.
-      --slug|--remote)
+      --slug|--label|--remote)
         if [[ $# -lt 2 ]]; then
           clast_log_error "registry add: $1 requires a value"
           return 2
         fi
         passthrough+=("$1" "$2"); shift 2 ;;
-      --slug=*|--remote=*)
+      --slug=*|--label=*|--remote=*)
         passthrough+=("$1"); shift ;;
       *)
         passthrough+=("$1"); shift ;;
@@ -110,10 +111,15 @@ EOF
   if [[ -n "$json" ]]; then
     printf '%s\n' "$line"
   else
-    local slug path
+    local slug label path
     slug="$(jq -r '.slug' <<<"$line")"
+    label="$(jq -r '.label // ""' <<<"$line")"
     path="$(jq -r '.path' <<<"$line")"
-    printf 'registered %s → %s\n' "$slug" "$path"
+    if [[ -n "$label" ]]; then
+      printf 'registered %s (%s) → %s\n' "$slug" "$label" "$path"
+    else
+      printf 'registered %s → %s\n' "$slug" "$path"
+    fi
   fi
 }
 

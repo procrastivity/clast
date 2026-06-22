@@ -373,20 +373,41 @@ Manage `projects.json`.
 ### `clast-plumbing registry list [--json]`
 
 ```
-slug              path                              remote                                      aliases
-xesapps           /home/beau/code/xesapps           git@gitlab.xes-inc.com:xes/xesapps.git      /mnt/c/code/xesapps
-pi-coding-agent   /home/beau/code/pi-coding-agent   https://github.com/.../pi-coding-agent.git  (none)
+slug              label         path                              remote                                      aliases
+xesapps           dev           /home/beau/code/xesapps           git@gitlab.xes-inc.com:xes/xesapps.git      (none)
+xesapps           perf          /home/beau/perf/xesapps           git@gitlab.xes-inc.com:xes/xesapps.git      (none)
+pi-coding-agent   code          /home/beau/code/pi-coding-agent   https://github.com/.../pi-coding-agent.git  (none)
 ```
 
-### `clast-plumbing registry add <path> [--slug NAME] [--remote URL]`
+`label` distinguishes directories that share a `slug` (see below).
+
+### `clast-plumbing registry add <path> [--slug NAME] [--label NAME] [--remote URL]`
 
 1. Resolve `path` to absolute, canonicalize.
 2. Run `git -C <path> remote get-url origin` if `--remote` not given.
-3. If `--slug` not given, prompt with default = repo dirname.
-4. If `remote` matches an existing entry, add `path` to that entry's `aliases` instead of creating a new entry.
-5. Else create a new registry entry.
+3. Resolve the **slug**. The remote is a *grouping hint*, not an identity —
+   it lets clones of one repo share a logical project, but it never
+   overrides an explicit choice:
 
-Output: confirmation line, or JSON with `--json`.
+   | `--slug` given? | remote matches an existing slug? | resulting slug | notice |
+   |---|---|---|---|
+   | yes `S` | no | `S` | — |
+   | yes `S` | yes, equals `S` | `S` | — (intentional grouping) |
+   | yes `S` | yes, differs (`M`) | `S` (separate project) | **warn**: remote already under `M` |
+   | no | no | `basename(path)` | — |
+   | no | yes (`M`) | `M` | **info**: grouped under `M` |
+
+4. Resolve the **label**: `--label NAME` (lowercased; must match
+   `[a-z0-9][a-z0-9-]{0,31}`), else the parent directory's basename,
+   slugified (e.g. `~/perf/xesapps` → `perf`). The label only distinguishes
+   clones of one slug; single-directory projects never surface it.
+5. Append a new line with `aliases: []`. Sibling paths are **not** rolled
+   into `aliases` — a shared `slug` across distinct `path` lines is the
+   supported way to register multiple directories of one project.
+
+Output: confirmation line (includes the label in parentheses when set), or
+JSON with `--json`. Warnings and the grouping notice go to stderr; the info
+notice is suppressed by `--quiet`, the warning is not.
 
 ### `clast-plumbing registry resolve <path-or-segment>`
 
@@ -456,7 +477,7 @@ clast-plumbing doctor [--fix]
 ### Checks performed
 
 1. **Manifest validity**: every line is parseable JSON with required fields.
-2. **Registry validity**: every line is parseable JSON; no duplicate slugs; aliases don't conflict across entries.
+2. **Registry validity**: every line is parseable JSON. A `slug` shared across distinct `path` lines is valid (multi-directory project); flagged instead are genuine conflicts — the same `path` registered twice, one `path` mapped to two slugs, or an alias colliding across two *different* slugs.
 3. **Orphan snapshots**: files in `transcripts/` not referenced by manifest.
 4. **Missing snapshots**: entries reference snapshot paths that don't exist on disk.
 5. **Day-bucket consistency**: snapshot file location matches its manifest `day_bucket`.
@@ -474,7 +495,7 @@ Destructive operations (removing entries, rewriting frontmatter) always require 
 
 ```
 ✓ Manifest: 247 entries, all valid
-✓ Registry: 8 projects, no duplicates
+✓ Registry: 11 line(s), 8 project(s), no conflicts
 ✗ Orphan snapshots: 3 (see below)
   transcripts/2026-04-15/-old-path/abc.jsonl
   transcripts/2026-04-15/-old-path/def.jsonl
@@ -545,15 +566,16 @@ These three are **optional**: manifest lines written before this cache was intro
 
 ```json
 {
-  "path": "/home/beau/code/xesapps",
+  "path": "/home/beau/perf/xesapps",
   "slug": "xesapps",
+  "label": "perf",
   "remote": "git@gitlab.xes-inc.com:xes/xesapps.git",
   "first_seen": "2026-03-12",
-  "aliases": ["/mnt/c/code/xesapps", "/Users/beau/code/xesapps"]
+  "aliases": []
 }
 ```
 
-`path` is required. `slug` is required. Other fields optional. Multiple lines may share a `slug` if `path` differs (slug acts as a logical project identifier).
+`path` is required. `slug` is required. Other fields optional. Multiple lines may share a `slug` if `path` differs — that is how multiple directories (clones / worktrees) of one project are registered; the slug is the logical project identifier and `label` distinguishes the directories. `aliases` is reserved for genuine alternate paths of the *same* checkout (e.g. a WSL vs. macOS mount) and is no longer auto-populated by registration.
 
 ### Entry frontmatter
 

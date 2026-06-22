@@ -147,39 +147,53 @@ _clast_doctor_check_registry_validity() {
     return 0
   fi
 
-  # Duplicate slug + alias collisions, computed across the parseable subset.
+  # Path conflicts + alias collisions, computed across the parseable subset.
   local entries_json='[]'
   if (( ${#entries[@]} > 0 )); then
     entries_json="$(printf '%s\n' "${entries[@]}" | jq -cs .)"
   fi
 
-  local dup_lines
-  dup_lines="$(jq -r '
-    [.[] | .slug] | group_by(.)
-    | map(select(length > 1) | .[0]) | .[]
+  # A shared slug across distinct .path lines is the supported way to span
+  # multiple directories (worktrees / clones) of one logical project — see
+  # data-model.md. So duplicate slugs are NOT a problem. Genuine problems
+  # are keyed on path: the same path registered more than once, or one path
+  # claimed by more than one slug.
+  local path_issues
+  path_issues="$(jq -r '
+    group_by(.path)
+    | map(select(length > 1))
+    | .[]
+    | ([ .[].slug ] | unique) as $slugs
+    | if ($slugs | length) > 1
+      then "path conflict: " + .[0].path + " maps to slugs " + ($slugs | join(", "))
+      else "duplicate path: " + .[0].path
+      end
   ' <<<"$entries_json")"
-  local dup_slug
-  while IFS= read -r dup_slug; do
-    [[ -z "$dup_slug" ]] && continue
-    issues+=("duplicate slug: $dup_slug")
-  done <<<"$dup_lines"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    issues+=("$line")
+  done <<<"$path_issues"
 
+  # Alias collisions only matter across *different* slugs: two lines of one
+  # slug sharing an alias (or a legacy roll-up) is benign.
   local collisions
   collisions="$(jq -r '
     . as $arr
     | [
-        # alias collides with another entry'"'"'s slug
+        # alias collides with a *different* entry'"'"'s slug
         ( range(0; length) as $i
           | range(0; length) as $j
           | select($i != $j)
+          | select($arr[$i].slug != $arr[$j].slug)
           | ($arr[$i].aliases // []) as $aliases
           | select($aliases | index($arr[$j].slug) != null)
           | "alias collision: " + $arr[$i].slug + " aliases slug " + $arr[$j].slug
         ),
-        # alias collides with another entry'"'"'s alias (shared alias across two slugs)
+        # two *different* slugs share an alias path
         ( range(0; length) as $i
           | range(0; length) as $j
           | select($i < $j)
+          | select($arr[$i].slug != $arr[$j].slug)
           | ($arr[$i].aliases // []) as $ai
           | ($arr[$j].aliases // []) as $aj
           | ($ai | map(select(. as $x | $aj | index($x) != null))) as $shared
@@ -201,8 +215,10 @@ _clast_doctor_check_registry_validity() {
       "${issues[@]}"
     return 0
   fi
+  local proj_count
+  proj_count="$(jq -r '[.[].slug] | unique | length' <<<"$entries_json")"
   _clast_doctor_emit "registry_validity" "ok" \
-    "$valid_count projects, no duplicates"
+    "$valid_count line(s), $proj_count project(s), no conflicts"
 }
 
 # Compute the deduped (most-recent per session_id) manifest rows.
