@@ -46,6 +46,28 @@ curated_source_mtime: "2026-06-17T18:41:00Z"
 
 Body must stay byte-for-byte.
 EOF
+  # Legacy entry whose project_path is a dash-encoded segment (leading dash),
+  # not a real path. Must not break dirname/basename, and gets no label.
+  cat > "$CLAST_JOURNAL_DIR/entries/legacy.md" <<'EOF'
+---
+date: 2026-06-04
+time: 10:00
+day_bucket: 2026-06-04
+project: dev-xesapps
+project_path: -home-u-Workspaces-dev-xesapps
+author: u
+tags: []
+session_id: 44444444-4444-4444-8444-444444444444
+session_slug: legacy
+snapshot_path: transcripts/w
+machine: m
+curated_source_mtime: "2026-06-04T10:00:00Z"
+---
+
+# Session: Legacy
+
+Legacy body.
+EOF
   # Unrelated entry — must be untouched.
   cat > "$CLAST_JOURNAL_DIR/entries/other.md" <<'EOF'
 ---
@@ -126,6 +148,17 @@ assert_eq "$perf_body_before" "$perf_body_after" "real run: entry body unchanged
 case "$(cat "$CLAST_JOURNAL_DIR/entries/other.md")" in
   *"project: other"*) _clast_test_pass "real run: unrelated entry untouched" ;;
   *) _clast_test_fail "real run: unrelated entry untouched" ;;
+esac
+
+# Legacy dash-segment project_path: no crash, project rewritten, label null.
+legacy="$(cat "$CLAST_JOURNAL_DIR/entries/legacy.md")"
+case "$legacy" in
+  *"project: xesapps"*) _clast_test_pass "real run: legacy entry project rewritten" ;;
+  *) _clast_test_fail "real run: legacy entry project rewritten"; printf '%s\n' "$legacy" >&2 ;;
+esac
+case "$legacy" in
+  *"label: null"*) _clast_test_pass "real run: legacy entry label null (no path to derive)" ;;
+  *) _clast_test_fail "real run: legacy entry label null"; printf '%s\n' "$legacy" >&2 ;;
 esac
 
 # Backup created with the changed files.

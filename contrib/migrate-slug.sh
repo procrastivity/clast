@@ -156,7 +156,7 @@ if (( ${#affected_entries[@]} > 0 )); then
     if [[ -n "$existing_label" && "$existing_label" != "null" ]]; then
       derived="$existing_label (kept)"
     elif [[ -n "$pp" && "$pp" != "null" ]]; then
-      derived="$(slugify "$(basename "$(dirname "$pp")")")"
+      derived="$(slugify "$(basename -- "$(dirname -- "$pp")")")"
       [[ -z "$derived" ]] && derived="(none)"
     else
       derived="(none — no project_path)"
@@ -211,7 +211,7 @@ for f in "${affected_entries[@]+"${affected_entries[@]}"}"; do
   pp="$(fm_get "$f" project_path)"
   derived=""
   if [[ -n "$pp" && "$pp" != "null" ]]; then
-    derived="$(slugify "$(basename "$(dirname "$pp")")")"
+    derived="$(slugify "$(basename -- "$(dirname -- "$pp")")")"
   fi
 
   # Does the entry already carry a label line? (present vs. absent — distinct
