@@ -205,6 +205,7 @@ declare -a suites=(
   test/test-doctor.sh
   test/test-stats.sh
   test/test-install.sh
+  test/test-migrate-slug.sh
 )
 
 fail=0

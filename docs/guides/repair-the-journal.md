@@ -67,6 +67,46 @@ clast-plumbing doctor --fix
 present under `transcripts/`. You won't lose snapshots, only the manifest's
 record of when/from-where each was captured.
 
+## Renaming / merging a project slug
+
+If several directories of one repo were registered under an auto-adopted slug
+(e.g. four clones all became `dev-xesapps`) and you'd rather they shared a
+deliberate slug with per-directory labels, use the one-shot migration:
+
+```sh
+# Preview — writes nothing, no backups
+contrib/migrate-slug.sh --dry-run dev-xesapps xesapps
+
+# Apply (prompts unless --yes); pass --journal-dir for a non-default journal
+contrib/migrate-slug.sh dev-xesapps xesapps
+```
+
+It rewrites every registry line with `slug: dev-xesapps` to `slug: xesapps`,
+backfills `label` from each path's parent directory (`dev`, `performance`, …)
+when absent, and clears stale `aliases` roll-ups. It then rewrites matching
+curated entries' `project:` and backfills their `label:` from each entry's own
+`project_path`. Bodies are never touched; non-matching and malformed registry
+lines are preserved verbatim. The run ends by invoking `clast-plumbing doctor`
+so you immediately see a clean registry.
+
+Before writing, every file about to change is copied to
+`~/.claude/journal/.migrations/<timestamp>-<old>-to-<new>/`. **To roll back**,
+restore `projects.json` and the `entries/` files from that directory:
+
+```sh
+cp -p ~/.claude/journal/.migrations/<ts>-dev-xesapps-to-xesapps/projects.json \
+      ~/.claude/journal/projects.json
+cp -p ~/.claude/journal/.migrations/<ts>-dev-xesapps-to-xesapps/entries/*.md \
+      ~/.claude/journal/entries/
+```
+
+Re-running with the old slug after a successful migration is a safe no-op.
+
+> **Breadcrumbs are not renamed.** Breadcrumb files embed the slug in their
+> filename (`breadcrumbs/YYYY-MM-DD-<slug>.md`); this migration leaves them as
+> they are. Rename them by hand if you rely on old breadcrumbs under the new
+> slug.
+
 ## See also
 
 - [`reference/cli.md#clast-doctor`](../reference/cli.md#clast-doctor) — full
