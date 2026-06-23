@@ -89,6 +89,36 @@ assert_eq "-tmp-proj-scratch" "$(jq -r '.[0].segment' <<<"$out")" "projects --un
 assert_eq "false" "$(jq -r '.[0].registered' <<<"$out")" "projects --unregistered: registered=false"
 teardown_test_journal
 
+# --- shared-slug: each segment's row reports its OWN path/remote -----------
+# Regression: rows used to be filled via _clast_projects_path_for_slug which
+# returned the FIRST registry path for the slug, collapsing every checkout's
+# row onto the first checkout's path. With two registered paths sharing one
+# slug, each row must reflect its own segment's registry line.
+_seed_journal
+# Register a second path under the same slug. Use a distinct remote so the
+# rows are also distinguishable by remote, and add a session on the same day
+# so the second segment shows up in `projects --day` output.
+printf '{"path":"/tmp/proj-xesapps-b","slug":"xesapps","label":"clone-b","remote":"git@example.com:xes/xesapps-b.git","first_seen":"2026-05-01","aliases":[]}\n' \
+  >>"$CLAST_JOURNAL_DIR/projects.json"
+SID_SHARED="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+shared_snap="transcripts/2026-05-30/-tmp-proj-xesapps-b/$SID_SHARED.jsonl"
+shared_abs="$CLAST_JOURNAL_DIR/$shared_snap"
+mkdir -p "$(dirname "$shared_abs")"
+printf '{"type":"summary","timestamp":"2026-05-30T15:00:00Z","session_id":"%s"}\n' "$SID_SHARED" >"$shared_abs"
+printf '{"session_id":"%s","source":"/tmp/proj-xesapps-b/x.jsonl","snapshot":"%s","captured_at":"2026-05-30T15:30:00Z","source_mtime":"2026-05-30T15:25:00Z","source_size":100,"day_bucket":"2026-05-30","msg_count":1,"first_ts":"2026-05-30T15:00:00Z","last_ts":"2026-05-30T15:00:00Z"}\n' \
+  "$SID_SHARED" "$shared_snap" >>"$CLAST_JOURNAL_DIR/.manifest.jsonl"
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json projects --day 2026-05-30 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "projects shared-slug: exits 0"
+row_a="$(jq -c '.[] | select(.segment == "-tmp-proj-xesapps")' <<<"$out")"
+row_b="$(jq -c '.[] | select(.segment == "-tmp-proj-xesapps-b")' <<<"$out")"
+assert_eq "xesapps" "$(jq -r '.slug' <<<"$row_a")" "projects shared-slug: row A slug"
+assert_eq "xesapps" "$(jq -r '.slug' <<<"$row_b")" "projects shared-slug: row B slug"
+assert_eq "/tmp/proj-xesapps" "$(jq -r '.path' <<<"$row_a")" "projects shared-slug: row A path is its own"
+assert_eq "/tmp/proj-xesapps-b" "$(jq -r '.path' <<<"$row_b")" "projects shared-slug: row B path is its own (not collapsed to A)"
+assert_eq "git@example.com:xes/xesapps.git" "$(jq -r '.remote' <<<"$row_a")" "projects shared-slug: row A remote"
+assert_eq "git@example.com:xes/xesapps-b.git" "$(jq -r '.remote' <<<"$row_b")" "projects shared-slug: row B remote"
+teardown_test_journal
+
 # --- mutual exclusion ------------------------------------------------------
 _seed_journal
 err="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" projects --day today --since 2026-05-01 2>&1 >/dev/null)" && rc=$? || rc=$?

@@ -124,17 +124,33 @@ case "$out" in
 esac
 teardown_test_journal
 
-# --- registry duplicate slug → warn ----------------------------------------
+# --- registry shared slug across distinct paths → OK (multi-directory) ------
+# A slug spanning multiple .path lines is the supported way to register
+# several clones/worktrees of one project (data-model.md). Not an issue.
 setup_test_journal >/dev/null
 cat > "$CLAST_JOURNAL_DIR/projects.json" <<'EOF'
-{"path":"/tmp/a","slug":"xesapps","first_seen":"2026-05-01","aliases":[]}
-{"path":"/tmp/b","slug":"xesapps","first_seen":"2026-05-02","aliases":[]}
+{"path":"/tmp/a","slug":"xesapps","label":"dev","first_seen":"2026-05-01","aliases":[]}
+{"path":"/tmp/b","slug":"xesapps","label":"perf","first_seen":"2026-05-02","aliases":[]}
 EOF
 out="$("$CLAST_BIN" doctor 2>&1)" && rc=$? || rc=$?
-assert_eq "1" "$rc" "doctor dup-slug: exit 1"
+assert_eq "0" "$rc" "doctor shared-slug: exit 0 (legal multi-directory)"
 case "$out" in
-  *"duplicate slug: xesapps"*) _clast_test_pass "doctor dup-slug: finding lists slug" ;;
-  *) _clast_test_fail "doctor dup-slug: finding lists slug"; printf '%s\n' "$out" >&2 ;;
+  *"duplicate slug"*) _clast_test_fail "doctor shared-slug: must NOT flag duplicate slug"; printf '%s\n' "$out" >&2 ;;
+  *) _clast_test_pass "doctor shared-slug: no duplicate-slug finding" ;;
+esac
+teardown_test_journal
+
+# --- registry path conflict (one path, two slugs) → warn --------------------
+setup_test_journal >/dev/null
+cat > "$CLAST_JOURNAL_DIR/projects.json" <<'EOF'
+{"path":"/tmp/a","slug":"alpha","first_seen":"2026-05-01","aliases":[]}
+{"path":"/tmp/a","slug":"beta","first_seen":"2026-05-02","aliases":[]}
+EOF
+out="$("$CLAST_BIN" doctor 2>&1)" && rc=$? || rc=$?
+assert_eq "1" "$rc" "doctor path-conflict: exit 1"
+case "$out" in
+  *"path conflict: /tmp/a"*) _clast_test_pass "doctor path-conflict: finding lists path" ;;
+  *) _clast_test_fail "doctor path-conflict: finding lists path"; printf '%s\n' "$out" >&2 ;;
 esac
 teardown_test_journal
 

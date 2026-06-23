@@ -169,13 +169,18 @@ clast_cmd_projects() {
   done
 
   # Build per-segment rows as JSON, applying registry + --unregistered.
+  # Resolve each segment to its OWN registry line (not slug-first-match) so
+  # that a project spanning multiple checkouts under one shared slug reports
+  # each segment's own path/remote, instead of collapsing every row onto the
+  # first checkout's path.
   local -a rows=()
-  local slug path remote registered row decode_rc decoded
+  local slug path remote registered row decode_rc decoded line
   for seg in "${!seg_session_count[@]}"; do
-    if slug="$(clast_registry_resolve "$seg" 2>/dev/null)" && [[ -n "$slug" ]]; then
+    if line="$(clast_registry_line_for_path "$seg" 2>/dev/null)" && [[ -n "$line" ]]; then
       registered=true
-      path="$(_clast_projects_path_for_slug "$slug")"
-      remote="$(_clast_projects_remote_for_slug "$slug")"
+      slug="$(jq -r '.slug // empty' <<<"$line")"
+      path="$(jq -r '.path // empty' <<<"$line")"
+      remote="$(jq -r '.remote // empty' <<<"$line")"
     else
       registered=false
       slug=""
@@ -298,18 +303,3 @@ _clast_projects_window_filter() {
   printf '%s' "$joined"
 }
 
-# _clast_projects_path_for_slug <slug>
-#   First registry path for <slug>, or empty.
-_clast_projects_path_for_slug() {
-  local slug="$1"
-  clast_registry_list_json \
-    | jq -r --arg s "$slug" 'map(select(.slug == $s)) | .[0].path // empty'
-}
-
-# _clast_projects_remote_for_slug <slug>
-#   First non-empty registry remote for <slug>, or empty.
-_clast_projects_remote_for_slug() {
-  local slug="$1"
-  clast_registry_list_json \
-    | jq -r --arg s "$slug" 'map(select(.slug == $s and (.remote // "") != "")) | .[0].remote // empty'
-}

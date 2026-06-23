@@ -290,7 +290,7 @@ _clast_entries_list_consider() {
   fi
 
   # Parse frontmatter.
-  local fm_date="" fm_time="" fm_day_bucket="" fm_project=""
+  local fm_date="" fm_time="" fm_day_bucket="" fm_project="" fm_label=""
   local fm_session_id="" fm_session_slug="" fm_branch=""
   local fm_tags_raw=""
   local line key val
@@ -307,6 +307,11 @@ _clast_entries_list_consider() {
       time)         fm_time="$(_clast_entries_unquote "$val")" ;;
       day_bucket)   fm_day_bucket="$(_clast_entries_unquote "$val")" ;;
       project)      fm_project="$(_clast_entries_unquote "$val")" ;;
+      label)
+        if [[ "$val" != "null" ]]; then
+          fm_label="$(_clast_entries_unquote "$val")"
+        fi
+        ;;
       session_id)   fm_session_id="$(_clast_entries_unquote "$val")" ;;
       session_slug) fm_session_slug="$(_clast_entries_unquote "$val")" ;;
       branch)
@@ -372,6 +377,7 @@ _clast_entries_list_consider() {
     --arg time "$fm_time" \
     --arg day_bucket "$bucket" \
     --arg project "$fm_project" \
+    --arg label "$fm_label" \
     --arg session_id "$fm_session_id" \
     --arg session_slug "$fm_session_slug" \
     --arg branch "$fm_branch" \
@@ -383,6 +389,7 @@ _clast_entries_list_consider() {
        time: $time,
        day_bucket: $day_bucket,
        project: $project,
+       label: (if $label == "" then null else $label end),
        session_id: $session_id,
        session_slug: $session_slug,
        branch: (if $branch == "" then null else $branch end),
@@ -534,20 +541,17 @@ _clast_entries_write() {
   local seg
   seg="$(awk -F/ 'NR==1{print $3}' <<<"$snapshot_rel")"
 
-  # Resolve project from registry.
-  local project_slug="" project_path="" project_remote=""
-  local resolved_slug=""
-  if resolved_slug="$(clast_registry_resolve "$seg" 2>/dev/null)" && [[ -n "$resolved_slug" ]]; then
-    local reg_json reg_match
-    reg_json="$(clast_registry_list_json)"
-    reg_match="$(jq -c --arg s "$resolved_slug" 'map(select(.slug == $s)) | .[0] // empty' <<<"$reg_json")"
-    if [[ -n "$reg_match" ]]; then
-      project_slug="$resolved_slug"
-      project_path="$(jq -r '.path // empty' <<<"$reg_match")"
-      project_remote="$(jq -r '.remote // empty' <<<"$reg_match")"
-    else
-      project_slug="$resolved_slug"
-    fi
+  # Resolve the *specific* registry line for this session's directory (by
+  # path), not the first line that shares the slug. A slug may span several
+  # directories (clones/worktrees), each with its own path and label;
+  # slug-first-match would stamp every entry with the first line's path.
+  local project_slug="" project_path="" project_remote="" project_label=""
+  local reg_line=""
+  if reg_line="$(clast_registry_line_for_path "$seg" 2>/dev/null)" && [[ -n "$reg_line" ]]; then
+    project_slug="$(jq -r '.slug // empty' <<<"$reg_line")"
+    project_path="$(jq -r '.path // empty' <<<"$reg_line")"
+    project_remote="$(jq -r '.remote // empty' <<<"$reg_line")"
+    project_label="$(jq -r '.label // empty' <<<"$reg_line")"
   else
     project_slug="$seg"
     local -a decoded=()
@@ -618,6 +622,11 @@ _clast_entries_write() {
     fm+="project_path: $(_clast_entries_yaml_string "$project_path")"$'\n'
   else
     fm+="project_path: null"$'\n'
+  fi
+  if [[ -n "$project_label" ]]; then
+    fm+="label: $(_clast_entries_yaml_string "$project_label")"$'\n'
+  else
+    fm+="label: null"$'\n'
   fi
   if [[ -n "$project_remote" ]]; then
     fm+="project_remote: $(_clast_entries_yaml_string "$project_remote")"$'\n'

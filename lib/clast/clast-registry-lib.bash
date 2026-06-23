@@ -95,6 +95,58 @@ clast_registry_resolve() {
   printf '%s\n' "$slug"
 }
 
+# clast_registry_line_for_path <path-or-segment>
+#   Like clast_registry_resolve, but prints the FULL matching registry line
+#   (the JSON object) instead of just the slug; empty + return 1 on miss.
+#   Use this to recover the per-directory path/label/remote for a specific
+#   session — slug-first-match collapses a multi-directory project onto its
+#   first line, which is wrong once a slug spans several directories.
+clast_registry_line_for_path() {
+  local input="${1:-}"
+  if [[ -z "$input" ]]; then
+    return 1
+  fi
+
+  local arr
+  arr="$(clast_registry_list_json)"
+
+  local -a candidates=()
+  if [[ "$input" == -* ]]; then
+    candidates=("$input")
+    local -a decoded=()
+    mapfile -t decoded < <(clast_decode_candidates "$input")
+    candidates+=("${decoded[@]}")
+  else
+    local canon
+    canon="$(realpath -m "$input" 2>/dev/null || printf '%s' "$input")"
+    candidates=("$canon")
+  fi
+
+  local cands_json line
+  cands_json="$(printf '%s\n' "${candidates[@]}" | jq -Rn '[inputs]')"
+  line="$(_clast_registry_lookup_line "$cands_json" "$arr" 2>/dev/null)" || true
+  if [[ -z "$line" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$line"
+}
+
+# _clast_registry_lookup_line <candidates-json-array> <registry-json-array>
+#   Like _clast_registry_lookup_paths but returns the FIRST matching line's
+#   whole object (path before alias). Print the compact JSON object or empty.
+_clast_registry_lookup_line() {
+  local cands_json="$1" arr="$2"
+  jq -c --argjson cands "$cands_json" '
+    . as $arr
+    | first(
+        $cands[] as $c
+        | ( ($arr | map(select(.path == $c)) | .[0])
+            // ($arr | map(select((.aliases? // []) | index($c) != null)) | .[0]) )
+        | select(. != null)
+      ) // empty
+  ' <<<"$arr"
+}
+
 # _clast_registry_lookup_path <path> <registry-json-array>
 #   First match wins: scan .path, then .aliases[]. Print slug or empty.
 _clast_registry_lookup_path() {
@@ -125,14 +177,30 @@ _clast_registry_lookup_paths() {
   ' <<<"$arr"
 }
 
-# clast_registry_add <path> [--slug NAME] [--remote URL]
-#   Append a single JSONL line. Default slug = basename(path). Default
-#   remote = `git -C <path> remote get-url origin` (or absent). If the
-#   resolved remote matches an existing entry's remote, append a new line
-#   carrying that entry's slug and rolling its known paths into aliases.
+# _clast_registry_slugify <string>
+#   Lowercase, map non-[a-z0-9] runs to single dashes, trim, cap at 32.
+#   Used for auto-derived labels (e.g. a parent-directory basename).
+_clast_registry_slugify() {
+  local s
+  s="$(printf '%s' "${1,,}" | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+  s="${s:0:32}"
+  s="${s%-}"
+  printf '%s' "$s"
+}
+
+# clast_registry_add <path> [--slug NAME] [--label NAME] [--remote URL]
+#   Append a single JSONL line. The remote is a *grouping hint*, not an
+#   identity: when it matches an existing entry's remote, an absent --slug
+#   adopts that entry's slug (so clones of one repo share a project), but an
+#   explicit --slug always wins (a divergent one warns). Default slug =
+#   basename(path). Default label = basename(dirname(path)). Default remote
+#   = `git -C <path> remote get-url origin` (or absent). New lines carry
+#   `aliases: []` — sibling paths are no longer rolled up; a shared slug
+#   across distinct .path lines is the supported multi-directory shape.
 #   Print the appended JSON on stdout. Exit 2 on bad args, 1 on write fail.
 clast_registry_add() {
-  local path="" slug="" remote="" remote_explicit=0
+  local path="" slug="" slug_explicit=0 label_raw="" label_explicit=0
+  local remote="" remote_explicit=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --slug)
@@ -140,8 +208,25 @@ clast_registry_add() {
           clast_log_error "clast_registry_add: --slug requires a value"
           return 2
         fi
-        slug="$2"; shift 2 ;;
-      --slug=*)  slug="${1#*=}"; shift ;;
+        if [[ -z "$2" ]]; then
+          clast_log_error "clast_registry_add: --slug requires a non-empty value"
+          return 2
+        fi
+        slug="$2"; slug_explicit=1; shift 2 ;;
+      --slug=*)
+        slug="${1#*=}"
+        if [[ -z "$slug" ]]; then
+          clast_log_error "clast_registry_add: --slug requires a non-empty value"
+          return 2
+        fi
+        slug_explicit=1; shift ;;
+      --label)
+        if [[ $# -lt 2 ]]; then
+          clast_log_error "clast_registry_add: --label requires a value"
+          return 2
+        fi
+        label_raw="$2"; label_explicit=1; shift 2 ;;
+      --label=*) label_raw="${1#*=}"; label_explicit=1; shift ;;
       --remote)
         if [[ $# -lt 2 ]]; then
           clast_log_error "clast_registry_add: --remote requires a value"
@@ -196,29 +281,48 @@ clast_registry_add() {
     fi
   fi
 
-  # Default slug from basename.
-  if [[ -z "$slug" ]]; then
+  # Resolve the slug against any existing entry sharing this remote. The
+  # remote groups clones of one repo under a single logical project, but it
+  # is only a hint: an explicit --slug always wins. A divergent explicit
+  # slug warns (you are splitting the remote into two projects on purpose);
+  # the default slug silently adopts the match.
+  local matched_slug=""
+  if [[ -n "$remote" ]]; then
+    matched_slug="$(clast_registry_match_remote "$remote" 2>/dev/null || true)"
+  fi
+
+  if (( slug_explicit == 1 )); then
+    if [[ -n "$matched_slug" && "$matched_slug" != "$slug" ]]; then
+      clast_log_warn "registry: remote '$remote' is already registered under slug '$matched_slug'; registering '$canon' under requested slug '$slug' as a separate project (pass --slug '$matched_slug' to group them)"
+    fi
+  elif [[ -n "$matched_slug" ]]; then
+    slug="$matched_slug"
+    clast_log_info "registry: grouping '$canon' under existing slug '$slug' (shared remote; pass --slug to override)"
+  else
     slug="$(basename "$canon")"
   fi
 
-  # Aliases roll-up only when remote matched an existing entry.
-  local arr matched_slug
-  arr="$(clast_registry_list_json)"
-  local aliases_json='[]'
-  if [[ -n "$remote" ]]; then
-    matched_slug="$(jq -r --arg r "$remote" 'map(select(.remote == $r)) | .[0].slug // empty' <<<"$arr")"
-    if [[ -n "$matched_slug" ]]; then
-      slug="$matched_slug"
-      # Collect every known path for this slug (excluding the new one),
-      # plus their existing aliases.
-      aliases_json="$(jq -c --arg s "$slug" --arg p "$canon" '
-        [ .[] | select(.slug == $s) | [.path] + (.aliases // []) ]
-        | add // []
-        | map(select(. != $p))
-        | unique
-      ' <<<"$arr")"
+  # Per-directory label. An explicit --label is lowercased and validated;
+  # otherwise derive from the parent directory's basename (e.g.
+  # ~/Workspaces/performance/xesapps → "performance"). The label only
+  # distinguishes clones of one slug; a single-directory project never
+  # surfaces it, so a default like "code" is harmless.
+  local label=""
+  if (( label_explicit == 1 )); then
+    label="${label_raw,,}"
+    if [[ ! "$label" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
+      clast_log_error "clast_registry_add: invalid --label '$label_raw' (expected [a-z0-9][a-z0-9-]{0,31})"
+      return 2
     fi
+  else
+    label="$(_clast_registry_slugify "$(basename "$(dirname "$canon")")")"
   fi
+
+  # Sibling paths are no longer rolled into aliases: each directory is its
+  # own line keyed by .path, and a shared slug is the supported way to span
+  # directories. `aliases` stays present (reserved for genuine alternate
+  # paths of the same checkout) but empty.
+  local aliases_json='[]'
 
   local journal_dir
   journal_dir="$(clast_journal_dir)"
@@ -234,10 +338,11 @@ clast_registry_add() {
   line="$(jq -c -n \
     --arg path "$canon" \
     --arg slug "$slug" \
+    --arg label "$label" \
     --arg remote "$remote" \
     --arg first_seen "$first_seen" \
     --argjson aliases "$aliases_json" \
-    '{path: $path, slug: $slug, remote: $remote, first_seen: $first_seen}
+    '{path: $path, slug: $slug, label: $label, remote: $remote, first_seen: $first_seen}
      | with_entries(select(.value != null and .value != ""))
      | . + {aliases: $aliases}')" || {
     clast_log_error "clast_registry_add: jq failed to build registry line"
