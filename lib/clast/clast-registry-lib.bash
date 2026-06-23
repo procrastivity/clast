@@ -208,8 +208,18 @@ clast_registry_add() {
           clast_log_error "clast_registry_add: --slug requires a value"
           return 2
         fi
+        if [[ -z "$2" ]]; then
+          clast_log_error "clast_registry_add: --slug requires a non-empty value"
+          return 2
+        fi
         slug="$2"; slug_explicit=1; shift 2 ;;
-      --slug=*)  slug="${1#*=}"; slug_explicit=1; shift ;;
+      --slug=*)
+        slug="${1#*=}"
+        if [[ -z "$slug" ]]; then
+          clast_log_error "clast_registry_add: --slug requires a non-empty value"
+          return 2
+        fi
+        slug_explicit=1; shift ;;
       --label)
         if [[ $# -lt 2 ]]; then
           clast_log_error "clast_registry_add: --label requires a value"

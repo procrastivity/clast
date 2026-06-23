@@ -195,6 +195,21 @@ case "$err" in
   *--remote*requires*) _clast_test_pass "add --remote missing value: error message" ;;
   *) _clast_test_fail "add --remote missing value: error message (got: $err)" ;;
 esac
+# Empty explicit slug must be rejected (both --slug "" and --slug=); otherwise
+# slug_explicit=1 bypasses the default-slug branch and the line is appended
+# with no slug field, which doctor then flags as missing required fields.
+err="$(clast_registry_add /tmp/x --slug '' 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --slug '' exits 2"
+case "$err" in
+  *--slug*non-empty*) _clast_test_pass "add --slug '': error message" ;;
+  *) _clast_test_fail "add --slug '': error message (got: $err)" ;;
+esac
+err="$(clast_registry_add /tmp/x --slug= 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "add --slug= exits 2"
+case "$err" in
+  *--slug*non-empty*) _clast_test_pass "add --slug=: error message" ;;
+  *) _clast_test_fail "add --slug=: error message (got: $err)" ;;
+esac
 teardown_test_journal
 
 # --- remove: by slug ---------------------------------------------------------
