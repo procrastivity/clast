@@ -34,23 +34,31 @@ _clast_brief_resolve_project() {
 # A slug may span several directories; grouping keeps their work distinct
 # instead of letting the single newest entry stand in for the whole project.
 _clast_brief_gather_entries() {
-  local project="$1"
+  local project="$1" current_label="${2:-}"
 
-  # Pull a generous window (not just the newest few) so grouping by workspace
-  # doesn't let one busy clone starve the others; we re-limit per group below.
+  # Pull the full entries list (no global cap). A global `--limit` here would
+  # let one busy clone with N newer entries push the current clone out of the
+  # window entirely before we ever see it — even though the per-group/total
+  # caps below already keep the prompt within the brief's token budget.
   local entries_json
-  entries_json="$(clast-plumbing --json entries --project "$project" --limit 30 2>/dev/null)" || true
+  entries_json="$(clast-plumbing --json entries --project "$project" 2>/dev/null)" || true
 
   if [[ -z "$entries_json" ]] || [[ "$(jq 'length' <<<"$entries_json" 2>/dev/null)" == "0" ]]; then
     return
   fi
 
   # Ordered, de-duplicated group keys in newest-first order of first
-  # appearance (entries list is already sorted newest-first).
+  # appearance (entries list is already sorted newest-first). If a
+  # current_label was provided AND it appears in the entries, hoist it to
+  # the front so the active thread gets its share before total_cap is hit.
   local -a groups=()
-  mapfile -t groups < <(jq -r '
+  mapfile -t groups < <(jq -r --arg cur "$current_label" '
     [ .[] | (.label // .branch // "default") ] as $keys
-    | reduce $keys[] as $k ([]; if index($k) then . else . + [$k] end) | .[]
+    | (reduce $keys[] as $k ([]; if index($k) then . else . + [$k] end)) as $uniq
+    | (if $cur != "" and ($uniq | index($cur)) != null
+         then [$cur] + ($uniq - [$cur])
+         else $uniq end)
+    | .[]
   ' <<<"$entries_json")
 
   # A single-workspace project renders exactly as before (no group headers),
@@ -202,7 +210,7 @@ clast_cmd_brief() {
   clast_porcelain_info "Gathering context..."
 
   local entries breadcrumbs sessions
-  entries="$(_clast_brief_gather_entries "$project")"
+  entries="$(_clast_brief_gather_entries "$project" "$current_label")"
   breadcrumbs="$(_clast_brief_gather_breadcrumbs "$project")"
   sessions="$(_clast_brief_gather_sessions "$project")"
 

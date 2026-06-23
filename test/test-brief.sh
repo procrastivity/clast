@@ -99,6 +99,43 @@ case "$out" in
 esac
 teardown_test_journal
 
+# --- busy clone must not starve a quieter clone in the same shared-slug ----
+# Regression: the gather used to apply --limit 30 to the global entries query,
+# so a clone with >30 newer entries pushed the current clone out of the window
+# entirely. The dropped global cap plus per_group/total_cap is enough; the
+# current_label hoist below guarantees ordering on top of that.
+setup_test_journal >/dev/null
+# 31 newer entries in workspace "busy" — past the old global cap.
+for i in $(seq -w 1 31); do
+  hh=$(( 10#$i / 2 + 8 ))
+  mm=$(( 10#$i % 60 ))
+  _write_entry "2026-06-17-${i}-xesapps-b.md" xesapps busy main "$(printf '%02d:%02d' "$hh" "$mm")" "Busy $i"
+done
+# Single older entry in workspace "active". Without the fix, it never surfaces.
+_write_entry 2026-06-17-0001-xesapps-a.md xesapps active feat/a 00:01 "Active sole"
+out="$(_clast_brief_gather_entries xesapps active)"
+case "$out" in
+  *"Active sole"*) _clast_test_pass "gather busy+active: active entry surfaces despite 31 newer busy entries" ;;
+  *) _clast_test_fail "gather busy+active: active entry surfaces despite 31 newer busy entries"; printf '%s\n' "$out" >&2 ;;
+esac
+active_pos="${out%%## Workspace: active*}"
+busy_pos="${out%%## Workspace: busy*}"
+if (( ${#active_pos} < ${#busy_pos} )); then
+  _clast_test_pass "gather busy+active: current_label 'active' hoisted before busy"
+else
+  _clast_test_fail "gather busy+active: current_label 'active' hoisted before busy"
+fi
+# Without current_label, newest-first-appearance order applies: busy precedes active.
+out_no_hoist="$(_clast_brief_gather_entries xesapps)"
+active_pos="${out_no_hoist%%## Workspace: active*}"
+busy_pos="${out_no_hoist%%## Workspace: busy*}"
+if (( ${#busy_pos} < ${#active_pos} )); then
+  _clast_test_pass "gather busy+active (no current_label): newest workspace precedes older"
+else
+  _clast_test_fail "gather busy+active (no current_label): newest workspace precedes older"
+fi
+teardown_test_journal
+
 # --- entries with no label fall back to branch grouping ---------------------
 setup_test_journal >/dev/null
 _write_entry 2026-06-17-1200-xesapps-a.md xesapps null feat/aaa 12:00 "Branch A"
