@@ -152,12 +152,13 @@ clast_cmd_retro() {
     summary_pairs+=("$(jq -cn --arg s "$sid" --arg v "$summary" '{session_id:$s, summary:$v}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
-  # Fold summaries back into the manifest.
+  # Fold summaries back into the manifest. The manifest carries --bodies, so it
+  # can exceed MAX_ARG_STRLEN — feed it via stdin and the summary pairs via
+  # --slurpfile, never argv.
   local enriched="$manifest"
   if (( ${#summary_pairs[@]} > 0 )); then
-    enriched="$(printf '%s\n' "${summary_pairs[@]}" | jq -cs --argjson m "$manifest" '
-      (reduce .[] as $p ({}; .[$p.session_id] = $p.summary)) as $sum
-      | $m
+    enriched="$(printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${summary_pairs[@]}") '
+      (reduce $pairs[] as $p ({}; .[$p.session_id] = $p.summary)) as $sum
       | .days |= map(.projects |= map(.sessions |= map(. + {summary: ($sum[.session_id] // null)})))
     ')"
   fi

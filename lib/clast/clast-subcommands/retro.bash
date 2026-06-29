@@ -129,7 +129,10 @@ _clast_retro_inject_bodies() {
     else
       interrupted=false
     fi
-    pairs+=("$(jq -cn --arg s "$sid" --arg b "$body" --arg t "$title" --argjson i "$interrupted" \
+    # Body via --rawfile (process substitution), never argv: a single merged
+    # body can exceed MAX_ARG_STRLEN (~128 KiB) and silently fail the exec.
+    pairs+=("$(jq -cn --arg s "$sid" --rawfile b <(printf '%s' "$body") \
+      --arg t "$title" --argjson i "$interrupted" \
       '{session_id:$s, body:$b, title:$t, interrupted:$i}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
@@ -138,9 +141,10 @@ _clast_retro_inject_bodies() {
     return 0
   fi
 
-  printf '%s\n' "${pairs[@]}" | jq -cs --argjson m "$manifest" '
-    (reduce .[] as $p ({}; .[$p.session_id] = $p)) as $x
-    | $m
+  # Manifest on stdin and the body-bearing pairs via --slurpfile — both can be
+  # large, so neither goes through argv.
+  printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${pairs[@]}") '
+    (reduce $pairs[] as $p ({}; .[$p.session_id] = $p)) as $x
     | .days |= map(.projects |= map(.sessions |= map(
         . + {body:        ($x[.session_id].body // null),
              title:       ($x[.session_id].title // null),

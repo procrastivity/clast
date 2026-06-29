@@ -271,9 +271,10 @@ _clast_retro_inject_project_names() {
     return 0
   fi
 
-  printf '%s\n' "${pairs[@]}" | jq -cs --argjson m "$manifest" '
-    (reduce .[] as $p ({}; .[($p.path | tostring)] = $p.name)) as $names
-    | $m
+  # Manifest on stdin (it can be large with many sessions), name pairs via
+  # --slurpfile — keep both off argv (MAX_ARG_STRLEN).
+  printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${pairs[@]}") '
+    (reduce $pairs[] as $p ({}; .[($p.path | tostring)] = $p.name)) as $names
     | .days |= map(.projects |= map(
         . + {project_name: ($names[(.project_path | tostring)] // "(no project)")} ))
   '

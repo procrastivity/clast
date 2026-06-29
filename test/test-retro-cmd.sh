@@ -113,6 +113,29 @@ assert_eq "0" "$(jq '[.days[].projects[].sessions[].title | select(. == null)] |
 assert_exit_code 2 "$CLAST_BIN" retro --bodies
 teardown_test_journal
 
+# === large body: no argv (MAX_ARG_STRLEN) overflow =========================
+# A merged body / --bodies manifest larger than ~128 KiB must not be passed
+# through jq argv (it would E2BIG and silently yield body: "").
+setup_test_journal >/dev/null
+mkdir -p "$CLAST_JOURNAL_DIR/entries"
+{
+  printf -- '---\ndate: 2026-08-01\ntime: "10:00"\nday_bucket: 2026-08-01\n'
+  printf -- 'project: big\nproject_path: /tmp/projBig\n'
+  printf -- 'session_id: 99999999-9999-4999-8999-999999999999\nsession_slug: big\n'
+  printf -- 'snapshot_path: transcripts/2026-08-01/-tmp-projBig/99999999-9999-4999-8999-999999999999.jsonl\n'
+  printf -- 'machine: m\ncurated_source_mtime: "2026-08-01T10:00:00Z"\n---\n\n# Session: Huge\n## What shipped\n'
+  for i in $(seq 1 4000); do printf -- '- shipped item %s with padding to grow the body past the argv limit\n' "$i"; done
+} > "$CLAST_JOURNAL_DIR/entries/2026-08-01-1000-big-huge.md"
+big_json="$("$CLAST_BIN" --json retro --bodies 2>/dev/null)"
+big_len="$(jq -r '.days[0].projects[0].sessions[0].body | length' <<<"$big_json")"
+if [[ "$big_len" =~ ^[0-9]+$ ]] && (( big_len > 200000 )); then
+  _clast_test_pass "large body: full body preserved through --bodies ($big_len chars)"
+else
+  _clast_test_fail "large body: full body preserved through --bodies (got '$big_len')"
+fi
+assert_exit_code 0 "$CLAST_BIN" retro
+teardown_test_journal
+
 # === window scope flag =====================================================
 _seed
 # file-dates over 06-13 keeps only the entry filed 06-13 → one merged entry.
