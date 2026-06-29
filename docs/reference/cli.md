@@ -464,6 +464,74 @@ Stats are derived from manifest + filesystem stat; no JSONL parsing required.
 
 ---
 
+## `clast-plumbing retro`
+
+Work summary grouped by the day work **actually happened** → project. The
+defining behavior: entries are bucketed by their `snapshot_path` work day (with
+`curated_source_mtime` as a fallback), **not** the filename/curation date — a
+file dated `2026-06-29` routinely holds work from `2026-06-24`. Deterministic;
+no model call. The LLM-condensed version is `clast retro` (porcelain).
+
+### Synopsis
+
+```
+clast-plumbing retro [--from DATE] [--to DATE] [--window work-days|file-dates] [--bodies]
+```
+
+### Behavior
+
+- Reads every curated entry's front-matter, assigns each to a work day, dedups
+  by `session_id` (a session spanning midnight is attributed to the **later**
+  day and its bodies are merged), and groups `day → project`.
+- A session with no derivable work day lands in an `unknown` bucket (never
+  dropped).
+
+### Flags
+
+- `--from DATE` / `--to DATE` — inclusive window bounds. Default: the whole
+  corpus. DATE accepts the [usual forms](#date-parsing).
+- `--window work-days` (default) — keep sessions whose **work day** is in range.
+- `--window file-dates` — keep entries whose **filename date** is in range, then
+  bucket by work day (surfaces earlier work reachable from those files).
+- `--bodies` — with `--json` only: add each session's merged entry `body`,
+  `title`, and `interrupted` flag. (Used by the `clast retro` porcelain.)
+
+### Output (default)
+
+```
+Retro: 2026-06-24 -> 2026-06-24 (work-days)
+
+== 2026-06-24 ==
+  (filed 2026-06-29; work day reconstructed from session snapshots)
+
+[dev/xesapps]
+
+  * Stand up mac-address-revocation initiative  (1a9a8397)
+## What shipped
+- …
+```
+
+- A **once-per-day provenance note** appears when the work day differs from the
+  entries' filename date.
+- Projects render a friendly name (`~/Workspaces/dev/xesapps` → `dev/xesapps`,
+  bare `$HOME` → `~`); `project_path: null` sessions group under `(no project)`.
+- Interrupted sessions (a goal/open-threads but no `## What shipped`) are tagged
+  `[interrupted]` rather than dropped or overstated.
+
+### Output (`--json`)
+
+The day→project manifest: `{from, to, window, days:[{day, curation_dates,
+projects:[{project_path, project_name, sessions:[{session_id, work_day, entries,
+curated_source_mtime}]}]}]}`. With `--bodies`, each session also carries `body`,
+`title`, and `interrupted`.
+
+### Exit codes
+
+- 0: rendered (or empty window)
+- 2: bad flag / `--from > --to` / `--bodies` without `--json`
+
+---
+
 ## `clast-plumbing doctor`
 
 Sanity-check the journal.
