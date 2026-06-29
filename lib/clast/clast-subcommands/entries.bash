@@ -76,20 +76,9 @@ _clast_entries_read_frontmatter() {
 
 # _clast_entries_extract_title <path>
 #   Look for `# Session: <title>` as the first non-blank body line.
+#   Thin alias over the shared primitive in clast-lib.bash.
 _clast_entries_extract_title() {
-  awk '
-    BEGIN { in_fm = 0; seen = 0; past = 0 }
-    /^---[[:space:]]*$/ {
-      if (!seen) { in_fm = 1; seen = 1; next }
-      if (in_fm) { in_fm = 0; past = 1; next }
-    }
-    in_fm { next }
-    past {
-      if ($0 ~ /^[[:space:]]*$/) next
-      if (sub(/^# Session: /, "")) { print; exit }
-      exit
-    }
-  ' "$1"
+  clast_entry_title "$1"
 }
 
 # _clast_entries_unquote <string>
