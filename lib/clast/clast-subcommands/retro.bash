@@ -116,7 +116,7 @@ clast_cmd_retro() {
 _clast_retro_inject_bodies() {
   local manifest="$1"
   local -a pairs=()
-  local sess sid body entry0 title
+  local sess sid body entry0 title interrupted
   while IFS= read -r sess; do
     [[ -z "$sess" ]] && continue
     sid="$(jq -r '.session_id' <<<"$sess")"
@@ -124,8 +124,13 @@ _clast_retro_inject_bodies() {
     entry0="$(jq -r '.entries[0]' <<<"$sess")"
     title=""
     [[ -r "$entry0" ]] && title="$(clast_entry_title "$entry0")"
-    pairs+=("$(jq -cn --arg s "$sid" --arg b "$body" --arg t "$title" \
-      '{session_id:$s, body:$b, title:$t}')")
+    if printf '%s' "$body" | clast_retro_is_interrupted; then
+      interrupted=true
+    else
+      interrupted=false
+    fi
+    pairs+=("$(jq -cn --arg s "$sid" --arg b "$body" --arg t "$title" --argjson i "$interrupted" \
+      '{session_id:$s, body:$b, title:$t, interrupted:$i}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
   if (( ${#pairs[@]} == 0 )); then
@@ -137,8 +142,9 @@ _clast_retro_inject_bodies() {
     (reduce .[] as $p ({}; .[$p.session_id] = $p)) as $x
     | $m
     | .days |= map(.projects |= map(.sessions |= map(
-        . + {body:  ($x[.session_id].body // null),
-             title: ($x[.session_id].title // null)} )))
+        . + {body:        ($x[.session_id].body // null),
+             title:       ($x[.session_id].title // null),
+             interrupted: ($x[.session_id].interrupted // false)} )))
   '
 }
 
@@ -160,10 +166,12 @@ _clast_retro_render() {
   fi
 
   local di pj si
-  local day np project ns sess sid shortsid title entry
+  local day np project ns sess sid shortsid title entry note body flag
   for (( di = 0; di < nd; di++ )); do
     day="$(jq -r ".days[$di].day" <<<"$manifest")"
     printf '\n== %s ==\n' "$day"
+    note="$(_clast_retro_provenance_note "$day" "$(jq -c ".days[$di].curation_dates // []" <<<"$manifest")")"
+    [[ -n "$note" ]] && printf '%s\n' "$note"
     np="$(jq ".days[$di].projects | length" <<<"$manifest")"
     for (( pj = 0; pj < np; pj++ )); do
       project="$(jq -r ".days[$di].projects[$pj].project_name // .days[$di].projects[$pj].project_path // \"(no project)\"" <<<"$manifest")"
@@ -177,9 +185,23 @@ _clast_retro_render() {
         title=""
         [[ -r "$entry" ]] && title="$(clast_entry_title "$entry")"
         [[ -z "$title" ]] && title="(untitled)"
-        printf '\n  * %s  (%s)\n' "$title" "$shortsid"
-        clast_retro_session_body "$sess"
+        body="$(clast_retro_session_body "$sess")"
+        flag=""
+        printf '%s' "$body" | clast_retro_is_interrupted && flag="  [interrupted]"
+        printf '\n  * %s  (%s)%s\n' "$title" "$shortsid" "$flag"
+        printf '%s\n' "$body"
       done
     done
   done
+}
+
+# _clast_retro_provenance_note <work-day> <curation_dates-json>
+#   One-line note when a day's entries were curated on other date(s) than the
+#   work day. Empty when they match (or there's nothing to say).
+_clast_retro_provenance_note() {
+  local day="$1" cd_json="$2"
+  jq -r --arg d "$day" '
+    if . == [] or . == [$d] then empty
+    else "  (filed " + (join(", ")) + "; work day reconstructed from session snapshots)"
+    end' <<<"$cd_json"
 }

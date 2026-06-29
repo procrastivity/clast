@@ -229,6 +229,9 @@ clast_retro_manifest() {
           group_by(.work_day)          # ascending; "unknown" sorts last
           | map({
               day: .[0].work_day,
+              curation_dates: ([.[].entries[] | sub(".*/"; "") | .[0:10]]
+                               | map(select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")))
+                               | unique),
               projects: (
                 group_by(.project_path)
                 | map({
@@ -290,6 +293,18 @@ _clast_retro_trim_body() {
     /^# Session:/ { next }
     { started = 1; print }
   '
+}
+
+# clast_retro_is_interrupted  (stdin = session body; exit 0 if interrupted)
+#   An interrupted session has a goal and/or open threads but nothing shipped —
+#   work was started and left hanging. Flag it rather than overstate or drop it.
+clast_retro_is_interrupted() {
+  local body
+  body="$(cat)"
+  if grep -qiE '^#+ +what shipped' <<<"$body"; then
+    return 1
+  fi
+  grep -qiE '^#+ +(goal|open threads)' <<<"$body"
 }
 
 # clast_retro_session_body <session-json>

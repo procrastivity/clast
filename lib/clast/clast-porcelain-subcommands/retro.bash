@@ -186,10 +186,15 @@ _clast_retrosum_render() {
     return 0
   fi
 
-  local di pj si day np project ns sess sid shortsid title summary
+  local di pj si day np project ns sess sid shortsid title summary note flag
   for (( di = 0; di < nd; di++ )); do
     day="$(jq -r ".days[$di].day" <<<"$manifest")"
     printf '\n== %s ==\n' "$day"
+    note="$(jq -r --arg d "$day" '.days['"$di"'].curation_dates // [] |
+      if . == [] or . == [$d] then empty
+      else "  (filed " + (join(", ")) + "; work day reconstructed from session snapshots)"
+      end' <<<"$manifest")"
+    [[ -n "$note" ]] && printf '%s\n' "$note"
     np="$(jq ".days[$di].projects | length" <<<"$manifest")"
     for (( pj = 0; pj < np; pj++ )); do
       project="$(jq -r ".days[$di].projects[$pj].project_name // .days[$di].projects[$pj].project_path // \"(no project)\"" <<<"$manifest")"
@@ -202,7 +207,9 @@ _clast_retrosum_render() {
         title="$(jq -r '.title // "(untitled)"' <<<"$sess")"
         [[ -z "$title" || "$title" == "null" ]] && title="(untitled)"
         summary="$(jq -r '.summary // "(no summary)"' <<<"$sess")"
-        printf '\n  * %s  (%s)\n' "$title" "$shortsid"
+        flag=""
+        [[ "$(jq -r '.interrupted // false' <<<"$sess")" == "true" ]] && flag="  [interrupted]"
+        printf '\n  * %s  (%s)%s\n' "$title" "$shortsid" "$flag"
         printf '%s\n' "$summary"
       done
     done
