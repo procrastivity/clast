@@ -62,6 +62,9 @@ case "$out" in
 esac
 # Day/project structure preserved from the manifest.
 case "$out" in *"== 2026-06-13 =="*"[/tmp/projA]"*) _clast_test_pass "render: day/project structure" ;; *) _clast_test_fail "render: day/project structure" >&2 ;; esac
+# Porcelain render shows the friendly project_name too (HOME=/tmp → ~/projA).
+home_out="$(HOME=/tmp clast_cmd_retro 2>/dev/null)"
+case "$home_out" in *"[~/projA]"*) _clast_test_pass "render: friendly project_name" ;; *) _clast_test_fail "render: friendly project_name" >&2 ;; esac
 teardown_test_journal
 
 # === cache hit → no LLM call ===============================================

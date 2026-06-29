@@ -191,7 +191,8 @@ clast_retro_manifest() {
     return 0
   fi
 
-  printf '%s\n' "${enriched[@]}" | jq -s \
+  local manifest
+  manifest="$(printf '%s\n' "${enriched[@]}" | jq -s \
     --arg from "$from" --arg to "$to" --arg window "$window" '
     def within($day): ($from == "" or $day >= $from) and ($to == "" or $day <= $to);
 
@@ -238,7 +239,41 @@ clast_retro_manifest() {
                 | sort_by(.project_path == null)   # null project group sorts last
               )
             })
-        ) }'
+        ) }')"
+
+  _clast_retro_inject_project_names "$manifest"
+}
+
+# _clast_retro_inject_project_names <manifest-json>
+#   Add a friendly `project_name` to every project group (display polish; the
+#   raw project_path is kept). Names are computed in bash (clast_retro_friendly_name
+#   needs $HOME + string ops) and merged back via jq, keyed by project_path.
+_clast_retro_inject_project_names() {
+  local manifest="$1"
+  local -a pairs=()
+  local pp name
+  while IFS= read -r pp; do
+    if [[ "$pp" == "null" ]]; then
+      name="$(clast_retro_friendly_name "")"
+      pairs+=("$(jq -cn --arg n "$name" '{path: null, name: $n}')")
+    else
+      name="$(clast_retro_friendly_name "$pp")"
+      pairs+=("$(jq -cn --arg p "$pp" --arg n "$name" '{path: $p, name: $n}')")
+    fi
+  done < <(jq -r '[.days[].projects[].project_path] | unique | .[]
+                  | if . == null then "null" else . end' <<<"$manifest")
+
+  if (( ${#pairs[@]} == 0 )); then
+    printf '%s\n' "$manifest"
+    return 0
+  fi
+
+  printf '%s\n' "${pairs[@]}" | jq -cs --argjson m "$manifest" '
+    (reduce .[] as $p ({}; .[($p.path | tostring)] = $p.name)) as $names
+    | $m
+    | .days |= map(.projects |= map(
+        . + {project_name: ($names[(.project_path | tostring)] // "(no project)")} ))
+  '
 }
 
 # ---------------------------------------------------------------------------
@@ -276,4 +311,68 @@ clast_retro_session_body() {
       printf '  (entry not readable: %s)\n' "$entry"
     fi
   done
+}
+
+# ---------------------------------------------------------------------------
+# Friendly project names (step-05)
+# ---------------------------------------------------------------------------
+
+# clast_retro_friendly_name <project_path|encoded-segment|empty>
+#   A short, readable name for a project group. Path-derived (the registry slug
+#   is already dash-joined, so label/slug doesn't yield the wanted form):
+#     - empty / "null"                  -> "(no project)"
+#     - a leading-"-" encoded segment   -> decoded to a path first
+#     - == $HOME                        -> "~"
+#     - under $HOME, >=3 components      -> last two (…/Workspaces/dev/xesapps -> dev/xesapps)
+#     - under $HOME, otherwise           -> "~/<rest>" (~/Code/clast, ~/fix)
+#     - elsewhere, >=3 components        -> last two
+#     - elsewhere, otherwise             -> the path verbatim (/tmp/projA)
+clast_retro_friendly_name() {
+  local p="$1"
+  if [[ -z "$p" || "$p" == "null" ]]; then
+    printf '(no project)'
+    return 0
+  fi
+
+  # Decode an encoded snapshot segment (…/ -> -, literal - -> --).
+  if [[ "$p" == -* ]]; then
+    p="${p//--/$'\x01'}"
+    p="${p//-//}"
+    p="${p//$'\x01'/-}"
+  fi
+
+  p="${p%/}"  # drop a trailing slash
+
+  local home="${HOME%/}"
+  if [[ -n "$home" && "$p" == "$home" ]]; then
+    printf '~'
+    return 0
+  fi
+
+  local rest="" tilde=0
+  if [[ -n "$home" && "$p" == "$home/"* ]]; then
+    rest="${p#"$home"/}"
+    tilde=1
+  else
+    rest="${p#/}"   # strip a single leading slash for component counting
+  fi
+
+  # Count components.
+  local -a parts=()
+  local IFS='/'
+  read -r -a parts <<<"$rest"
+  unset IFS
+
+  if (( ${#parts[@]} >= 3 )); then
+    # Last two components, regardless of home/elsewhere.
+    printf '%s/%s' "${parts[${#parts[@]}-2]}" "${parts[${#parts[@]}-1]}"
+    return 0
+  fi
+
+  if (( tilde )); then
+    # shellcheck disable=SC2088  # literal "~" for display, not path expansion
+    printf '~/%s' "$rest"
+  else
+    printf '%s' "$1"   # short non-home path: verbatim original (keep leading /)
+  fi
 }

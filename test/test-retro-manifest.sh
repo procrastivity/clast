@@ -64,6 +64,29 @@ assert_eq "2026-06-14" "$(jq -r '.work_day' <<<"$(_session "$SID_E" "$full")")" 
 proj_paths="$(jq -c '[.days[] | select(.day == "2026-06-14") | .projects[].project_path]' <<<"$full")"
 assert_eq '["/tmp/projA",null]' "$proj_paths" "06-14: projA before null project"
 
+# --- friendly project names (step-05) --------------------------------------
+# Unit cases with HOME pinned so tilde/last-two collapse is deterministic.
+_friendly() { HOME=/home/tester bash -c '
+  source lib/clast/clast-lib.bash; source lib/clast/clast-retro-lib.bash
+  clast_retro_friendly_name "$1"' _ "$1"; }
+assert_eq "~"            "$(_friendly /home/tester)"                          "friendly: home -> ~"
+assert_eq "dev/xesapps"  "$(_friendly /home/tester/Workspaces/dev/xesapps)"  "friendly: deep home -> last two"
+# shellcheck disable=SC2088  # literal "~/…" is the expected display string
+assert_eq "~/Code/clast" "$(_friendly /home/tester/Code/clast)"              "friendly: 2-comp home -> ~/rest"
+# shellcheck disable=SC2088
+assert_eq "~/fix"        "$(_friendly /home/tester/fix)"                      "friendly: 1-comp home -> ~/rest"
+assert_eq "dev/xesapps"  "$(_friendly -home-tester-Workspaces-dev-xesapps)"  "friendly: encoded segment decoded"
+assert_eq "b/c"          "$(_friendly /opt/a/b/c)"                           "friendly: deep non-home -> last two"
+assert_eq "/tmp/projA"   "$(_friendly /tmp/projA)"                           "friendly: short non-home -> verbatim"
+assert_eq "(no project)" "$(_friendly '')"                                   "friendly: empty -> (no project)"
+assert_eq "(no project)" "$(_friendly null)"                                 "friendly: null -> (no project)"
+
+# Manifest carries project_name per group; null group → (no project).
+assert_eq "/tmp/projA" "$(jq -r '[.days[].projects[] | select(.project_path=="/tmp/projA")][0].project_name' <<<"$full")" "manifest: project_name for /tmp/projA"
+assert_eq "(no project)" "$(jq -r '[.days[].projects[] | select(.project_path==null)][0].project_name' <<<"$full")" "manifest: null group project_name"
+# Raw project_path is still present alongside the friendly name.
+assert_eq "true" "$(jq '[.days[].projects[] | has("project_path") and has("project_name")] | all' <<<"$full")" "manifest: both project_path and project_name present"
+
 # --- determinism -----------------------------------------------------------
 assert_eq "$(clast_retro_manifest)" "$(clast_retro_manifest)" "byte-identical across runs"
 

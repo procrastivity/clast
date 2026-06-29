@@ -70,6 +70,14 @@ case "$out" in
   *) _clast_test_fail "render: null-project header" >&2 ;;
 esac
 
+# Header shows the friendly project_name, not the raw path: with HOME=/tmp the
+# fixture path /tmp/projA collapses to ~/projA.
+home_out="$(HOME=/tmp "$CLAST_BIN" retro 2>/dev/null)"
+case "$home_out" in
+  *"[~/projA]"*) _clast_test_pass "render: friendly project_name (HOME-relative)" ;;
+  *) _clast_test_fail "render: friendly project_name (HOME-relative)"; printf '%s\n' "$home_out" | grep '^\[' >&2 ;;
+esac
+
 # Merged session shows both entry bodies, each with a filename separator.
 case "$out" in
   *"--- 2026-06-12-2350-proja-cross.md ---"*"--- 2026-06-13-0010-proja-cross.md ---"*)

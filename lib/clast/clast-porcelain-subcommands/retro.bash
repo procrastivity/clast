@@ -192,7 +192,7 @@ _clast_retrosum_render() {
     printf '\n== %s ==\n' "$day"
     np="$(jq ".days[$di].projects | length" <<<"$manifest")"
     for (( pj = 0; pj < np; pj++ )); do
-      project="$(jq -r ".days[$di].projects[$pj].project_path // \"(no project)\"" <<<"$manifest")"
+      project="$(jq -r ".days[$di].projects[$pj].project_name // .days[$di].projects[$pj].project_path // \"(no project)\"" <<<"$manifest")"
       printf '\n[%s]\n' "$project"
       ns="$(jq ".days[$di].projects[$pj].sessions | length" <<<"$manifest")"
       for (( si = 0; si < ns; si++ )); do
