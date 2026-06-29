@@ -55,6 +55,44 @@ clast_json_get() {
   jq -r "$expr" <<<"$input"
 }
 
+# --- Front-matter / YAML -------------------------------------------------
+#
+# Curated journal entries are Markdown with a leading YAML front-matter block
+# fenced by `---`. These two primitives are the single source of truth for
+# reading that block; `entries.bash` and `clast-retro-lib.bash` both build on
+# them.
+
+# clast_read_frontmatter <path>
+#   Emit the raw front-matter lines (between the first two `---` fences) to
+#   stdout. Nothing is emitted for a file without a front-matter block.
+clast_read_frontmatter() {
+  local path="$1"
+  awk '
+    BEGIN { in_fm = 0; seen = 0 }
+    /^---[[:space:]]*$/ {
+      if (!seen) { in_fm = 1; seen = 1; next }
+      if (in_fm) { exit }
+    }
+    in_fm { print }
+  ' "$path"
+}
+
+# clast_yaml_unquote <string>
+#   Strip surrounding double quotes and unescape \", \\, \n on a YAML scalar.
+#   A bare (unquoted) value is returned unchanged.
+clast_yaml_unquote() {
+  local v="$1"
+  if [[ "${v:0:1}" == '"' && "${v: -1}" == '"' && ${#v} -ge 2 ]]; then
+    v="${v:1:${#v}-2}"
+    # Process escapes in order: \\ → placeholder, \" → ", \n → LF, placeholder → \
+    v="${v//\\\\/$'\x01'}"
+    v="${v//\\\"/\"}"
+    v="${v//\\n/$'\n'}"
+    v="${v//$'\x01'/\\}"
+  fi
+  printf '%s' "$v"
+}
+
 # --- Date math -----------------------------------------------------------
 #
 # Uses GNU `date -d` for relative-date math. The nix dev shell pulls in
