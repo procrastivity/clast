@@ -84,3 +84,159 @@ _clast_retro_index_record() {
        curated_source_mtime: (if $curated_source_mtime == "" then null else $curated_source_mtime end)
      }'
 }
+
+# ---------------------------------------------------------------------------
+# step-02: work-day bucketing + session dedup
+# ---------------------------------------------------------------------------
+
+# _clast_retro_work_day <snapshot_path> <curated_source_mtime>
+#   Resolve the day work actually happened. Primary: the <day> dir of
+#   snapshot_path (transcripts/<day>/<seg>/<sid>.jsonl). Fallback: the local
+#   cutoff-adjusted day of curated_source_mtime. Neither → "unknown".
+_clast_retro_work_day() {
+  local snapshot_path="$1" mtime="$2"
+  local day=""
+  if [[ -n "$snapshot_path" ]]; then
+    day="$(awk -F/ '{print $2}' <<<"$snapshot_path")"
+    if [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      printf '%s' "$day"
+      return 0
+    fi
+  fi
+  if [[ -n "$mtime" ]]; then
+    local epoch
+    if epoch="$(date -d "$mtime" +%s 2>/dev/null)" && [[ -n "$epoch" ]]; then
+      clast_day_bucket_for_epoch "$epoch"
+      return 0
+    fi
+  fi
+  printf 'unknown'
+}
+
+# _clast_retro_file_date <path>
+#   The curation (filename) date: leading YYYY-MM-DD of the basename. Empty if
+#   the name does not start with an ISO date.
+_clast_retro_file_date() {
+  local base
+  base="$(basename "$1")"
+  if [[ "$base" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
+# clast_retro_manifest [--from DATE] [--to DATE] [--window work-days|file-dates]
+#   Consume the step-01 index, assign each entry to its work day, dedup by
+#   session_id (later day wins; contributing entry paths merged into entries[]),
+#   group day → project, and honor the date window under the chosen scope.
+#   Prints the manifest JSON to stdout. Read-only; returns 0 (2 on bad args).
+clast_retro_manifest() {
+  local from="" to="" window="work-days"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ $# -lt 2 ]]; then clast_log_error "retro: --from requires a value"; return 2; fi
+        if ! from="$(clast_parse_date "$2" 2>/dev/null)"; then
+          clast_log_error "retro: invalid date '$2'"; return 2
+        fi
+        shift 2 ;;
+      --from=*)
+        if ! from="$(clast_parse_date "${1#*=}" 2>/dev/null)"; then
+          clast_log_error "retro: invalid date '${1#*=}'"; return 2
+        fi
+        shift ;;
+      --to)
+        if [[ $# -lt 2 ]]; then clast_log_error "retro: --to requires a value"; return 2; fi
+        if ! to="$(clast_parse_date "$2" 2>/dev/null)"; then
+          clast_log_error "retro: invalid date '$2'"; return 2
+        fi
+        shift 2 ;;
+      --to=*)
+        if ! to="$(clast_parse_date "${1#*=}" 2>/dev/null)"; then
+          clast_log_error "retro: invalid date '${1#*=}'"; return 2
+        fi
+        shift ;;
+      --window)
+        if [[ $# -lt 2 ]]; then clast_log_error "retro: --window requires a value"; return 2; fi
+        window="$2"; shift 2 ;;
+      --window=*) window="${1#*=}"; shift ;;
+      *) clast_log_error "retro: unknown argument '$1'"; return 2 ;;
+    esac
+  done
+
+  case "$window" in
+    work-days|file-dates) ;;
+    *) clast_log_error "retro: --window must be 'work-days' or 'file-dates'"; return 2 ;;
+  esac
+
+  # Enrich each indexed entry with its work day + filename date (bash owns the
+  # cutoff/epoch math; jq owns the filter/group/sort below).
+  local -a enriched=()
+  local rec sp mt path wd fd
+  while IFS= read -r rec; do
+    [[ -z "$rec" ]] && continue
+    sp="$(jq -r '.snapshot_path // ""' <<<"$rec")"
+    mt="$(jq -r '.curated_source_mtime // ""' <<<"$rec")"
+    path="$(jq -r '.path' <<<"$rec")"
+    wd="$(_clast_retro_work_day "$sp" "$mt")"
+    fd="$(_clast_retro_file_date "$path")"
+    enriched+=("$(jq -c --arg wd "$wd" --arg fd "$fd" \
+      '. + {work_day: $wd, file_date: (if $fd == "" then null else $fd end)}' <<<"$rec")")
+  done < <(clast_retro_index | jq -c '.[]')
+
+  if (( ${#enriched[@]} == 0 )); then
+    jq -cn --arg from "$from" --arg to "$to" --arg window "$window" \
+      '{from: (if $from == "" then null else $from end),
+        to:   (if $to == "" then null else $to end),
+        window: $window, days: []}'
+    return 0
+  fi
+
+  printf '%s\n' "${enriched[@]}" | jq -s \
+    --arg from "$from" --arg to "$to" --arg window "$window" '
+    def within($day): ($from == "" or $day >= $from) and ($to == "" or $day <= $to);
+
+    # file-dates scope filters entries by filename date *before* dedup.
+    (if $window == "file-dates"
+     then [ .[] | select(.file_date != null and within(.file_date)) ]
+     else . end)
+
+    # Dedup by session_id: later real day wins; merge contributing paths.
+    | [ group_by(.session_id)[]
+        | (map(.work_day) | map(select(. != "unknown"))
+           | (if length > 0 then max else "unknown" end)) as $wd
+        | ((map(select(.work_day == $wd))[0]) // .[0]) as $rep
+        | { session_id: .[0].session_id,
+            work_day: $wd,
+            entries: (map(.path) | sort),
+            project_path: ($rep.project_path
+              // (map(.project_path) | map(select(. != null))[0])),
+            curated_source_mtime: ($rep.curated_source_mtime
+              // (map(.curated_source_mtime) | map(select(. != null))[0])) } ]
+
+    # work-days scope filters resolved sessions by their work day.
+    | (if $window == "work-days"
+       then [ .[] | select(if .work_day == "unknown"
+                           then ($from == "" and $to == "")
+                           else within(.work_day) end) ]
+       else . end)
+
+    # Group day → project, with deterministic ordering.
+    | { from: (if $from == "" then null else $from end),
+        to:   (if $to == "" then null else $to end),
+        window: $window,
+        days: (
+          group_by(.work_day)          # ascending; "unknown" sorts last
+          | map({
+              day: .[0].work_day,
+              projects: (
+                group_by(.project_path)
+                | map({
+                    project_path: .[0].project_path,
+                    sessions: (sort_by(.session_id)
+                      | map({session_id, work_day, entries, curated_source_mtime}))
+                  })
+                | sort_by(.project_path == null)   # null project group sorts last
+              )
+            })
+        ) }'
+}

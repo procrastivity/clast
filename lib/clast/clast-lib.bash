@@ -109,20 +109,29 @@ _clast_now_epoch() {
   fi
 }
 
-# clast_today — local YYYY-MM-DD, adjusted by CLAST_DAY_CUTOFF (HH:MM, default 04:00).
-# A session starting before today's cutoff belongs to yesterday's bucket.
-clast_today() {
+# clast_day_bucket_for_epoch <epoch> — local YYYY-MM-DD for an epoch, adjusted
+# by CLAST_DAY_CUTOFF (HH:MM, default 04:00). Work before the cutoff belongs to
+# the previous day's bucket. Single source of truth for the day-bucket rule;
+# clast_today, `clast snapshot`, and `clast retro` all build on it.
+clast_day_bucket_for_epoch() {
+  local epoch="$1"
   local cutoff="${CLAST_DAY_CUTOFF:-04:00}"
-  local cutoff_hours cutoff_mins cutoff_secs now adjusted
+  local cutoff_hours cutoff_mins cutoff_secs adjusted
   cutoff_hours="${cutoff%%:*}"
   cutoff_mins="${cutoff##*:}"
   # Strip leading zeros so bash arithmetic doesn't treat them as octal.
   cutoff_hours=$((10#$cutoff_hours))
   cutoff_mins=$((10#$cutoff_mins))
   cutoff_secs=$((cutoff_hours * 3600 + cutoff_mins * 60))
-  now="$(_clast_now_epoch)"
-  adjusted=$((now - cutoff_secs))
+  adjusted=$((epoch - cutoff_secs))
+  # GNU `date -d` — BSD date not supported, per overview.md.
   date -d "@$adjusted" +%Y-%m-%d
+}
+
+# clast_today — local YYYY-MM-DD, adjusted by CLAST_DAY_CUTOFF (HH:MM, default 04:00).
+# A session starting before today's cutoff belongs to yesterday's bucket.
+clast_today() {
+  clast_day_bucket_for_epoch "$(_clast_now_epoch)"
 }
 
 # clast_parse_date <input> — print YYYY-MM-DD on stdout, exit non-zero on bad input.
