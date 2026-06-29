@@ -54,6 +54,7 @@ Usage:
 Subcommands:
   wake          Interactive day curation (standalone equivalent of /wake)
   brief         Project briefing (standalone equivalent of /brief)
+  retro         Model-condensed work retrospective by work day → project
 
 Global flags:
   -h, --help    Print this usage and exit

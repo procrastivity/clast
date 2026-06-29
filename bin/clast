@@ -62,6 +62,11 @@ case "$cmd" in
     source "$CLAST_LIB/clast-porcelain-subcommands/brief.bash"
     clast_cmd_brief "$@"
     ;;
+  retro)
+    # shellcheck source=lib/clast/clast-porcelain-subcommands/retro.bash
+    source "$CLAST_LIB/clast-porcelain-subcommands/retro.bash"
+    clast_cmd_retro "$@"
+    ;;
   *)
     clast_porcelain_log_error "unknown subcommand '$cmd'"
     clast_porcelain_usage >&2

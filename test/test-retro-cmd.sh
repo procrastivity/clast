@@ -88,6 +88,23 @@ case "$out" in
 esac
 teardown_test_journal
 
+# === --bodies (json only) ==================================================
+_seed
+# Default --json is lean: no body field.
+out="$("$CLAST_BIN" --json retro 2>/dev/null)"
+assert_eq "false" "$(jq '[.days[].projects[].sessions[] | has("body")] | any' <<<"$out")" "bodies: default json has no body"
+# --bodies adds the merged body to every session.
+out="$("$CLAST_BIN" --json retro --bodies 2>/dev/null)"
+assert_eq "0" "$(jq '[.days[].projects[].sessions[].body | select(. == null)] | length' <<<"$out")" "bodies: every session has a body"
+# The cross-midnight merged body contains both halves.
+sxb="$(jq -r '[.days[].projects[].sessions[] | select(.session_id=="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")][0].body' <<<"$out")"
+case "$sxb" in *"Started before midnight."*"Finished after midnight."*) _clast_test_pass "bodies: merged body has both entries" ;; *) _clast_test_fail "bodies: merged body has both entries" >&2 ;; esac
+# --bodies also carries the title.
+assert_eq "0" "$(jq '[.days[].projects[].sessions[].title | select(. == null)] | length' <<<"$out")" "bodies: every session has a title"
+# --bodies without --json is an error.
+assert_exit_code 2 "$CLAST_BIN" retro --bodies
+teardown_test_journal
+
 # === window scope flag =====================================================
 _seed
 # file-dates over 06-13 keeps only the entry filed 06-13 → one merged entry.

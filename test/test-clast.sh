@@ -203,6 +203,7 @@ declare -a suites=(
   test/test-retro.sh
   test/test-retro-manifest.sh
   test/test-retro-cmd.sh
+  test/test-retro-summary.sh
   test/test-brief.sh
   test/test-breadcrumb.sh
   test/test-doctor.sh

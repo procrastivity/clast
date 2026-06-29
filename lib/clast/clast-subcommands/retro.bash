@@ -23,6 +23,7 @@ Flags:
   --window WHICH  work-days (default): keep sessions whose work day is in range.
                   file-dates: keep entries whose filename date is in range
                   (pulls earlier work days reachable from those files).
+  --bodies        With --json only: add each session's merged entry `body`.
   -h, --help      Print this usage and exit.
 
 DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`, `-Nd`, `-Nw`.
@@ -40,10 +41,11 @@ _clast_retro_err() {
 }
 
 clast_cmd_retro() {
-  local from="" to="" window="work-days"
+  local from="" to="" window="work-days" bodies=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --bodies) bodies=1; shift ;;
       --from)
         if [[ $# -lt 2 ]]; then _clast_retro_err "--from requires a value"; return 2; fi
         if ! from="$(clast_parse_date "$2" 2>/dev/null)"; then
@@ -91,8 +93,14 @@ clast_cmd_retro() {
     ${from:+--from "$from"} ${to:+--to "$to"} --window "$window")" || return $?
 
   if [[ -n "${CLAST_JSON:-}" ]]; then
+    if (( bodies )); then
+      manifest="$(_clast_retro_inject_bodies "$manifest")"
+    fi
     printf '%s\n' "$manifest"
     return 0
+  fi
+  if (( bodies )); then
+    _clast_retro_err "--bodies is only meaningful with --json"; return 2
   fi
   if [[ -n "${CLAST_QUIET:-}" ]]; then
     return 0
@@ -101,15 +109,36 @@ clast_cmd_retro() {
   _clast_retro_render "$manifest"
 }
 
-# _clast_retro_trim_body
-#   Drop leading blank lines and leading `# Session:` heading(s) from an entry
-#   body on stdin; pass the rest through unchanged.
-_clast_retro_trim_body() {
-  awk '
-    started { print; next }
-    /^[[:space:]]*$/ { next }
-    /^# Session:/ { next }
-    { started = 1; print }
+# _clast_retro_inject_bodies <manifest-json>
+#   Add a `body` string (the merged trimmed entry bodies) to every session,
+#   for `--json --bodies`. Reuses clast_retro_session_body so the body matches
+#   the human render byte-for-byte.
+_clast_retro_inject_bodies() {
+  local manifest="$1"
+  local -a pairs=()
+  local sess sid body entry0 title
+  while IFS= read -r sess; do
+    [[ -z "$sess" ]] && continue
+    sid="$(jq -r '.session_id' <<<"$sess")"
+    body="$(clast_retro_session_body "$sess")"
+    entry0="$(jq -r '.entries[0]' <<<"$sess")"
+    title=""
+    [[ -r "$entry0" ]] && title="$(clast_entry_title "$entry0")"
+    pairs+=("$(jq -cn --arg s "$sid" --arg b "$body" --arg t "$title" \
+      '{session_id:$s, body:$b, title:$t}')")
+  done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
+
+  if (( ${#pairs[@]} == 0 )); then
+    printf '%s' "$manifest"
+    return 0
+  fi
+
+  printf '%s\n' "${pairs[@]}" | jq -cs --argjson m "$manifest" '
+    (reduce .[] as $p ({}; .[$p.session_id] = $p)) as $x
+    | $m
+    | .days |= map(.projects |= map(.sessions |= map(
+        . + {body:  ($x[.session_id].body // null),
+             title: ($x[.session_id].title // null)} )))
   '
 }
 
@@ -130,8 +159,8 @@ _clast_retro_render() {
     return 0
   fi
 
-  local di pj si ei
-  local day np project ns sess sid shortsid title ne entry
+  local di pj si
+  local day np project ns sess sid shortsid title entry
   for (( di = 0; di < nd; di++ )); do
     day="$(jq -r ".days[$di].day" <<<"$manifest")"
     printf '\n== %s ==\n' "$day"
@@ -144,23 +173,12 @@ _clast_retro_render() {
         sess="$(jq -c ".days[$di].projects[$pj].sessions[$si]" <<<"$manifest")"
         sid="$(jq -r '.session_id' <<<"$sess")"
         shortsid="${sid:0:8}"
-        ne="$(jq '.entries | length' <<<"$sess")"
         entry="$(jq -r '.entries[0]' <<<"$sess")"
         title=""
         [[ -r "$entry" ]] && title="$(clast_entry_title "$entry")"
         [[ -z "$title" ]] && title="(untitled)"
         printf '\n  * %s  (%s)\n' "$title" "$shortsid"
-        for (( ei = 0; ei < ne; ei++ )); do
-          entry="$(jq -r ".entries[$ei]" <<<"$sess")"
-          if (( ne > 1 )); then
-            printf '  --- %s ---\n' "$(basename "$entry")"
-          fi
-          if [[ -r "$entry" ]]; then
-            clast_entry_body "$entry" | _clast_retro_trim_body
-          else
-            printf '  (entry not readable: %s)\n' "$entry"
-          fi
-        done
+        clast_retro_session_body "$sess"
       done
     done
   done

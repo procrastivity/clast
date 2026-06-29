@@ -240,3 +240,40 @@ clast_retro_manifest() {
             })
         ) }'
 }
+
+# ---------------------------------------------------------------------------
+# Session body assembly (shared by the Round 1 render and the `--bodies` JSON)
+# ---------------------------------------------------------------------------
+
+# _clast_retro_trim_body
+#   Drop leading blank lines and leading `# Session:` heading(s) from an entry
+#   body on stdin; pass the rest through unchanged.
+_clast_retro_trim_body() {
+  awk '
+    started { print; next }
+    /^[[:space:]]*$/ { next }
+    /^# Session:/ { next }
+    { started = 1; print }
+  '
+}
+
+# clast_retro_session_body <session-json>
+#   Concatenate the trimmed bodies of a session's entries[] in order. For a
+#   merged (multi-entry) session each body is preceded by a "--- <file> ---"
+#   marker so the split is visible. Unreadable entries emit a notice line.
+clast_retro_session_body() {
+  local sess="$1"
+  local ne ei entry
+  ne="$(jq '.entries | length' <<<"$sess")"
+  for (( ei = 0; ei < ne; ei++ )); do
+    entry="$(jq -r ".entries[$ei]" <<<"$sess")"
+    if (( ne > 1 )); then
+      printf '  --- %s ---\n' "$(basename "$entry")"
+    fi
+    if [[ -r "$entry" ]]; then
+      clast_entry_body "$entry" | _clast_retro_trim_body
+    else
+      printf '  (entry not readable: %s)\n' "$entry"
+    fi
+  done
+}
