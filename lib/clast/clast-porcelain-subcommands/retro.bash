@@ -152,14 +152,18 @@ clast_cmd_retro() {
     summary_pairs+=("$(jq -cn --arg s "$sid" --arg v "$summary" '{session_id:$s, summary:$v}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
-  # Fold summaries back into the manifest. The manifest carries --bodies, so it
-  # can exceed MAX_ARG_STRLEN — feed it via stdin and the summary pairs via
+  # Fold summaries back into the manifest and drop the raw bodies. The manifest
+  # carries --bodies only as summarizer input; neither the JSON nor the render
+  # path consumes .body, so strip it here to keep --json condensed and
+  # consistent with the plumbing's lean-by-default output (raw bodies remain
+  # available via `clast-plumbing --json retro --bodies`). The manifest can
+  # exceed MAX_ARG_STRLEN — feed it via stdin and the summary pairs via
   # --slurpfile, never argv.
   local enriched="$manifest"
   if (( ${#summary_pairs[@]} > 0 )); then
     enriched="$(printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${summary_pairs[@]}") '
       (reduce $pairs[] as $p ({}; .[$p.session_id] = $p.summary)) as $sum
-      | .days |= map(.projects |= map(.sessions |= map(. + {summary: ($sum[.session_id] // null)})))
+      | .days |= map(.projects |= map(.sessions |= map(del(.body) + {summary: ($sum[.session_id] // null)})))
     ')"
   fi
 

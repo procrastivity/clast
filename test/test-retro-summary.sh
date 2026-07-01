@@ -112,6 +112,8 @@ clast_cmd_retro --from 2026-06-13 --to 2026-06-15 >/dev/null 2>&1   # prime cach
 js="$(clast_cmd_retro --from 2026-06-13 --to 2026-06-15 --json 2>/dev/null)"
 n_null="$(jq '[.days[].projects[].sessions[].summary | select(. == null)] | length' <<<"$js")"
 assert_eq "0" "$n_null" "json: every session has a summary"
+# Condensed output: the raw --bodies input is stripped, only the summary remains.
+assert_eq "false" "$(jq '[.days[].projects[].sessions[] | has("body")] | any' <<<"$js")" "json: no raw body field"
 assert_eq "0" "$(_calls)" "json: served from warm cache (no calls)"
 teardown_test_journal
 
