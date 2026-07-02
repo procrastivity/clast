@@ -301,18 +301,43 @@ clast_cmd_wake() {
     msg_count="$(jq -r '.msg_count_approx' <<<"$session")"
     snapshot_path="$(jq -r '.snapshot_path' <<<"$session")"
 
-    local start_short="${start_ts:11:5}"
-    [[ -z "$start_short" ]] && start_short="${start_ts:0:10}"
+    # Recorded date + time range so the reviewer can tell which day's work
+    # this is (BDS-54). Render the session's own start/end instant in the
+    # local timezone. Deliberately NOT day_bucket: that is clast's
+    # cutoff-adjusted *filing* day, which differs from the instant's calendar
+    # date for pre-cutoff sessions — pairing it with a clock time (and a "UTC"
+    # label) yielded a timestamp wrong by a day. Fall back to the raw UTC
+    # substrings if `date` can't parse the timestamp.
+    local rec_date start_short end_short tz
+    rec_date="$(date -d "$start_ts" +%Y-%m-%d 2>/dev/null)" || rec_date=""
+    [[ -z "$rec_date" ]] && rec_date="${start_ts:0:10}"
+    start_short="$(date -d "$start_ts" +%H:%M 2>/dev/null)" || start_short=""
+    [[ -z "$start_short" ]] && start_short="${start_ts:11:5}"
+    end_short="$(date -d "$end_ts" +%H:%M 2>/dev/null)" || end_short=""
+    [[ -z "$end_short" ]] && end_short="${end_ts:11:5}"
+    tz="$(date -d "$start_ts" +%Z 2>/dev/null)" || tz="UTC"
+    [[ -z "$tz" ]] && tz="UTC"
+
+    local recorded="$rec_date"
+    if [[ -n "$start_short" ]]; then
+      recorded="$recorded $start_short"
+      [[ -n "$end_short" && "$end_short" != "$start_short" ]] && recorded="$recorded–$end_short"
+      recorded="$recorded $tz"
+    fi
 
     local is_stale
     is_stale="$(jq -r '.stale // false' <<<"$session")"
     local label="Session $((i+1))/$total: $project"
     [[ "$is_stale" == "true" ]] && label="$label [STALE]"
-    [[ -n "$start_short" ]] && label="$label ($start_short"
+    [[ -n "$rec_date" ]] && label="$label ($rec_date $start_short"
     [[ -n "$branch" && "$branch" != "null" ]] && label="$label, $branch"
     label="$label)"
 
     _clast_wake_separator "$label"
+    # Full session ID + recorded window: identifies exactly which session is
+    # being reviewed (e.g. for `clast-plumbing sessions dismiss/undismiss <id>`).
+    clast_porcelain_info "  id: $sid"
+    clast_porcelain_info "  recorded: $recorded"
     clast_porcelain_info "Gathering context..."
 
     local show_json

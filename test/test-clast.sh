@@ -199,6 +199,7 @@ declare -a suites=(
   test/test-registry-cmd.sh
   test/test-snapshot.sh
   test/test-query.sh
+  test/test-dismiss.sh
   test/test-entries.sh
   test/test-retro.sh
   test/test-retro-manifest.sh
