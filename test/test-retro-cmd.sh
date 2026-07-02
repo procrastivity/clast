@@ -136,6 +136,30 @@ fi
 assert_exit_code 0 "$CLAST_BIN" retro
 teardown_test_journal
 
+# === null session_id: --bodies must not abort =============================
+# A legacy / hand-curated entry with no session_id indexes as JSON null. The
+# lean manifest renders, but the --bodies merge used to `$x[null]` → jq abort
+# ("Cannot index object with null"). The null session must survive with a body.
+setup_test_journal >/dev/null
+mkdir -p "$CLAST_JOURNAL_DIR/entries"
+{
+  printf -- '---\ndate: 2026-09-01\ntime: "10:00"\nday_bucket: 2026-09-01\n'
+  printf -- 'project: nullsess\nproject_path: /tmp/projNull\n'
+  # No session_id line at all → clast_retro_index emits null.
+  printf -- 'snapshot_path: transcripts/2026-09-01/-tmp-projNull/legacy.jsonl\n'
+  printf -- 'machine: m\ncurated_source_mtime: "2026-09-01T10:00:00Z"\n---\n\n'
+  printf -- '# Session: Legacy\n## What shipped\n- shipped from a session with no id\n'
+} > "$CLAST_JOURNAL_DIR/entries/2026-09-01-1000-nullsess-legacy.md"
+out="$("$CLAST_BIN" --json retro --bodies 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "null sid: --bodies exits 0 (no jq null-index abort)"
+nulls="$(jq -c '[.days[].projects[].sessions[] | select(.session_id==null)][0]' <<<"$out")"
+assert_eq "true" "$(jq 'has("body")' <<<"$nulls")" "null sid: null session carries a body field"
+case "$(jq -r '.body' <<<"$nulls")" in
+  *"shipped from a session with no id"*) _clast_test_pass "null sid: body preserved for null session" ;;
+  *) _clast_test_fail "null sid: body preserved for null session" >&2 ;;
+esac
+teardown_test_journal
+
 # === window scope flag =====================================================
 _seed
 # file-dates over 06-13 keeps only the entry filed 06-13 → one merged entry.

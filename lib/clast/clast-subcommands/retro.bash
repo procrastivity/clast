@@ -142,13 +142,17 @@ _clast_retro_inject_bodies() {
   fi
 
   # Manifest on stdin and the body-bearing pairs via --slurpfile — both can be
-  # large, so neither goes through argv.
+  # large, so neither goes through argv. Key both sides through `tostring`: a
+  # legacy entry with no session_id carries JSON null, and `$x[null]` aborts jq
+  # with "Cannot index object with null" (the pairs side already stringifies it
+  # to "null" via jq -r, so tostring keeps both consistent).
   printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${pairs[@]}") '
-    (reduce $pairs[] as $p ({}; .[$p.session_id] = $p)) as $x
+    (reduce $pairs[] as $p ({}; .[($p.session_id | tostring)] = $p)) as $x
     | .days |= map(.projects |= map(.sessions |= map(
-        . + {body:        ($x[.session_id].body // null),
-             title:       ($x[.session_id].title // null),
-             interrupted: ($x[.session_id].interrupted // false)} )))
+        (.session_id | tostring) as $k
+        | . + {body:        ($x[$k].body // null),
+               title:       ($x[$k].title // null),
+               interrupted: ($x[$k].interrupted // false)} )))
   '
 }
 

@@ -161,9 +161,12 @@ clast_cmd_retro() {
   # --slurpfile, never argv.
   local enriched="$manifest"
   if (( ${#summary_pairs[@]} > 0 )); then
+    # Key both sides through `tostring` so a null session_id (legacy entry with
+    # no session_id) doesn't abort jq with "Cannot index object with null".
     enriched="$(printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${summary_pairs[@]}") '
-      (reduce $pairs[] as $p ({}; .[$p.session_id] = $p.summary)) as $sum
-      | .days |= map(.projects |= map(.sessions |= map(del(.body) + {summary: ($sum[.session_id] // null)})))
+      (reduce $pairs[] as $p ({}; .[($p.session_id | tostring)] = $p.summary)) as $sum
+      | .days |= map(.projects |= map(.sessions |= map(
+          del(.body) + {summary: ($sum[(.session_id | tostring)] // null)})))
     ')"
   fi
 
