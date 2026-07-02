@@ -54,6 +54,7 @@ Usage:
 Subcommands:
   wake          Interactive day curation (standalone equivalent of /wake)
   brief         Project briefing (standalone equivalent of /brief)
+  undismiss     Restore session(s) dismissed in wake (by session id)
 
 Global flags:
   -h, --help    Print this usage and exit

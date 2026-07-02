@@ -66,4 +66,16 @@ assert_exit_code 2 "$CLAST_BIN" sessions undismiss not-a-uuid
 assert_exit_code 2 "$CLAST_BIN" sessions undismiss "$A" --bogus
 teardown_test_journal
 
+# --- porcelain `clast undismiss` passthrough --------------------------------
+
+# The porcelain verb calls bare `clast-plumbing`, so put the repo bin on PATH.
+CLAST_PORCELAIN="$PWD/bin/clast"
+setup_test_journal >/dev/null
+PATH="$PWD/bin:$PATH" "$CLAST_BIN" sessions dismiss "$A" >/dev/null 2>&1
+out="$(PATH="$PWD/bin:$PATH" CLAST_JSON=1 "$CLAST_PORCELAIN" undismiss "$A" 2>/dev/null)"
+assert_eq "1" "$(jq -r '.undismissed' <<<"$out")" "porcelain undismiss restores the session"
+# Bad UUID still rejected (validation happens in plumbing).
+assert_exit_code 2 env "PATH=$PWD/bin:$PATH" "$CLAST_PORCELAIN" undismiss not-a-uuid
+teardown_test_journal
+
 clast_test_summary
