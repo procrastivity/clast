@@ -368,10 +368,34 @@ err="$(printf 'x' | _env_for_write "$CLAST_BIN" entries write --session "$KNOWN_
 assert_eq "2" "$rc" "write bad slug: exits 2"
 teardown_test_journal
 
-# --- bad tag ---------------------------------------------------------------
+# --- tags with disallowed characters are normalized, not rejected ----------
+# LLM-suggested tags often carry dots/underscores (e.g. "php-8.5"); the write
+# should sanitize them rather than fail and discard the whole entry.
 _seed_manifest_only
-err="$(printf 'x' | _env_for_write "$CLAST_BIN" entries write --session "$KNOWN_SID" --slug s --tags 'mysql,BAD_TAG' --body-stdin 2>&1 >/dev/null)" && rc=$? || rc=$?
-assert_eq "2" "$rc" "write bad tag: exits 2"
+out="$(printf 'body' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug norm-slug --tags 'mysql,php-8.5,BAD_TAG' \
+  --body-stdin 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "write dotted/underscore tags: exits 0"
+target="$CLAST_JOURNAL_DIR/entries/2026-05-30-1430-xesapps-norm-slug.md"
+content="$(cat "$target" 2>/dev/null)"
+case "$content" in
+  *"tags: [mysql, php-8-5, bad-tag]"*) _clast_test_pass "tags normalized to charset" ;;
+  *) _clast_test_fail "tags normalized to charset"; printf '%s\n' "$content" >&2 ;;
+esac
+teardown_test_journal
+
+# --- an all-punctuation tag normalizes to nothing and is dropped -----------
+_seed_manifest_only
+out="$(printf 'body' | _env_for_write "$CLAST_BIN" entries write \
+  --session "$KNOWN_SID" --slug drop-slug --tags 'keep,!!!' \
+  --body-stdin 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "write empty-after-normalize tag: exits 0"
+target="$CLAST_JOURNAL_DIR/entries/2026-05-30-1430-xesapps-drop-slug.md"
+content="$(cat "$target" 2>/dev/null)"
+case "$content" in
+  *"tags: [keep]"*) _clast_test_pass "punctuation-only tag dropped" ;;
+  *) _clast_test_fail "punctuation-only tag dropped"; printf '%s\n' "$content" >&2 ;;
+esac
 teardown_test_journal
 
 # --- mixed-case tags auto-lowercased --------------------------------------
