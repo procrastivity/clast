@@ -72,3 +72,62 @@ clast_dismissed_check() {
 
   grep -q "\"session_id\":\"$session_id\"" "$dismissed_file" 2>/dev/null
 }
+
+# clast_dismissed_remove <session-id> — drop all records for a session,
+# reversing a dismissal. Prints the number of records removed to stdout.
+# Returns 0 if anything was removed, 1 if the session was not dismissed.
+clast_dismissed_remove() {
+  local session_id="$1"
+  if [[ -z "$session_id" ]]; then
+    clast_log_error "clast_dismissed_remove: empty session_id"
+    return 2
+  fi
+
+  local dismissed_file
+  dismissed_file="$(clast_dismissed_path)"
+
+  if [[ ! -f "$dismissed_file" ]]; then
+    printf '0\n'
+    return 1
+  fi
+
+  # Count matches, then rewrite the log without them. `fromjson?` tolerates
+  # malformed lines here (they simply never match), mirroring how
+  # clast_dismissed_set reads the log. The rewrite below preserves those
+  # malformed lines rather than discarding data we can't parse, and goes
+  # through a temp file + mv so a crash mid-write can't truncate the log.
+  local removed
+  removed="$(jq -rRn --arg sid "$session_id" '
+    [inputs | fromjson? | select(.session_id == $sid)] | length
+  ' "$dismissed_file" 2>/dev/null)" || removed=0
+  [[ -z "$removed" ]] && removed=0
+
+  if (( removed == 0 )); then
+    printf '0\n'
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp "${dismissed_file}.XXXXXX")" || {
+    clast_log_error "clast_dismissed_remove: failed to create temp file"
+    return 2
+  }
+  # Keep malformed lines verbatim and every well-formed record whose
+  # session_id differs from the target.
+  if jq -Rr --arg sid "$session_id" '
+    . as $line
+    | ($line | fromjson?) as $obj
+    | if $obj == null then $line
+      elif $obj.session_id == $sid then empty
+      else $line end
+  ' "$dismissed_file" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$dismissed_file"
+  else
+    rm -f "$tmp"
+    clast_log_error "clast_dismissed_remove: rewrite failed"
+    return 2
+  fi
+
+  printf '%s\n' "$removed"
+  return 0
+}
