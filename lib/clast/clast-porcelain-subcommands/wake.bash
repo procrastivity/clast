@@ -292,7 +292,7 @@ clast_cmd_wake() {
     local session
     session="$(jq -c ".[$i]" <<<"$uncurated")"
 
-    local sid project branch start_ts end_ts msg_count snapshot_path day_bucket
+    local sid project branch start_ts end_ts msg_count snapshot_path
     sid="$(jq -r '.session_id' <<<"$session")"
     project="$(jq -r '.project' <<<"$session")"
     branch="$(jq -r '.branch // ""' <<<"$session")"
@@ -300,21 +300,29 @@ clast_cmd_wake() {
     end_ts="$(jq -r '.end' <<<"$session")"
     msg_count="$(jq -r '.msg_count_approx' <<<"$session")"
     snapshot_path="$(jq -r '.snapshot_path' <<<"$session")"
-    day_bucket="$(jq -r '.day_bucket // ""' <<<"$session")"
 
-    # day_bucket is the timezone-adjusted recording day used for grouping;
-    # fall back to the UTC date portion of the start timestamp.
-    local rec_date="$day_bucket"
+    # Recorded date + time range so the reviewer can tell which day's work
+    # this is (BDS-54). Render the session's own start/end instant in the
+    # local timezone. Deliberately NOT day_bucket: that is clast's
+    # cutoff-adjusted *filing* day, which differs from the instant's calendar
+    # date for pre-cutoff sessions — pairing it with a clock time (and a "UTC"
+    # label) yielded a timestamp wrong by a day. Fall back to the raw UTC
+    # substrings if `date` can't parse the timestamp.
+    local rec_date start_short end_short tz
+    rec_date="$(date -d "$start_ts" +%Y-%m-%d 2>/dev/null)" || rec_date=""
     [[ -z "$rec_date" ]] && rec_date="${start_ts:0:10}"
-    local start_short="${start_ts:11:5}" end_short="${end_ts:11:5}"
+    start_short="$(date -d "$start_ts" +%H:%M 2>/dev/null)" || start_short=""
+    [[ -z "$start_short" ]] && start_short="${start_ts:11:5}"
+    end_short="$(date -d "$end_ts" +%H:%M 2>/dev/null)" || end_short=""
+    [[ -z "$end_short" ]] && end_short="${end_ts:11:5}"
+    tz="$(date -d "$start_ts" +%Z 2>/dev/null)" || tz="UTC"
+    [[ -z "$tz" ]] && tz="UTC"
 
-    # Recorded date + time range, so the reviewer can tell which day's work
-    # this is (BDS-54). Times are UTC, matching the stored timestamps.
     local recorded="$rec_date"
     if [[ -n "$start_short" ]]; then
       recorded="$recorded $start_short"
       [[ -n "$end_short" && "$end_short" != "$start_short" ]] && recorded="$recorded–$end_short"
-      recorded="$recorded UTC"
+      recorded="$recorded $tz"
     fi
 
     local is_stale
