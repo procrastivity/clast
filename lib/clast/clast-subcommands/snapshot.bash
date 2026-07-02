@@ -28,16 +28,10 @@ EOF
 
 # _clast_snapshot_bucket_for_epoch <epoch>
 #   Mirror of clast_today's cutoff math against an arbitrary epoch. Local
-#   time per docs/explanation/conventions.md.
+#   time per docs/explanation/conventions.md. Thin alias over the shared
+#   primitive in clast-lib.bash.
 _clast_snapshot_bucket_for_epoch() {
-  local epoch="$1"
-  local cutoff="${CLAST_DAY_CUTOFF:-04:00}"
-  local h="${cutoff%%:*}" m="${cutoff##*:}"
-  h=$((10#$h))
-  m=$((10#$m))
-  local off=$((h * 3600 + m * 60))
-  # GNU `date -d` — BSD date not supported, per overview.md.
-  date -d "@$((epoch - off))" +%Y-%m-%d
+  clast_day_bucket_for_epoch "$1"
 }
 
 clast_cmd_snapshot() {

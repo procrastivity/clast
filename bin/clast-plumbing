@@ -165,6 +165,11 @@ case "$cmd" in
     source "$CLAST_LIB/clast-subcommands/doctor.bash"
     clast_cmd_doctor "$@"
     ;;
+  retro)
+    # shellcheck source=lib/clast/clast-subcommands/retro.bash
+    source "$CLAST_LIB/clast-subcommands/retro.bash"
+    clast_cmd_retro "$@"
+    ;;
   *)
     clast_log_error "unknown subcommand '$cmd'"
     clast_usage >&2

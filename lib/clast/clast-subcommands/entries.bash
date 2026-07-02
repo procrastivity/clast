@@ -69,49 +69,23 @@ clast_cmd_entries() {
 
 # _clast_entries_read_frontmatter <path>
 #   Emit raw frontmatter lines (between the first two `---` fences) to stdout.
+#   Thin alias over the shared primitive in clast-lib.bash.
 _clast_entries_read_frontmatter() {
-  local path="$1"
-  awk '
-    BEGIN { in_fm = 0; seen = 0 }
-    /^---[[:space:]]*$/ {
-      if (!seen) { in_fm = 1; seen = 1; next }
-      if (in_fm) { exit }
-    }
-    in_fm { print }
-  ' "$path"
+  clast_read_frontmatter "$1"
 }
 
 # _clast_entries_extract_title <path>
 #   Look for `# Session: <title>` as the first non-blank body line.
+#   Thin alias over the shared primitive in clast-lib.bash.
 _clast_entries_extract_title() {
-  awk '
-    BEGIN { in_fm = 0; seen = 0; past = 0 }
-    /^---[[:space:]]*$/ {
-      if (!seen) { in_fm = 1; seen = 1; next }
-      if (in_fm) { in_fm = 0; past = 1; next }
-    }
-    in_fm { next }
-    past {
-      if ($0 ~ /^[[:space:]]*$/) next
-      if (sub(/^# Session: /, "")) { print; exit }
-      exit
-    }
-  ' "$1"
+  clast_entry_title "$1"
 }
 
 # _clast_entries_unquote <string>
 #   Strip surrounding double quotes and unescape \", \\, \n.
+#   Thin alias over the shared primitive in clast-lib.bash.
 _clast_entries_unquote() {
-  local v="$1"
-  if [[ "${v:0:1}" == '"' && "${v: -1}" == '"' && ${#v} -ge 2 ]]; then
-    v="${v:1:${#v}-2}"
-    # Process escapes in order: \\ → placeholder, \" → ", \n → LF, placeholder → \
-    v="${v//\\\\/$'\x01'}"
-    v="${v//\\\"/\"}"
-    v="${v//\\n/$'\n'}"
-    v="${v//$'\x01'/\\}"
-  fi
-  printf '%s' "$v"
+  clast_yaml_unquote "$1"
 }
 
 # ---------------------------------------------------------------------------

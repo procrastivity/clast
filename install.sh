@@ -45,7 +45,7 @@ install -m644 "$SRC/LICENSE" "$PREFIX/share/clast/LICENSE"
 install -m644 "$SRC/package.json" "$PREFIX/lib/clast/package.json"
 
 echo "Installed clast to $PREFIX"
-echo "  Porcelain: $PREFIX/bin/clast (wake, brief)"
+echo "  Porcelain: $PREFIX/bin/clast (wake, brief, retro)"
 echo "  Plumbing:  $PREFIX/bin/clast-plumbing"
 echo "  Plugin:    $PREFIX/share/clast/.claude-plugin"
 echo ""
