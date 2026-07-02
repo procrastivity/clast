@@ -63,6 +63,11 @@ case "$cmd" in
     source "$CLAST_LIB/clast-porcelain-subcommands/brief.bash"
     clast_cmd_brief "$@"
     ;;
+  retro)
+    # shellcheck source=lib/clast/clast-porcelain-subcommands/retro.bash
+    source "$CLAST_LIB/clast-porcelain-subcommands/retro.bash"
+    clast_cmd_retro "$@"
+    ;;
   undismiss)
     # shellcheck source=lib/clast/clast-porcelain-subcommands/undismiss.bash
     source "$CLAST_LIB/clast-porcelain-subcommands/undismiss.bash"

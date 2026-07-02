@@ -55,6 +55,78 @@ clast_json_get() {
   jq -r "$expr" <<<"$input"
 }
 
+# --- Front-matter / YAML -------------------------------------------------
+#
+# Curated journal entries are Markdown with a leading YAML front-matter block
+# fenced by `---`. These two primitives are the single source of truth for
+# reading that block; `entries.bash` and `clast-retro-lib.bash` both build on
+# them.
+
+# clast_read_frontmatter <path>
+#   Emit the raw front-matter lines (between the first two `---` fences) to
+#   stdout. Nothing is emitted for a file without a front-matter block.
+clast_read_frontmatter() {
+  local path="$1"
+  awk '
+    BEGIN { in_fm = 0; seen = 0 }
+    /^---[[:space:]]*$/ {
+      if (!seen) { in_fm = 1; seen = 1; next }
+      if (in_fm) { exit }
+    }
+    in_fm { print }
+  ' "$path"
+}
+
+# clast_yaml_unquote <string>
+#   Strip surrounding double quotes and unescape \", \\, \n on a YAML scalar.
+#   A bare (unquoted) value is returned unchanged.
+clast_yaml_unquote() {
+  local v="$1"
+  if [[ "${v:0:1}" == '"' && "${v: -1}" == '"' && ${#v} -ge 2 ]]; then
+    v="${v:1:${#v}-2}"
+    # Process escapes in order: \\ → placeholder, \" → ", \n → LF, placeholder → \
+    v="${v//\\\\/$'\x01'}"
+    v="${v//\\\"/\"}"
+    v="${v//\\n/$'\n'}"
+    v="${v//$'\x01'/\\}"
+  fi
+  printf '%s' "$v"
+}
+
+# clast_entry_body <path>
+#   Emit the entry body — everything after the closing `---` of the
+#   front-matter block. A file with no front-matter is emitted whole.
+clast_entry_body() {
+  awk '
+    BEGIN { in_fm = 0; seen = 0; past = 0 }
+    !past && /^---[[:space:]]*$/ {
+      if (!seen) { in_fm = 1; seen = 1; next }
+      if (in_fm) { in_fm = 0; past = 1; next }
+    }
+    past { print; next }
+    !seen { print }   # no front-matter fence yet seen → plain file, echo through
+  ' "$1"
+}
+
+# clast_entry_title <path>
+#   The session title from `# Session: <title>` (first non-blank body line).
+#   Empty if absent.
+clast_entry_title() {
+  awk '
+    BEGIN { in_fm = 0; seen = 0; past = 0 }
+    /^---[[:space:]]*$/ {
+      if (!seen) { in_fm = 1; seen = 1; next }
+      if (in_fm) { in_fm = 0; past = 1; next }
+    }
+    in_fm { next }
+    past {
+      if ($0 ~ /^[[:space:]]*$/) next
+      if (sub(/^# Session: /, "")) { print; exit }
+      exit
+    }
+  ' "$1"
+}
+
 # --- Date math -----------------------------------------------------------
 #
 # Uses GNU `date -d` for relative-date math. The nix dev shell pulls in
@@ -71,20 +143,29 @@ _clast_now_epoch() {
   fi
 }
 
-# clast_today — local YYYY-MM-DD, adjusted by CLAST_DAY_CUTOFF (HH:MM, default 04:00).
-# A session starting before today's cutoff belongs to yesterday's bucket.
-clast_today() {
+# clast_day_bucket_for_epoch <epoch> — local YYYY-MM-DD for an epoch, adjusted
+# by CLAST_DAY_CUTOFF (HH:MM, default 04:00). Work before the cutoff belongs to
+# the previous day's bucket. Single source of truth for the day-bucket rule;
+# clast_today, `clast snapshot`, and `clast retro` all build on it.
+clast_day_bucket_for_epoch() {
+  local epoch="$1"
   local cutoff="${CLAST_DAY_CUTOFF:-04:00}"
-  local cutoff_hours cutoff_mins cutoff_secs now adjusted
+  local cutoff_hours cutoff_mins cutoff_secs adjusted
   cutoff_hours="${cutoff%%:*}"
   cutoff_mins="${cutoff##*:}"
   # Strip leading zeros so bash arithmetic doesn't treat them as octal.
   cutoff_hours=$((10#$cutoff_hours))
   cutoff_mins=$((10#$cutoff_mins))
   cutoff_secs=$((cutoff_hours * 3600 + cutoff_mins * 60))
-  now="$(_clast_now_epoch)"
-  adjusted=$((now - cutoff_secs))
+  adjusted=$((epoch - cutoff_secs))
+  # GNU `date -d` — BSD date not supported, per overview.md.
   date -d "@$adjusted" +%Y-%m-%d
+}
+
+# clast_today — local YYYY-MM-DD, adjusted by CLAST_DAY_CUTOFF (HH:MM, default 04:00).
+# A session starting before today's cutoff belongs to yesterday's bucket.
+clast_today() {
+  clast_day_bucket_for_epoch "$(_clast_now_epoch)"
 }
 
 # clast_parse_date <input> — print YYYY-MM-DD on stdout, exit non-zero on bad input.
@@ -219,6 +300,7 @@ Subcommands:
   breadcrumb    Append a one-line in-flight hint
   registry      Manage the project registry
   stats         Token/duration/session-count stats
+  retro         Work summary grouped by actual work day → project
   doctor        Sanity-check the journal
 
 Global flags:

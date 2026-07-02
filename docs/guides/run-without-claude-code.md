@@ -3,10 +3,11 @@
 The [`/wake` and `/brief` plugin skills](../reference/plugin.md) run *inside*
 Claude Code. If you want the same LLM-assisted curation and briefing from a plain
 terminal — a cron job, a remote box, or just a shell without Claude Code — use the
-two porcelain subcommands that ship with the CLI:
+porcelain subcommands that ship with the CLI:
 
 - **`clast wake`** — interactive day curation. The standalone equivalent of `/wake`.
 - **`clast brief`** — a project briefing. The standalone equivalent of `/brief`.
+- **`clast retro`** — a model-condensed work retrospective grouped by work day → project.
 
 Both call an OpenAI-compatible chat-completions endpoint directly (via `curl`) and
 reuse the same prompt templates as the plugin skills, so the output stays in sync.
@@ -79,6 +80,28 @@ recent curated entries, today's breadcrumbs, and today's sessions for that proje
 and prints a synthesized briefing. It writes nothing — it's read-only, same as
 `/brief`.
 
+## `clast retro` — condense a work retrospective
+
+```bash
+clast retro [--from DATE] [--to DATE] [--window work-days|file-dates] [--refresh] [--json]
+```
+
+Builds the deterministic day→project structure with `clast-plumbing --json retro
+--bodies` (`--json` is a global flag, so it precedes the subcommand), then asks
+the LLM to condense each session's body into a few retro
+bullets. The grouping, work-day bucketing, provenance notes, and friendly project
+names are all deterministic — only the per-session prose is model-written. With no
+`--from`/`--to` it covers the whole corpus.
+
+Summaries are **cached per session** under `<journal>/.retro-summaries/`, keyed by
+a content fingerprint of the session body, so re-runs are free and re-rendering
+costs nothing. A session re-summarizes only when its content changes or you pass
+`--refresh`. `--json` emits the manifest with a `summary` per session instead of
+the rendered report.
+
+For a model-free version (raw entry bodies instead of condensed bullets), use
+[`clast-plumbing retro`](../reference/cli.md#clast-plumbing-retro) directly.
+
 ## Customizing the prompts
 
 Both subcommands read their prompt templates from `lib/clast/prompts/` — the same
@@ -86,14 +109,16 @@ files the plugin skills use:
 
 - `wake-draft-system.md` / `wake-draft-user.md` (used by `clast wake`)
 - `brief-system.md` / `brief-user.md` (used by `clast brief`)
+- `retro-summary-system.md` / `retro-summary-user.md` (used by `clast retro`)
 
 Edit those files to change tone or structure once for both the porcelain and the
 plugin. If the files are missing the porcelain falls back to built-in inline prompts.
 
 ## Automating it
 
-`clast brief` is non-interactive and safe to run from a login shell or as part of a
-shell prompt. `clast wake` is interactive and expects a tty — don't run it from cron.
+`clast brief` and `clast retro` are non-interactive and safe to run from a login
+shell, a shell prompt, or cron (`clast retro`'s per-session cache keeps repeat runs
+cheap). `clast wake` is interactive and expects a tty — don't run it from cron.
 To capture sessions on a schedule, automate `clast-plumbing snapshot` instead (see
 [automate with cron](./automate-with-cron.md) or [systemd](./automate-with-systemd.md)),
 then run `clast wake` by hand when you want to curate.
