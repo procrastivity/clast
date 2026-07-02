@@ -519,9 +519,16 @@ _clast_entries_write() {
       trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
       [[ -z "$trimmed" ]] && continue
       trimmed="${trimmed,,}"
-      if ! [[ "$trimmed" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
-        _clast_entries_err "write: invalid tag '$trimmed'"; return 2
-      fi
+      # Normalize to the tag charset rather than rejecting. LLM-suggested tags
+      # routinely carry dots or other separators (e.g. "php-8.5"), and failing
+      # the whole write would discard a curated entry over a cosmetic tag. Map
+      # runs of disallowed characters to a single hyphen, trim edge hyphens,
+      # and cap at 32 chars — same shape as _clast_wake_slugify. A tag that
+      # normalizes to nothing (all punctuation) is dropped.
+      trimmed="$(printf '%s' "$trimmed" | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+      trimmed="${trimmed:0:32}"
+      trimmed="${trimmed%-}"
+      [[ -z "$trimmed" ]] && continue
       tags+=("$trimmed")
     done
   fi

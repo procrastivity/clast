@@ -14,11 +14,13 @@ _clast_sessions_usage() {
   cat <<'EOF'
 Usage: clast sessions [--day DATE] [--since DATE] [--until DATE] [--project SLUG]
        clast sessions dismiss <session-id> [<session-id>...] [--reason TEXT]
+       clast sessions undismiss <session-id> [<session-id>...]
 
 List sessions captured in a date window.
 
 Subcommands:
   dismiss ID...    Mark session(s) as dismissed (excluded from future queries).
+  undismiss ID...  Restore previously dismissed session(s).
 
 Flags:
   --day DATE              Single-day window (default: today). Mutually exclusive
@@ -98,11 +100,66 @@ _clast_sessions_dismiss() {
   fi
 }
 
+# _clast_sessions_undismiss <id> [<id>...]
+# Reverse a dismissal so the session reappears in queries.
+_clast_sessions_undismiss() {
+  source "$CLAST_LIB/clast-dismissed-lib.bash"
+
+  local -a ids=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        _clast_sessions_usage; return 0 ;;
+      -*)
+        _clast_sessions_err "undismiss: unknown flag '$1'"; return 2 ;;
+      *)
+        ids+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    _clast_sessions_err "undismiss requires at least one session ID"
+    return 2
+  fi
+
+  local id count=0 rc
+  for id in "${ids[@]}"; do
+    if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+      _clast_sessions_err "undismiss: '$id' is not a valid UUID"
+      return 2
+    fi
+    # `|| rc=$?` keeps the non-zero return from tripping `set -e` (the normal
+    # "not dismissed" path returns 1); rc stays 0 on success.
+    rc=0
+    clast_dismissed_remove "$id" >/dev/null || rc=$?
+    case "$rc" in
+      0) count=$(( count + 1 )) ;;
+      1) [[ -z "${CLAST_QUIET:-}" ]] && clast_log_info "not dismissed: $id" ;;
+      # Any other code is a real failure (temp file / rewrite / mv). Don't
+      # report success while the session is still dismissed — surface it.
+      *) _clast_sessions_err "undismiss: failed to restore $id"; return 1 ;;
+    esac
+  done
+
+  if [[ -n "${CLAST_JSON:-}" ]]; then
+    jq -cn --argjson count "$count" '{undismissed: $count}'
+  elif [[ -z "${CLAST_QUIET:-}" ]]; then
+    clast_log_info "Restored $count session(s)."
+  fi
+}
+
 clast_cmd_sessions() {
   # Handle "sessions dismiss" sub-action before flag parsing.
   if [[ "${1:-}" == "dismiss" ]]; then
     shift
     _clast_sessions_dismiss "$@"
+    return $?
+  fi
+
+  # Handle "sessions undismiss" sub-action before flag parsing.
+  if [[ "${1:-}" == "undismiss" ]]; then
+    shift
+    _clast_sessions_undismiss "$@"
     return $?
   fi
 

@@ -26,4 +26,4 @@ One sentence describing what this session was trying to accomplish.
 Be concise. Prefer bullets over paragraphs. Use the user's terminology (project-specific names, file paths). Do not invent details. If you are uncertain about something, omit it rather than guess.
 
 After the entry, add a blank line and then: "Suggested tags: tag1, tag2, tag3"
-Tags must be lowercase kebab-case (regex: `^[a-z0-9][a-z0-9-]{0,31}$`). Examples: `adrs`, `symfony-bot`, `mr-umbrella`, `phase-0`. Never use uppercase letters.
+Tags must be lowercase kebab-case (regex: `^[a-z0-9][a-z0-9-]{0,31}$`). Examples: `adrs`, `symfony-bot`, `mr-umbrella`, `phase-0`. Never use uppercase letters. Use hyphens, not dots or spaces, for separators — write versions like `php-8-5`, not `php-8.5`.

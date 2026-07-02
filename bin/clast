@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # clast — porcelain over clast-plumbing, with an OpenAI-compatible LLM
-# provider. Owns the `wake` and `brief` subcommands. Every other verb is a
-# clean error — the porcelain does not proxy to plumbing.
+# provider. Owns the `wake` and `brief` subcommands, plus `undismiss` as a
+# convenience passthrough to plumbing (recovers an accidental [d] in wake).
+# Every other verb is a clean error — the porcelain does not broadly proxy.
 #
 # Subcommand files live in $CLAST_LIB/clast-porcelain-subcommands/<name>.bash
 # and each defines a single function `clast_cmd_<name>`.
@@ -61,6 +62,11 @@ case "$cmd" in
     # shellcheck source=lib/clast/clast-porcelain-subcommands/brief.bash
     source "$CLAST_LIB/clast-porcelain-subcommands/brief.bash"
     clast_cmd_brief "$@"
+    ;;
+  undismiss)
+    # shellcheck source=lib/clast/clast-porcelain-subcommands/undismiss.bash
+    source "$CLAST_LIB/clast-porcelain-subcommands/undismiss.bash"
+    clast_cmd_undismiss "$@"
     ;;
   *)
     clast_porcelain_log_error "unknown subcommand '$cmd'"
