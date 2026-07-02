@@ -292,7 +292,7 @@ clast_cmd_wake() {
     local session
     session="$(jq -c ".[$i]" <<<"$uncurated")"
 
-    local sid project branch start_ts end_ts msg_count snapshot_path
+    local sid project branch start_ts end_ts msg_count snapshot_path day_bucket
     sid="$(jq -r '.session_id' <<<"$session")"
     project="$(jq -r '.project' <<<"$session")"
     branch="$(jq -r '.branch // ""' <<<"$session")"
@@ -300,19 +300,36 @@ clast_cmd_wake() {
     end_ts="$(jq -r '.end' <<<"$session")"
     msg_count="$(jq -r '.msg_count_approx' <<<"$session")"
     snapshot_path="$(jq -r '.snapshot_path' <<<"$session")"
+    day_bucket="$(jq -r '.day_bucket // ""' <<<"$session")"
 
-    local start_short="${start_ts:11:5}"
-    [[ -z "$start_short" ]] && start_short="${start_ts:0:10}"
+    # day_bucket is the timezone-adjusted recording day used for grouping;
+    # fall back to the UTC date portion of the start timestamp.
+    local rec_date="$day_bucket"
+    [[ -z "$rec_date" ]] && rec_date="${start_ts:0:10}"
+    local start_short="${start_ts:11:5}" end_short="${end_ts:11:5}"
+
+    # Recorded date + time range, so the reviewer can tell which day's work
+    # this is (BDS-54). Times are UTC, matching the stored timestamps.
+    local recorded="$rec_date"
+    if [[ -n "$start_short" ]]; then
+      recorded="$recorded $start_short"
+      [[ -n "$end_short" && "$end_short" != "$start_short" ]] && recorded="$recorded–$end_short"
+      recorded="$recorded UTC"
+    fi
 
     local is_stale
     is_stale="$(jq -r '.stale // false' <<<"$session")"
     local label="Session $((i+1))/$total: $project"
     [[ "$is_stale" == "true" ]] && label="$label [STALE]"
-    [[ -n "$start_short" ]] && label="$label ($start_short"
+    [[ -n "$rec_date" ]] && label="$label ($rec_date $start_short"
     [[ -n "$branch" && "$branch" != "null" ]] && label="$label, $branch"
     label="$label)"
 
     _clast_wake_separator "$label"
+    # Full session ID + recorded window: identifies exactly which session is
+    # being reviewed (e.g. for `clast-plumbing sessions dismiss/undismiss <id>`).
+    clast_porcelain_info "  id: $sid"
+    clast_porcelain_info "  recorded: $recorded"
     clast_porcelain_info "Gathering context..."
 
     local show_json
