@@ -86,8 +86,9 @@ and prints a synthesized briefing. It writes nothing — it's read-only, same as
 clast retro [--from DATE] [--to DATE] [--window work-days|file-dates] [--refresh] [--json]
 ```
 
-Builds the deterministic day→project structure with `clast-plumbing retro --json
---bodies`, then asks the LLM to condense each session's body into a few retro
+Builds the deterministic day→project structure with `clast-plumbing --json retro
+--bodies` (`--json` is a global flag, so it precedes the subcommand), then asks
+the LLM to condense each session's body into a few retro
 bullets. The grouping, work-day bucketing, provenance notes, and friendly project
 names are all deterministic — only the per-session prose is model-written. With no
 `--from`/`--to` it covers the whole corpus.

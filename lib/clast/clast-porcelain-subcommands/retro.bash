@@ -134,22 +134,32 @@ clast_cmd_retro() {
   local cache_dir
   cache_dir="$(_clast_retrosum_journal_dir)/.retro-summaries"
 
-  # Summarize each session; collect session_id → summary.
+  # Summarize each session; collect key → summary.
   local -a summary_pairs=()
-  local sess sid project work_day body title summary
+  local sess sid key cache_id project work_day body title summary
   while IFS= read -r sess; do
     [[ -z "$sess" ]] && continue
-    sid="$(jq -r '.session_id' <<<"$sess")"
+    sid="$(jq -r '.session_id // ""' <<<"$sess")"
+    # Fold key: session_id, or the unique first entry path for id-less sessions
+    # (must match the plumbing manifest's key so summaries fold back correctly
+    # and two id-less sessions don't collide on a shared "null" key).
+    key="$(jq -r '.session_id // .entries[0]' <<<"$sess")"
+    # Cache filename must be unique and filesystem-safe even without an id.
+    if [[ -n "$sid" ]]; then
+      cache_id="$sid"
+    else
+      cache_id="noid-$(printf '%s' "$key" | _clast_retrosum_fingerprint)"
+    fi
     work_day="$(jq -r '.work_day' <<<"$sess")"
     body="$(jq -r '.body // ""' <<<"$sess")"
     project="$(jq -r '.project_path // "(no project)"' <<<"$sess")"
     if [[ -z "$body" ]]; then
       summary="(no body to summarize)"
-    elif ! summary="$(_clast_retrosum_summary "$project" "$work_day" "$sid" "$body" "$cache_dir" "$refresh")"; then
-      clast_porcelain_warn "summary failed for session $sid — leaving it unsummarized"
+    elif ! summary="$(_clast_retrosum_summary "$project" "$work_day" "$cache_id" "$body" "$cache_dir" "$refresh")"; then
+      clast_porcelain_warn "summary failed for session ${sid:-<no id>} — leaving it unsummarized"
       summary="(summary unavailable)"
     fi
-    summary_pairs+=("$(jq -cn --arg s "$sid" --arg v "$summary" '{session_id:$s, summary:$v}')")
+    summary_pairs+=("$(jq -cn --arg k "$key" --arg v "$summary" '{key:$k, summary:$v}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
   # Fold summaries back into the manifest and drop the raw bodies. The manifest
@@ -161,12 +171,13 @@ clast_cmd_retro() {
   # --slurpfile, never argv.
   local enriched="$manifest"
   if (( ${#summary_pairs[@]} > 0 )); then
-    # Key both sides through `tostring` so a null session_id (legacy entry with
-    # no session_id) doesn't abort jq with "Cannot index object with null".
+    # Key by `session_id // .entries[0]` (always a non-null string), matching
+    # the pairs above: this can't abort jq on a null id and keeps two id-less
+    # sessions distinct instead of collapsing them onto a shared key.
     enriched="$(printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${summary_pairs[@]}") '
-      (reduce $pairs[] as $p ({}; .[($p.session_id | tostring)] = $p.summary)) as $sum
+      (reduce $pairs[] as $p ({}; .[$p.key] = $p.summary)) as $sum
       | .days |= map(.projects |= map(.sessions |= map(
-          del(.body) + {summary: ($sum[(.session_id | tostring)] // null)})))
+          del(.body) + {summary: ($sum[(.session_id // .entries[0])] // null)})))
     ')"
   fi
 

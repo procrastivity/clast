@@ -116,10 +116,13 @@ clast_cmd_retro() {
 _clast_retro_inject_bodies() {
   local manifest="$1"
   local -a pairs=()
-  local sess sid body entry0 title interrupted
+  local sess key body entry0 title interrupted
   while IFS= read -r sess; do
     [[ -z "$sess" ]] && continue
-    sid="$(jq -r '.session_id' <<<"$sess")"
+    # Key by session_id, falling back to the first entry path when a
+    # legacy/hand-curated session has no id (JSON null): entries[0] is unique
+    # per session, so id-less sessions don't collide on a shared "null" key.
+    key="$(jq -r '.session_id // .entries[0]' <<<"$sess")"
     body="$(clast_retro_session_body "$sess")"
     entry0="$(jq -r '.entries[0]' <<<"$sess")"
     title=""
@@ -131,9 +134,9 @@ _clast_retro_inject_bodies() {
     fi
     # Body via --rawfile (process substitution), never argv: a single merged
     # body can exceed MAX_ARG_STRLEN (~128 KiB) and silently fail the exec.
-    pairs+=("$(jq -cn --arg s "$sid" --rawfile b <(printf '%s' "$body") \
+    pairs+=("$(jq -cn --arg k "$key" --rawfile b <(printf '%s' "$body") \
       --arg t "$title" --argjson i "$interrupted" \
-      '{session_id:$s, body:$b, title:$t, interrupted:$i}')")
+      '{key:$k, body:$b, title:$t, interrupted:$i}')")
   done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
 
   if (( ${#pairs[@]} == 0 )); then
@@ -142,14 +145,13 @@ _clast_retro_inject_bodies() {
   fi
 
   # Manifest on stdin and the body-bearing pairs via --slurpfile — both can be
-  # large, so neither goes through argv. Key both sides through `tostring`: a
-  # legacy entry with no session_id carries JSON null, and `$x[null]` aborts jq
-  # with "Cannot index object with null" (the pairs side already stringifies it
-  # to "null" via jq -r, so tostring keeps both consistent).
+  # large, so neither goes through argv. The `session_id // .entries[0]` key is
+  # always a non-null string, so this can't `$x[null]` abort jq ("Cannot index
+  # object with null") and id-less sessions don't collide on a shared key.
   printf '%s' "$manifest" | jq -c --slurpfile pairs <(printf '%s\n' "${pairs[@]}") '
-    (reduce $pairs[] as $p ({}; .[($p.session_id | tostring)] = $p)) as $x
+    (reduce $pairs[] as $p ({}; .[$p.key] = $p)) as $x
     | .days |= map(.projects |= map(.sessions |= map(
-        (.session_id | tostring) as $k
+        (.session_id // .entries[0]) as $k
         | . + {body:        ($x[$k].body // null),
                title:       ($x[$k].title // null),
                interrupted: ($x[$k].interrupted // false)} )))

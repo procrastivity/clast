@@ -202,7 +202,10 @@ clast_retro_manifest() {
      else . end)
 
     # Dedup by session_id: later real day wins; merge contributing paths.
-    | [ group_by(.session_id)[]
+    # Fall back to .path for id-less (legacy/hand-curated) entries so two of
+    # them do not collapse under a shared null key into one session; .path is
+    # unique, so each stays its own singleton session.
+    | [ group_by(.session_id // .path)[]
         | (map(.work_day) | map(select(. != "unknown"))
            | (if length > 0 then max else "unknown" end)) as $wd
         | ((map(select(.work_day == $wd))[0]) // .[0]) as $rep
@@ -236,7 +239,7 @@ clast_retro_manifest() {
                 group_by(.project_path)
                 | map({
                     project_path: .[0].project_path,
-                    sessions: (sort_by(.session_id)
+                    sessions: (sort_by(.session_id // .entries[0])
                       | map({session_id, work_day, entries, curated_source_mtime}))
                   })
                 | sort_by(.project_path == null)   # null project group sorts last

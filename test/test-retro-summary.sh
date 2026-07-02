@@ -117,25 +117,31 @@ assert_eq "false" "$(jq '[.days[].projects[].sessions[] | has("body")] | any' <<
 assert_eq "0" "$(_calls)" "json: served from warm cache (no calls)"
 teardown_test_journal
 
-# === null session_id: summary fold must not abort =========================
-# The porcelain consumes `clast-plumbing --json retro --bodies`; a legacy entry
-# with no session_id flows through as JSON null. Folding summaries back used to
-# `$sum[null]` → jq abort. The null session must survive with a summary.
+# === null session_id: summary fold must not abort, must not collapse ======
+# The porcelain consumes `clast-plumbing --json retro --bodies`; id-less entries
+# flow through as JSON null. Folding summaries back used to `$sum[null]` → jq
+# abort. And two id-less sessions must stay distinct (not collapse to one), each
+# summarized and cached under its own file.
 setup_test_journal >/dev/null
 mkdir -p "$CLAST_JOURNAL_DIR/entries"
 CALLLOG="$_CLAST_TEST_TMPDIR/calls.log"; : >"$CALLLOG"
 LASTUSER="$_CLAST_TEST_TMPDIR/lastuser.txt"
-{
-  printf -- '---\ndate: 2026-09-01\ntime: "10:00"\nday_bucket: 2026-09-01\n'
-  printf -- 'project: nullsess\nproject_path: /tmp/projNull\n'
-  printf -- 'snapshot_path: transcripts/2026-09-01/-tmp-projNull/legacy.jsonl\n'
-  printf -- 'machine: m\ncurated_source_mtime: "2026-09-01T10:00:00Z"\n---\n\n'
-  printf -- '# Session: Legacy\n## What shipped\n- shipped from a session with no id\n'
-} > "$CLAST_JOURNAL_DIR/entries/2026-09-01-1000-nullsess-legacy.md"
+for s in A B; do
+  {
+    printf -- '---\ndate: 2026-09-01\ntime: "10:00"\nday_bucket: 2026-09-01\n'
+    printf -- 'project: nullsess\nproject_path: /tmp/projNull\n'
+    printf -- 'snapshot_path: transcripts/2026-09-01/-tmp-projNull/legacy%s.jsonl\n' "$s"
+    printf -- 'machine: m\ncurated_source_mtime: "2026-09-01T10:00:00Z"\n---\n\n'
+    printf -- '# Session: Legacy %s\n## What shipped\n- shipped from id-less session %s\n' "$s" "$s"
+  } > "$CLAST_JOURNAL_DIR/entries/2026-09-01-1000-nullsess-legacy$s.md"
+done
 js="$(clast_cmd_retro --from 2026-09-01 --to 2026-09-01 --json 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "null sid: porcelain --json exits 0 (no jq null-index abort)"
-nulls="$(jq -c '[.days[].projects[].sessions[] | select(.session_id==null)][0]' <<<"$js")"
-assert_eq "- **Shipped:** stub bullet for testing" "$(jq -r '.summary' <<<"$nulls")" "null sid: null session gets a summary"
+assert_eq "2" "$(jq '[.days[].projects[].sessions[] | select(.session_id==null)] | length' <<<"$js")" "null sid: two id-less sessions stay distinct"
+assert_eq "0" "$(jq '[.days[].projects[].sessions[] | select(.session_id==null) | .summary | select(. == null)] | length' <<<"$js")" "null sid: every id-less session gets a summary"
+# Each id-less session summarized independently (two LLM calls, two cache files).
+assert_eq "2" "$(_calls)" "null sid: both id-less sessions summarized (2 calls)"
+assert_eq "2" "$(find "$CLAST_JOURNAL_DIR/.retro-summaries" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')" "null sid: a distinct cache file per id-less session"
 teardown_test_journal
 
 # === arg validation ========================================================

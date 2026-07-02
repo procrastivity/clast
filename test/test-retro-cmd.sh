@@ -136,27 +136,40 @@ fi
 assert_exit_code 0 "$CLAST_BIN" retro
 teardown_test_journal
 
-# === null session_id: --bodies must not abort =============================
-# A legacy / hand-curated entry with no session_id indexes as JSON null. The
-# lean manifest renders, but the --bodies merge used to `$x[null]` → jq abort
-# ("Cannot index object with null"). The null session must survive with a body.
+# === null session_id: --bodies must not abort, must not collapse ==========
+# Legacy / hand-curated entries with no session_id index as JSON null. The lean
+# manifest renders, but the --bodies merge used to `$x[null]` → jq abort
+# ("Cannot index object with null"). And two id-less entries must NOT collapse
+# under a shared null key into one session — each keeps its own body.
 setup_test_journal >/dev/null
 mkdir -p "$CLAST_JOURNAL_DIR/entries"
-{
-  printf -- '---\ndate: 2026-09-01\ntime: "10:00"\nday_bucket: 2026-09-01\n'
-  printf -- 'project: nullsess\nproject_path: /tmp/projNull\n'
-  # No session_id line at all → clast_retro_index emits null.
-  printf -- 'snapshot_path: transcripts/2026-09-01/-tmp-projNull/legacy.jsonl\n'
-  printf -- 'machine: m\ncurated_source_mtime: "2026-09-01T10:00:00Z"\n---\n\n'
-  printf -- '# Session: Legacy\n## What shipped\n- shipped from a session with no id\n'
-} > "$CLAST_JOURNAL_DIR/entries/2026-09-01-1000-nullsess-legacy.md"
+_nullentry() { # <basename> <shipped-marker>
+  {
+    printf -- '---\ndate: 2026-09-01\ntime: "10:00"\nday_bucket: 2026-09-01\n'
+    printf -- 'project: nullsess\nproject_path: /tmp/projNull\n'
+    # No session_id line at all → clast_retro_index emits null.
+    printf -- 'snapshot_path: transcripts/2026-09-01/-tmp-projNull/%s.jsonl\n' "$1"
+    printf -- 'machine: m\ncurated_source_mtime: "2026-09-01T10:00:00Z"\n---\n\n'
+    printf -- '# Session: Legacy\n## What shipped\n- %s\n' "$2"
+  } > "$CLAST_JOURNAL_DIR/entries/2026-09-01-1000-nullsess-$1.md"
+}
+_nullentry legacyA "shipped from id-less session A"
+_nullentry legacyB "shipped from id-less session B"
 out="$("$CLAST_BIN" --json retro --bodies 2>/dev/null)" && rc=$? || rc=$?
 assert_eq "0" "$rc" "null sid: --bodies exits 0 (no jq null-index abort)"
-nulls="$(jq -c '[.days[].projects[].sessions[] | select(.session_id==null)][0]' <<<"$out")"
-assert_eq "true" "$(jq 'has("body")' <<<"$nulls")" "null sid: null session carries a body field"
-case "$(jq -r '.body' <<<"$nulls")" in
-  *"shipped from a session with no id"*) _clast_test_pass "null sid: body preserved for null session" ;;
-  *) _clast_test_fail "null sid: body preserved for null session" >&2 ;;
+# Two distinct id-less sessions survive (not collapsed into one).
+assert_eq "2" "$(jq '[.days[].projects[].sessions[] | select(.session_id==null)] | length' <<<"$out")" "null sid: two id-less sessions stay distinct"
+# Each carries its own body, not a merged/shared one.
+bodies="$(jq -r '[.days[].projects[].sessions[] | select(.session_id==null) | .body] | sort | join("|")' <<<"$out")"
+case "$bodies" in
+  *"id-less session A"*"id-less session B"*) _clast_test_pass "null sid: each id-less session keeps its own body" ;;
+  *) _clast_test_fail "null sid: each id-less session keeps its own body"; printf '%s\n' "$bodies" >&2 ;;
+esac
+# No cross-contamination: A's body must not contain B's marker.
+a_body="$(jq -r '[.days[].projects[].sessions[] | select(.session_id==null) | select(.body|test("session A")) | .body][0]' <<<"$out")"
+case "$a_body" in
+  *"session B"*) _clast_test_fail "null sid: session A body must not include session B" ;;
+  *) _clast_test_pass "null sid: no body cross-contamination between id-less sessions" ;;
 esac
 teardown_test_journal
 
