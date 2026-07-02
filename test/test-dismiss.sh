@@ -43,6 +43,36 @@ assert_eq "0" "$removed" "remove A again: reports 0 removed"
 
 teardown_test_journal
 
+# --- malformed lines are preserved through a removal (regression) -----------
+
+# A non-JSON line in the log must survive when an unrelated session is
+# removed — the rewrite tolerates junk rather than silently deleting it.
+setup_test_journal >/dev/null
+dfile="$CLAST_JOURNAL_DIR/.dismissed.jsonl"
+clast_dismissed_add "$A" "one"
+printf 'CORRUPT NON-JSON LINE\n' >>"$dfile"
+clast_dismissed_add "$B" "two"
+removed="$(clast_dismissed_remove "$A")"; rc=$?
+assert_eq "0" "$rc" "remove A (mixed log): exit 0"
+assert_eq "1" "$removed" "remove A (mixed log): 1 record removed"
+if grep -q 'CORRUPT NON-JSON LINE' "$dfile"; then _clast_test_pass "malformed line preserved"; else _clast_test_fail "malformed line dropped"; fi
+if clast_dismissed_check "$B"; then _clast_test_pass "unrelated record B preserved"; else _clast_test_fail "record B dropped"; fi
+teardown_test_journal
+
+# --- a rewrite failure surfaces as an error, not a silent no-op -------------
+
+# Make the journal dir read-only so mktemp(1) fails; a matching record is
+# present, so this exercises the hard-error (exit 2) path rather than the
+# "not dismissed" no-op (exit 1).
+setup_test_journal >/dev/null
+clast_dismissed_add "$A" "one"
+chmod a-w "$CLAST_JOURNAL_DIR"
+removed="$(clast_dismissed_remove "$A" 2>/dev/null)"; rc=$?
+chmod u+w "$CLAST_JOURNAL_DIR"
+assert_eq "2" "$rc" "rewrite failure returns exit 2"
+if clast_dismissed_check "$A"; then _clast_test_pass "record intact after failed rewrite"; else _clast_test_fail "record lost after failed rewrite"; fi
+teardown_test_journal
+
 # --- CLI round trip: dismiss then undismiss ---------------------------------
 
 setup_test_journal >/dev/null

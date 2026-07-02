@@ -91,14 +91,18 @@ clast_dismissed_remove() {
     return 1
   fi
 
-  # Count matches, then rewrite the log without them. `fromjson?` tolerates
-  # malformed lines here (they simply never match), mirroring how
-  # clast_dismissed_set reads the log. The rewrite below preserves those
-  # malformed lines rather than discarding data we can't parse, and goes
-  # through a temp file + mv so a crash mid-write can't truncate the log.
+  # Count matches, then rewrite the log without them. A match is a
+  # well-formed JSON *object* whose session_id equals the target;
+  # `try fromjson catch null` turns unparseable lines into null so they
+  # never match, and the `type == "object"` guard keeps non-object JSON
+  # (numbers, strings) from erroring on `.session_id`. This mirrors the
+  # tolerant read in clast_dismissed_set.
   local removed
   removed="$(jq -rRn --arg sid "$session_id" '
-    [inputs | fromjson? | select(.session_id == $sid)] | length
+    [ inputs
+      | (try fromjson catch null) as $obj
+      | select(($obj | type) == "object" and $obj.session_id == $sid)
+    ] | length
   ' "$dismissed_file" 2>/dev/null)" || removed=0
   [[ -z "$removed" ]] && removed=0
 
@@ -112,16 +116,23 @@ clast_dismissed_remove() {
     clast_log_error "clast_dismissed_remove: failed to create temp file"
     return 2
   }
-  # Keep malformed lines verbatim and every well-formed record whose
-  # session_id differs from the target.
+  # Emit every line except well-formed objects matching the target id.
+  # Malformed lines parse to null (type != "object") and so are preserved
+  # verbatim rather than silently dropped. Rewrite goes through a temp file
+  # + mv so a crash mid-write can't truncate the log.
   if jq -Rr --arg sid "$session_id" '
     . as $line
-    | ($line | fromjson?) as $obj
-    | if $obj == null then $line
-      elif $obj.session_id == $sid then empty
-      else $line end
+    | (try ($line | fromjson) catch null) as $obj
+    | if ($obj | type) == "object" and $obj.session_id == $sid
+      then empty
+      else $line
+      end
   ' "$dismissed_file" >"$tmp" 2>/dev/null; then
-    mv "$tmp" "$dismissed_file"
+    if ! mv "$tmp" "$dismissed_file"; then
+      rm -f "$tmp"
+      clast_log_error "clast_dismissed_remove: failed to replace log"
+      return 2
+    fi
   else
     rm -f "$tmp"
     clast_log_error "clast_dismissed_remove: rewrite failed"

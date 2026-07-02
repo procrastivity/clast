@@ -122,17 +122,23 @@ _clast_sessions_undismiss() {
     return 2
   fi
 
-  local id count=0
+  local id count=0 rc
   for id in "${ids[@]}"; do
     if ! [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
       _clast_sessions_err "undismiss: '$id' is not a valid UUID"
       return 2
     fi
-    if clast_dismissed_remove "$id" >/dev/null; then
-      count=$(( count + 1 ))
-    elif [[ -z "${CLAST_QUIET:-}" ]]; then
-      clast_log_info "not dismissed: $id"
-    fi
+    # `|| rc=$?` keeps the non-zero return from tripping `set -e` (the normal
+    # "not dismissed" path returns 1); rc stays 0 on success.
+    rc=0
+    clast_dismissed_remove "$id" >/dev/null || rc=$?
+    case "$rc" in
+      0) count=$(( count + 1 )) ;;
+      1) [[ -z "${CLAST_QUIET:-}" ]] && clast_log_info "not dismissed: $id" ;;
+      # Any other code is a real failure (temp file / rewrite / mv). Don't
+      # report success while the session is still dismissed — surface it.
+      *) _clast_sessions_err "undismiss: failed to restore $id"; return 1 ;;
+    esac
   done
 
   if [[ -n "${CLAST_JSON:-}" ]]; then
