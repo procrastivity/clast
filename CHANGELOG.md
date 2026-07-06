@@ -3,6 +3,20 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.5] - 2026-07-06
+
+### Bug Fixes
+
+- Move skills to repo root + rename to brief/wake (#30)
+- Handle large sessions — SIGPIPE and ARG_MAX overflows (#31)
+
+### Features
+
+- Per-directory labels, explicit-slug honoring, workspace-segmented brief (#32)
+- Undismiss sessions + show recorded date/id in wake (#34)
+- Clast retro — work summary grouped by actual work day (#33)
+- Auto-skip no-op sessions before the LLM (#35)
+
 ## [0.0.4] - 2026-06-16
 
 ### Performance
