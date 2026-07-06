@@ -13,6 +13,13 @@ if [[ -n "${_CLAST_MANIFEST_LIB_SOURCED:-}" ]]; then
 fi
 _CLAST_MANIFEST_LIB_SOURCED=1
 
+# clast_manifest_rebuild_from_disk backfills the session-classification counts
+# via clast_session_msg_counts. Source the classify lib relative to this file
+# (not via CLAST_LIB) so callers that source manifest-lib directly — e.g. the
+# test suite — get the dependency without extra setup.
+# shellcheck source=lib/clast/clast-classify-lib.bash
+source "${BASH_SOURCE[0]%/*}/clast-classify-lib.bash"
+
 # clast_manifest_path — single chokepoint so CLAST_JOURNAL_DIR override
 # (via clast_journal_dir) redirects every read/write in this file.
 clast_manifest_path() {
@@ -26,10 +33,10 @@ _clast_manifest_now_iso() {
   date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ
 }
 
-# clast_manifest_append <session-id> <source> <snapshot> <source-mtime> <source-size> <day-bucket> <msg-count> <first-ts> <last-ts>
+# clast_manifest_append <session-id> <source> <snapshot> <source-mtime> <source-size> <day-bucket> <msg-count> <first-ts> <last-ts> <user-msg-count> <assistant-msg-count>
 clast_manifest_append() {
-  if [[ $# -ne 9 ]]; then
-    clast_log_error "clast_manifest_append: expected 9 args, got $#"
+  if [[ $# -ne 11 ]]; then
+    clast_log_error "clast_manifest_append: expected 11 args, got $#"
     return 2
   fi
   local session_id="$1" source="$2" snapshot="$3" source_mtime="$4" source_size="$5" day_bucket="$6"
@@ -38,6 +45,11 @@ clast_manifest_append() {
   # ("" → stored as JSON null). Readers prefer these over re-reading the
   # snapshot file, falling back to the file when a line predates the cache.
   local msg_count="$7" first_ts="$8" last_ts="$9"
+  # Session classification (clast-classify-lib.bash): counts of real user
+  # prompts and assistant replies. A session is a no-op (auto-dismissed by
+  # wake) when either is 0. Cached here so readers never re-open the
+  # transcript; legacy lines lack them and readers recompute on demand.
+  local user_msg_count="${10}" assistant_msg_count="${11}"
   local field
   for field in session_id source snapshot source_mtime source_size day_bucket; do
     if [[ -z "${!field}" ]]; then
@@ -51,6 +63,14 @@ clast_manifest_append() {
   fi
   if ! [[ "$msg_count" =~ ^[0-9]+$ ]]; then
     clast_log_error "clast_manifest_append: msg_count must be a non-negative integer, got '$msg_count'"
+    return 2
+  fi
+  if ! [[ "$user_msg_count" =~ ^[0-9]+$ ]]; then
+    clast_log_error "clast_manifest_append: user_msg_count must be a non-negative integer, got '$user_msg_count'"
+    return 2
+  fi
+  if ! [[ "$assistant_msg_count" =~ ^[0-9]+$ ]]; then
+    clast_log_error "clast_manifest_append: assistant_msg_count must be a non-negative integer, got '$assistant_msg_count'"
     return 2
   fi
 
@@ -74,7 +94,9 @@ clast_manifest_append() {
     --argjson msg_count "$msg_count" \
     --arg first_ts "$first_ts" \
     --arg last_ts "$last_ts" \
-    '{session_id: $session_id, source: $source, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: $source_size, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end)}')" || {
+    --argjson user_msg_count "$user_msg_count" \
+    --argjson assistant_msg_count "$assistant_msg_count" \
+    '{session_id: $session_id, source: $source, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: $source_size, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end), user_msg_count: $user_msg_count, assistant_msg_count: $assistant_msg_count}')" || {
     clast_log_error "clast_manifest_append: jq failed to build manifest line"
     return 1
   }
@@ -205,6 +227,12 @@ clast_manifest_rebuild_from_disk() {
       last_ts="$(tail -n1 "$snapshot" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || true)"
       msg_count="$(wc -l <"$snapshot" 2>/dev/null | tr -d ' ')"
       [[ "$msg_count" =~ ^[0-9]+$ ]] || msg_count=0
+      # Session classification counts are equally recoverable from the copy.
+      local user_msg_count assistant_msg_count
+      IFS=$'\t' read -r user_msg_count assistant_msg_count \
+        < <(clast_session_msg_counts "$snapshot")
+      [[ "$user_msg_count" =~ ^[0-9]+$ ]] || user_msg_count=0
+      [[ "$assistant_msg_count" =~ ^[0-9]+$ ]] || assistant_msg_count=0
       line="$(jq -c -n \
         --arg session_id "$session_id" \
         --arg snapshot "${snapshot#"$journal_dir/"}" \
@@ -214,7 +242,9 @@ clast_manifest_rebuild_from_disk() {
         --argjson msg_count "$msg_count" \
         --arg first_ts "$first_ts" \
         --arg last_ts "$last_ts" \
-        '{session_id: $session_id, source: null, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: 0, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end)}')" || {
+        --argjson user_msg_count "$user_msg_count" \
+        --argjson assistant_msg_count "$assistant_msg_count" \
+        '{session_id: $session_id, source: null, snapshot: $snapshot, captured_at: $captured_at, source_mtime: $source_mtime, source_size: 0, day_bucket: $day_bucket, msg_count: $msg_count, first_ts: (if $first_ts == "" then null else $first_ts end), last_ts: (if $last_ts == "" then null else $last_ts end), user_msg_count: $user_msg_count, assistant_msg_count: $assistant_msg_count}')" || {
         clast_log_error "clast_manifest_rebuild_from_disk: jq failed for '$snapshot'"
         rm -f "$tmp_file"
         return 1

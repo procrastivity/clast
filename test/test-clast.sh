@@ -191,6 +191,7 @@ _assert_plugin_assets() {
 
 declare -a suites=(
   test/test-lib.sh
+  test/test-classify.sh
   test/test-decode.sh
   test/test-dispatcher.sh
   test/test-whereami.sh

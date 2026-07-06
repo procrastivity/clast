@@ -48,6 +48,13 @@ files=$(find "$CLAST_JOURNAL_DIR/transcripts" -type f -name '*.jsonl' | wc -l | 
 assert_eq "2" "$files" "simple fresh: 2 transcript files"
 lines=$(wc -l <"$CLAST_JOURNAL_DIR/.manifest.jsonl" | tr -d ' ')
 assert_eq "2" "$lines" "simple fresh: 2 manifest lines"
+# Session-classification counts are cached on every manifest line. The simple
+# fixtures are a single user message with no assistant reply → user=1,
+# assistant=0 (a no-op / abandoned session).
+have_counts="$(jq -c 'select((.user_msg_count | type == "number") and (.assistant_msg_count | type == "number"))' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$have_counts" "simple fresh: both lines carry numeric classification counts"
+u_ok="$(jq -c 'select(.user_msg_count == 1 and .assistant_msg_count == 0)' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$u_ok" "simple fresh: counts are user=1 assistant=0"
 
 # --- simple fixture: idempotent re-run ---------------------------------------
 out="$("$CLAST_BIN" snapshot 2>/dev/null)" && rc=$? || rc=$?

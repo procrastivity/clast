@@ -193,12 +193,19 @@ c3d4e5f6-a7b8-9012-cdef-123456789012  pi-coding-agent   autopatchelf-bun        
     "day_bucket": "2026-05-30",
     "curated": false,
     "stale": false,
-    "dismissed": false
+    "dismissed": false,
+    "user_msg_count": 6,
+    "assistant_msg_count": 12,
+    "substantive": true
   }
 ]
 ```
 
 `curated: true` if there's a corresponding entry in `entries/` (joined on `session_id` via entry frontmatter). The plugin's `/wake` uses this field to iterate only uncurated sessions.
+
+`user_msg_count` / `assistant_msg_count` are the session classification counts (see [manifest line](#manifest-line)): real user prompts (excluding slash-command wrappers and meta messages) and assistant replies. They are read from the manifest cache; for legacy lines that predate the cache they are recomputed from the transcript, and are `null` when the transcript is unavailable.
+
+`substantive: false` marks a **no-op session** — one where Claude never replied (`assistant_msg_count == 0`): an empty session, a slash-command-only session (`/clear`, `/model`, `/config`), or one abandoned before any response. It is `true` when `assistant_msg_count > 0`, and — as a fail-safe — `true` whenever the counts cannot be determined. `/wake` auto-dismisses `substantive: false` sessions before calling the LLM (see [`sessions dismiss`](#clast-plumbing-sessions-dismiss-session-id--reason-text)). Note the flag is deliberately **not** gated on `user_msg_count`: a session driven by a custom slash command leaves zero prose prompts but still has assistant replies, so it stays substantive.
 
 `stale: true` when a session has been curated but its transcript was updated after the entry was written (detected by comparing the entry's `curated_source_mtime` frontmatter field against the manifest's current `source_mtime`). Legacy entries without `curated_source_mtime` are conservatively treated as not stale.
 
@@ -212,7 +219,9 @@ Mark one or more sessions as dismissed so they are excluded from future `clast-p
 |---|---|---|
 | `--reason TEXT` | none | Optional note recorded alongside the dismissal. |
 
-Each ID must be a valid session UUID. Already-dismissed IDs are skipped (idempotent). Dismissals are appended to `.dismissed.jsonl` in the journal root (one JSON record per line: `session_id`, `dismissed_at` timestamp, and `reason` — `null` when omitted). With `--json`, prints `{"dismissed": N}` where N is the count newly added.
+Each ID must be a valid session UUID. Already-dismissed IDs are skipped (idempotent). Dismissals are appended to `.dismissed.jsonl` in the journal root (one JSON record per line: `session_id`, `dismissed_at` timestamp, and `reason` — `null` when omitted). With `--json`, prints `{"dismissed": N}` where N is the count newly added. Reverse a dismissal with `clast-plumbing sessions undismiss <session-id>...`.
+
+Both `/wake` flows use this to auto-dismiss **no-op sessions** (`substantive: false` — see [`sessions --json`](#output-json-1)) before any LLM call, recording `reason: "auto: no substantive content (empty / slash-command-only)"`. This is reversible via `undismiss`, and can be disabled by setting `CLAST_WAKE_AUTODISMISS_NOOP=0`.
 
 ---
 
@@ -244,6 +253,9 @@ start:            2026-05-30 09:15:23
 end:              2026-05-30 11:48:07
 duration:         2h 32m
 msg_count:        47 (approx)
+user_msgs:        6
+assistant_msgs:   12
+substantive:      yes
 snapshot:         ~/.claude/journal/transcripts/2026-05-30/-home-beau-code-xesapps/a1b2c3....jsonl
 curated:          no
 first_prompt:     "Let's investigate why vw_Consumer_Fields_All is slow…"
@@ -252,7 +264,7 @@ last_prompt:      "Can we benchmark the new query plan?"
 
 With `--full`, appends `## First 5 turns` and `## Last 5 turns` sections in plain text.
 
-`--json` produces the same data as a JSON object.
+`--json` produces the same data as a JSON object, including `user_msg_count`, `assistant_msg_count`, and `substantive` (see [`sessions --json`](#output-json-1) for their meaning). `first_prompt` / `last_prompt` report the first/last *real* user prompt, skipping slash-command wrappers and meta messages.
 
 ---
 
@@ -617,18 +629,22 @@ machine:        beau-wsl2
   "day_bucket": "2026-05-30",
   "msg_count": 248,
   "first_ts": "2026-05-30T15:01:22.118Z",
-  "last_ts": "2026-05-30T16:30:54.902Z"
+  "last_ts": "2026-05-30T16:30:54.902Z",
+  "user_msg_count": 18,
+  "assistant_msg_count": 22
 }
 ```
 
 The first seven fields (`session_id` … `day_bucket`) are always present and required. Lookups use "most recent line wins" semantics for a given `session_id`.
 
-`msg_count`, `first_ts`, and `last_ts` are cached per-session metadata written at snapshot time so that `sessions`, `projects`, `stats`, and `show` need not re-read the transcript to compute counts and start/end times:
+`msg_count`, `first_ts`, `last_ts`, `user_msg_count`, and `assistant_msg_count` are cached per-session metadata written at snapshot time so that `sessions`, `projects`, `stats`, and `show` need not re-read the transcript to compute counts, start/end times, and session classification:
 
 - `msg_count` — transcript line count (`wc -l` semantics).
 - `first_ts` / `last_ts` — the `.timestamp` of the transcript's first / last line, or `null` when that line carries no timestamp.
+- `user_msg_count` — count of real user prompts: `user`-role messages that are non-empty, not meta, and not slash-command wrappers (`<command-name>`, `<local-command-*>`, …).
+- `assistant_msg_count` — count of `assistant`-role messages (presence, not text — a tool-only reply still counts). Drives the `substantive` flag surfaced by `sessions`/`show`: `substantive == (assistant_msg_count > 0)`.
 
-These three are **optional**: manifest lines written before this cache was introduced omit them, and `doctor --fix` backfills them on rebuild. Readers fall back to reading the snapshot file (and ultimately `source_mtime`) when a cache field is absent or `null`.
+These cache fields are **optional**: manifest lines written before a given cache field was introduced omit it, and `doctor --fix` backfills them on rebuild. Readers fall back to reading the snapshot file (and ultimately `source_mtime`) when a cache field is absent or `null`.
 
 ### Registry line (in `projects.json`)
 

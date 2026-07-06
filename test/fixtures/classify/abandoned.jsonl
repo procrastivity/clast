@@ -1,0 +1,2 @@
+{"type":"mode","mode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"can you refactor the auth module?"}]},"timestamp":"2026-05-30T11:00:00.000Z"}

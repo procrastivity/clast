@@ -1,0 +1,6 @@
+{"type":"mode","mode":"default"}
+{"type":"permission-mode","mode":"default"}
+{"type":"system","subtype":"local_command","content":"<command-name>/model</command-name>\n            <command-message>model</command-message>"}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>Kept model as Opus 4.8</local-command-stdout>"}
+{"type":"last-prompt"}
+{"type":"file-history-snapshot"}

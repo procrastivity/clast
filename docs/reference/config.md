@@ -48,6 +48,17 @@ Only used by the porcelain [`clast wake` and `clast brief`](../guides/run-withou
 
 All three must be set for `clast wake`/`clast brief` to run.
 
+### `[wake]`
+
+Tunables for the `/wake` curation flow. `CLAST_WAKE_AUTODISMISS_NOOP` is honored by
+both the porcelain `clast wake` and the Claude Code `/wake` skill; `CLAST_WAKE_SINCE`
+is read by the porcelain. There is no TOML equivalent yet; these are env-only.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `CLAST_WAKE_AUTODISMISS_NOOP` | `1` (on) | When on, `/wake` auto-dismisses **no-op** sessions (`substantive: false` — empty, slash-command-only, or abandoned before any reply) before calling the LLM. Set to `0` to disable and review every uncurated session. Auto-dismissals are reversible with `clast-plumbing sessions undismiss`. |
+| `CLAST_WAKE_SINCE` | `-14d` | How far back the porcelain `clast wake` scans for uncurated sessions (any value accepted by [Date parsing](cli.md#date-parsing)). A shorter window keeps the scan fast on large journals. |
+
 ## Sample
 
 A heavily-commented sample lives at

@@ -5,6 +5,7 @@
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
+# shellcheck source=lib/clast/clast-classify-lib.bash
 # shellcheck source=lib/clast/clast-registry-lib.bash
 # shellcheck source=lib/clast/clast-decode-lib.bash
 
@@ -113,6 +114,25 @@ clast_cmd_show() {
   start_ts="${first_ts:-$source_mtime}"
   end_ts="${last_ts:-$source_mtime}"
 
+  # Session classification (clast-classify-lib.bash): prefer cached counts on
+  # the manifest line, else recompute from the transcript (always readable
+  # here — the -r guard above already returned otherwise). substantive is true
+  # iff Claude produced at least one reply (assistant_msg_count > 0) — this is
+  # the no-op signal wake keys on; see sessions.bash for the full rationale.
+  local user_count assistant_count substantive
+  IFS=$'\t' read -r user_count assistant_count \
+    < <(jq -r '[(.user_msg_count // ""), (.assistant_msg_count // "")] | @tsv' <<<"$line")
+  if ! [[ "$user_count" =~ ^[0-9]+$ && "$assistant_count" =~ ^[0-9]+$ ]]; then
+    IFS=$'\t' read -r user_count assistant_count < <(clast_session_msg_counts "$abs_path")
+    [[ "$user_count" =~ ^[0-9]+$ ]] || user_count=0
+    [[ "$assistant_count" =~ ^[0-9]+$ ]] || assistant_count=0
+  fi
+  if (( assistant_count > 0 )); then
+    substantive=true
+  else
+    substantive=false
+  fi
+
   # first_prompt / last_prompt — best-effort scan of user messages.
   # These pipelines must never abort the command: malformed JSONL lines are
   # routine, and the fields are explicitly documented as best-effort.
@@ -176,6 +196,9 @@ clast_cmd_show() {
       --argjson curated "$curated" \
       --arg first_prompt "$first_prompt" \
       --arg last_prompt "$last_prompt" \
+      --argjson user_msg_count "$user_count" \
+      --argjson assistant_msg_count "$assistant_count" \
+      --argjson substantive "$substantive" \
       '{
          session_id: $session_id,
          project: $project,
@@ -189,7 +212,10 @@ clast_cmd_show() {
          day_bucket: $day_bucket,
          curated: $curated,
          first_prompt: (if $first_prompt == "" then null else $first_prompt end),
-         last_prompt: (if $last_prompt == "" then null else $last_prompt end)
+         last_prompt: (if $last_prompt == "" then null else $last_prompt end),
+         user_msg_count: $user_msg_count,
+         assistant_msg_count: $assistant_msg_count,
+         substantive: $substantive
        }')"
     if (( include_turns == 1 )); then
       # Feed the (potentially multi-hundred-KB) turn arrays via stdin, not as
@@ -215,6 +241,13 @@ clast_cmd_show() {
       printf 'duration:         %s\n' "$duration_str"
     fi
     printf 'msg_count:        %s (approx)\n' "$msgs"
+    printf 'user_msgs:        %s\n' "$user_count"
+    printf 'assistant_msgs:   %s\n' "$assistant_count"
+    if [[ "$substantive" == "true" ]]; then
+      printf 'substantive:      yes\n'
+    else
+      printf 'substantive:      no (no-op — empty / slash-command-only)\n'
+    fi
     printf 'snapshot:         %s\n' "$abs_path"
     if [[ "$curated" == "true" ]]; then
       printf 'curated:          yes\n'
@@ -238,14 +271,20 @@ clast_cmd_show() {
 }
 
 # _clast_show_user_messages <abs_path>
-#   Stream user-message text content, one per line. Empty lines dropped.
+#   Stream real user-prompt text content, one per line. Empty lines, meta
+#   messages, and slash-command wrappers (`/clear`, `/model`, …) are dropped
+#   so first_prompt/last_prompt reflect what the user actually typed — not a
+#   `<local-command-caveat>…` marker. Shares CLAST_COMMAND_MARKER_RE with the
+#   classifier (clast-classify-lib.bash) so the two can't drift.
 _clast_show_user_messages() {
   local path="$1"
-  jq -r '
+  jq -r --arg cmd_re "$CLAST_COMMAND_MARKER_RE" '
     select((.role // .message.role // .type) == "user")
+    | select((.isMeta // false) != true)
     | (.message.content // .content // empty)
     | if type == "array" then map(.text? // "") | join(" ") else . end
     | select(. != null and . != "")
+    | select(test($cmd_re) | not)
   ' "$path" 2>/dev/null
 }
 

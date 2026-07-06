@@ -7,6 +7,7 @@
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
+# shellcheck source=lib/clast/clast-classify-lib.bash
 # shellcheck source=lib/clast/clast-decode-lib.bash
 # shellcheck source=lib/clast/clast-registry-lib.bash
 
@@ -112,6 +113,7 @@ clast_cmd_snapshot() {
   if [[ -d "$projects_dir" ]]; then
     local source segment session_id mtime_epoch mtime_iso source_size
     local first_ts ts_epoch day_bucket last_ts msg_count
+    local user_msg_count assistant_msg_count
     local dest_rel dest dest_dir tmp
     while IFS= read -r -d '' source; do
       segment="$(basename "$(dirname "$source")")"
@@ -175,6 +177,18 @@ clast_cmd_snapshot() {
         continue
       fi
 
+      # Session classification (clast-classify-lib.bash): count real user
+      # prompts and assistant replies so wake can auto-dismiss no-op sessions
+      # (empty / slash-command-only) without an LLM call. Cached on the
+      # manifest line alongside msg_count so readers never re-open the file.
+      # Computed AFTER the dedupe check: unlike the head/tail/wc reads above,
+      # this streams the whole transcript through jq, so we must not pay it for
+      # already-captured sessions skipped on every wake/hook run.
+      IFS=$'\t' read -r user_msg_count assistant_msg_count \
+        < <(clast_session_msg_counts "$source")
+      [[ "$user_msg_count" =~ ^[0-9]+$ ]] || user_msg_count=0
+      [[ "$assistant_msg_count" =~ ^[0-9]+$ ]] || assistant_msg_count=0
+
       dest_rel="transcripts/$day_bucket/$segment/$session_id.jsonl"
       dest="$journal_dir/$dest_rel"
 
@@ -203,7 +217,7 @@ clast_cmd_snapshot() {
         # Invariant: a manifest line implies the dest file exists. If the
         # append fails the dest is an orphan; doctor (step 10) will reap
         # it, and a re-run of snapshot overwrites + retries the append.
-        if ! clast_manifest_append "$session_id" "$source" "$dest_rel" "$mtime_iso" "$source_size" "$day_bucket" "$msg_count" "$first_ts" "$last_ts"; then
+        if ! clast_manifest_append "$session_id" "$source" "$dest_rel" "$mtime_iso" "$source_size" "$day_bucket" "$msg_count" "$first_ts" "$last_ts" "$user_msg_count" "$assistant_msg_count"; then
           error_lines+=("$(jq -cn --arg f "$source" --arg r "manifest append failed" '{file:$f,reason:$r}')")
           continue
         fi
