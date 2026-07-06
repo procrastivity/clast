@@ -169,15 +169,6 @@ clast_cmd_snapshot() {
       msg_count="$(wc -l <"$source" 2>/dev/null | tr -d ' ')"
       [[ "$msg_count" =~ ^[0-9]+$ ]] || msg_count=0
 
-      # Session classification (clast-classify-lib.bash): count real user
-      # prompts and assistant replies so wake can auto-dismiss no-op sessions
-      # (empty / slash-command-only) without an LLM call. Cached on the
-      # manifest line alongside msg_count so readers never re-open the file.
-      IFS=$'\t' read -r user_msg_count assistant_msg_count \
-        < <(clast_session_msg_counts "$source")
-      [[ "$user_msg_count" =~ ^[0-9]+$ ]] || user_msg_count=0
-      [[ "$assistant_msg_count" =~ ^[0-9]+$ ]] || assistant_msg_count=0
-
       # Dedup on (session_id, source_mtime). Mtime — not ctime or size —
       # is the manifest's "most recent line wins" key; Claude Code's
       # writer bumps mtime whenever a session grows.
@@ -185,6 +176,18 @@ clast_cmd_snapshot() {
         skipped=$((skipped + 1))
         continue
       fi
+
+      # Session classification (clast-classify-lib.bash): count real user
+      # prompts and assistant replies so wake can auto-dismiss no-op sessions
+      # (empty / slash-command-only) without an LLM call. Cached on the
+      # manifest line alongside msg_count so readers never re-open the file.
+      # Computed AFTER the dedupe check: unlike the head/tail/wc reads above,
+      # this streams the whole transcript through jq, so we must not pay it for
+      # already-captured sessions skipped on every wake/hook run.
+      IFS=$'\t' read -r user_msg_count assistant_msg_count \
+        < <(clast_session_msg_counts "$source")
+      [[ "$user_msg_count" =~ ^[0-9]+$ ]] || user_msg_count=0
+      [[ "$assistant_msg_count" =~ ^[0-9]+$ ]] || assistant_msg_count=0
 
       dest_rel="transcripts/$day_bucket/$segment/$session_id.jsonl"
       dest="$journal_dir/$dest_rel"
