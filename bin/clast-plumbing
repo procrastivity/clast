@@ -18,6 +18,8 @@ source "$CLAST_LIB/clast-decode-lib.bash"
 source "$CLAST_LIB/clast-registry-lib.bash"
 # shellcheck source=lib/clast/clast-manifest-lib.bash
 source "$CLAST_LIB/clast-manifest-lib.bash"
+# shellcheck source=lib/clast/clast-classify-lib.bash
+source "$CLAST_LIB/clast-classify-lib.bash"
 
 # --- Global flag parsing -------------------------------------------------
 #

@@ -6,6 +6,7 @@
 # shellcheck shell=bash
 # shellcheck source=lib/clast/clast-lib.bash
 # shellcheck source=lib/clast/clast-manifest-lib.bash
+# shellcheck source=lib/clast/clast-classify-lib.bash
 # shellcheck source=lib/clast/clast-registry-lib.bash
 # shellcheck source=lib/clast/clast-decode-lib.bash
 # shellcheck source=lib/clast/clast-dismissed-lib.bash
@@ -303,11 +304,12 @@ clast_cmd_sessions() {
   # source_mtime.
   local -a rows=()
   local sid snapshot day_bucket mtime seg abs_path msgs
-  local cached_msgs cached_first cached_last
+  local cached_msgs cached_first cached_last cached_user cached_assistant
+  local user_count assistant_count substantive
   local first_ts last_ts start_ts end_ts curated stale branch slug
   declare -A seg_slug=()
 
-  while IFS=$'\t' read -r sid snapshot day_bucket mtime cached_msgs cached_first cached_last; do
+  while IFS=$'\t' read -r sid snapshot day_bucket mtime cached_msgs cached_first cached_last cached_user cached_assistant; do
     [[ -z "$sid" ]] && continue
     # Skip dismissed sessions early, before any per-session file work.
     if [[ -n "${dismissed_ids[$sid]:-}" ]]; then
@@ -349,6 +351,40 @@ clast_cmd_sessions() {
     fi
     start_ts="${first_ts:-$mtime}"
     end_ts="${last_ts:-$mtime}"
+
+    # Session classification (clast-classify-lib.bash). Prefer the cached
+    # counts on the manifest line; recompute from the transcript for legacy
+    # lines that predate them. When neither is available (snapshot missing),
+    # leave the counts unknown and fall SAFE — substantive=true — so wake
+    # never auto-dismisses a session we couldn't classify. Note: a line may
+    # carry cached_msgs (step 21) yet lack these counts, so resolve them
+    # independently of the msg_count branch above.
+    if [[ -n "$cached_user" ]]; then
+      user_count="$cached_user"
+      assistant_count="$cached_assistant"
+    elif [[ -r "$abs_path" ]]; then
+      IFS=$'\t' read -r user_count assistant_count < <(clast_session_msg_counts "$abs_path")
+      [[ "$user_count" =~ ^[0-9]+$ ]] || user_count=""
+      [[ "$assistant_count" =~ ^[0-9]+$ ]] || assistant_count=""
+    else
+      user_count=""
+      assistant_count=""
+    fi
+    # substantive iff Claude actually produced a reply. assistant_msg_count==0
+    # captures BOTH no-op shapes the feature targets: empty / slash-command-only
+    # sessions (/clear, /model, /config) AND sessions where the user typed but
+    # quit before any response. Deliberately NOT gated on user_msg_count: a
+    # custom slash command (e.g. /review) leaves zero prose prompts yet drives
+    # real assistant work — those must be kept. Unknown count → SAFE (true).
+    if [[ "$assistant_count" =~ ^[0-9]+$ ]]; then
+      if (( assistant_count > 0 )); then
+        substantive=true
+      else
+        substantive=false
+      fi
+    else
+      substantive=true
+    fi
 
     # Resolve the slug once per unique segment (segments repeat heavily
     # across sessions; each resolve forks several jq calls).
@@ -395,6 +431,9 @@ clast_cmd_sessions() {
       --argjson curated "$curated" \
       --argjson stale "$stale" \
       --argjson dismissed "$is_dismissed" \
+      --arg user_msg_count "$user_count" \
+      --arg assistant_msg_count "$assistant_count" \
+      --argjson substantive "$substantive" \
       '{
          session_id: $session_id,
          project: $project,
@@ -407,7 +446,10 @@ clast_cmd_sessions() {
          day_bucket: $day_bucket,
          curated: $curated,
          stale: $stale,
-         dismissed: $dismissed
+         dismissed: $dismissed,
+         user_msg_count: (if $user_msg_count == "" then null else ($user_msg_count | tonumber) end),
+         assistant_msg_count: (if $assistant_msg_count == "" then null else ($assistant_msg_count | tonumber) end),
+         substantive: $substantive
        }')")
   done < <(
     if [[ -f "$manifest_path" ]]; then
@@ -418,7 +460,8 @@ clast_cmd_sessions() {
           ({}; .[$l.session_id] = $l)
         | to_entries[] | .value
         | [.session_id, .snapshot, .day_bucket, .source_mtime,
-           .msg_count, .first_ts, .last_ts] | @tsv
+           .msg_count, .first_ts, .last_ts,
+           .user_msg_count, .assistant_msg_count] | @tsv
       ' "$manifest_path"
     fi
   )

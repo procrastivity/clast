@@ -189,6 +189,13 @@ row="$(jq -c --arg s "$SID_CACHE" '.[] | select(.session_id == $s)' <<<"$out")"
 assert_eq "248" "$(jq -r '.msg_count_approx' <<<"$row")" "cached: msg_count_approx from manifest (file absent)"
 assert_eq "2026-05-30T15:01:22.118Z" "$(jq -r '.start' <<<"$row")" "cached: start from cached first_ts"
 assert_eq "2026-05-30T16:30:54.902Z" "$(jq -r '.end' <<<"$row")" "cached: end from cached last_ts"
+# This synthetic line carries msg_count but NOT the classification counts, and
+# its file is absent — the counts can't be determined, so they surface as null
+# and substantive falls SAFE to true (wake must never auto-dismiss a session it
+# couldn't classify).
+assert_eq "null" "$(jq -r '.user_msg_count' <<<"$row")" "cached: user_msg_count null when unknowable"
+assert_eq "null" "$(jq -r '.assistant_msg_count' <<<"$row")" "cached: assistant_msg_count null when unknowable"
+assert_eq "true" "$(jq -r '.substantive' <<<"$row")" "cached: substantive fail-safe true when counts unknown"
 teardown_test_journal
 
 # --- legacy line (no cache fields): falls back to file, start/end=mtime -----
@@ -204,6 +211,20 @@ row="$(jq -c --arg s "$SID_LEGACY" '.[] | select(.session_id == $s)' <<<"$out")"
 assert_eq "0" "$(jq -r '.msg_count_approx' <<<"$row")" "legacy: msg_count_approx falls back to 0 (file absent)"
 assert_eq "2026-05-30T17:45:00Z" "$(jq -r '.start' <<<"$row")" "legacy: start falls back to source_mtime"
 assert_eq "2026-05-30T17:45:00Z" "$(jq -r '.end' <<<"$row")" "legacy: end falls back to source_mtime"
+assert_eq "null" "$(jq -r '.user_msg_count' <<<"$row")" "legacy: user_msg_count null (file absent)"
+assert_eq "true" "$(jq -r '.substantive' <<<"$row")" "legacy: substantive fail-safe true (file absent)"
+teardown_test_journal
+
+# --- classification recomputed from the transcript for legacy lines ---------
+# The journal-seed manifest predates the cached counts, but the transcript is
+# present, so sessions recomputes user/assistant counts on the fly. Session
+# 22222222 has 2 real user prompts and 2 assistant replies → substantive.
+_seed_journal
+out="$(CLAST_NOW_EPOCH="$FROZEN_EPOCH" "$CLAST_BIN" --json sessions --day 2026-05-30 2>/dev/null)"
+row="$(jq -c '.[] | select(.session_id == "22222222-2222-4222-8222-222222222222")' <<<"$out")"
+assert_eq "2" "$(jq -r '.user_msg_count' <<<"$row")" "recompute: user_msg_count from transcript"
+assert_eq "2" "$(jq -r '.assistant_msg_count' <<<"$row")" "recompute: assistant_msg_count from transcript"
+assert_eq "true" "$(jq -r '.substantive' <<<"$row")" "recompute: substantive true"
 teardown_test_journal
 
 # === clast show =============================================================
@@ -256,6 +277,10 @@ fi
 assert_eq "1" "$(jq '.first_turns | length' <<<"$out")" "show --json --full: first_turns length 1"
 assert_eq "1" "$(jq '.last_turns | length' <<<"$out")" "show --json --full: last_turns length 1"
 assert_eq "user" "$(jq -r '.first_turns[0].role' <<<"$out")" "show --json --full: first turn role"
+# Classification fields (recomputed from the transcript for this legacy line).
+assert_eq "2" "$(jq -r '.user_msg_count' <<<"$out")" "show --json: user_msg_count"
+assert_eq "2" "$(jq -r '.assistant_msg_count' <<<"$out")" "show --json: assistant_msg_count"
+assert_eq "true" "$(jq -r '.substantive' <<<"$out")" "show --json: substantive"
 
 # --- large multi-line session: must not SIGPIPE under pipefail (regression) -
 # A session whose concatenated user-message text exceeds the 64KB pipe buffer

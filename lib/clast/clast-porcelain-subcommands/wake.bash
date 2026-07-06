@@ -255,6 +255,34 @@ clast_cmd_wake() {
     clast_porcelain_die "failed to list sessions"
   }
 
+  # Auto-dismiss no-op sessions before any LLM work: sessions where Claude
+  # never replied (substantive == false) — empty sessions, slash-command-only
+  # sessions (/clear, /model, /config), and sessions abandoned before any
+  # response. This is a deterministic pre-filter — the LLM is never called for
+  # them. Sessions driven by a custom slash command still have assistant
+  # replies, so they are kept. Reversible via `clast undismiss <id>`. Opt out
+  # by setting CLAST_WAKE_AUTODISMISS_NOOP=0.
+  local auto_dismissed_count=0
+  if [[ "${CLAST_WAKE_AUTODISMISS_NOOP:-1}" != "0" ]]; then
+    local noop_ids noop_id
+    noop_ids="$(jq -r '
+      .[] | select(.substantive == false and .curated == false and .dismissed == false)
+      | .session_id
+    ' <<<"$sessions_json")"
+    while IFS= read -r noop_id; do
+      [[ -z "$noop_id" ]] && continue
+      if clast-plumbing sessions dismiss "$noop_id" \
+        --reason "auto: no substantive content (empty / slash-command-only)" >/dev/null 2>&1; then
+        auto_dismissed_count=$(( auto_dismissed_count + 1 ))
+      fi
+    done <<<"$noop_ids"
+    if (( auto_dismissed_count > 0 )); then
+      clast_porcelain_info "Auto-dismissed $auto_dismissed_count no-op session(s) (empty / slash-command-only)."
+      # Drop the just-dismissed rows from the working set so they don't reappear.
+      sessions_json="$(jq -c '[.[] | select(.substantive != false or .curated == true)]' <<<"$sessions_json")"
+    fi
+  fi
+
   local uncurated
   uncurated="$(jq -c '[.[] | select(.curated == false or .stale == true)]' <<<"$sessions_json")"
   local total
@@ -473,6 +501,9 @@ Revisions requested by user: ${edit_extra}"
   printf '\n'
   _clast_wake_separator "Summary"
   clast_porcelain_info "  Curated: $curated_count session(s) across $unique_projects project(s)"
+  if (( auto_dismissed_count > 0 )); then
+    clast_porcelain_info "  Auto-dismissed (no-op): $auto_dismissed_count session(s)"
+  fi
   if (( dismissed_count > 0 )); then
     clast_porcelain_info "  Dismissed: $dismissed_count session(s)"
   fi

@@ -1,0 +1,8 @@
+{"type":"mode","mode":"default"}
+{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"add a --json flag to the sessions command"}]},"timestamp":"2026-05-30T11:00:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Sure, I'll add the flag."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"done"}]}}
+{"type":"user","message":{"role":"user","content":"now write a test for it"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here is the test."}]}}
+{"type":"summary","summary":"added json flag"}

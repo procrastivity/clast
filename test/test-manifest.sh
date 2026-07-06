@@ -28,7 +28,9 @@ clast_manifest_append \
   "2025-05-30" \
   "42" \
   "2025-05-30T11:00:00.111Z" \
-  "2025-05-30T11:54:59.999Z"
+  "2025-05-30T11:54:59.999Z" \
+  "5" \
+  "7"
 assert_file_exists "$CLAST_JOURNAL_DIR/.manifest.jsonl" "append creates manifest"
 line="$(clast_manifest_lookup "$SID_A")"
 assert_eq "$SID_A" "$(jq -r '.session_id' <<<"$line")" "lookup session_id"
@@ -41,6 +43,11 @@ assert_eq "42" "$(jq -r '.msg_count' <<<"$line")" "msg_count value"
 assert_eq "number" "$(jq -r '.msg_count | type' <<<"$line")" "msg_count is numeric"
 assert_eq "2025-05-30T11:00:00.111Z" "$(jq -r '.first_ts' <<<"$line")" "first_ts value"
 assert_eq "2025-05-30T11:54:59.999Z" "$(jq -r '.last_ts' <<<"$line")" "last_ts value"
+# --- session classification counts ---
+assert_eq "5" "$(jq -r '.user_msg_count' <<<"$line")" "user_msg_count value"
+assert_eq "number" "$(jq -r '.user_msg_count | type' <<<"$line")" "user_msg_count is numeric"
+assert_eq "7" "$(jq -r '.assistant_msg_count' <<<"$line")" "assistant_msg_count value"
+assert_eq "number" "$(jq -r '.assistant_msg_count | type' <<<"$line")" "assistant_msg_count is numeric"
 unset CLAST_NOW_EPOCH
 teardown_test_journal
 
@@ -49,7 +56,7 @@ setup_test_journal >/dev/null
 clast_manifest_append \
   "$SID_A" "/tmp/proj/$SID_A.jsonl" \
   "transcripts/2025-05-30/-tmp-proj/$SID_A.jsonl" \
-  "2025-05-30T11:55:00Z" "1234" "2025-05-30" "0" "" ""
+  "2025-05-30T11:55:00Z" "1234" "2025-05-30" "0" "" "" "0" "0"
 line="$(clast_manifest_lookup "$SID_A")"
 assert_eq "null" "$(jq -r '.first_ts | if . == null then "null" else . end' <<<"$line")" "empty first_ts -> JSON null"
 assert_eq "null" "$(jq -r '.last_ts | if . == null then "null" else . end' <<<"$line")" "empty last_ts -> JSON null"
@@ -60,18 +67,34 @@ setup_test_journal >/dev/null
 err="$(clast_manifest_append a b c 2>&1)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "append wrong arity returns 2"
 case "$err" in
-  *expected\ 9\ args*) _clast_test_pass "append arity error message" ;;
+  *expected\ 11\ args*) _clast_test_pass "append arity error message" ;;
   *) _clast_test_fail "append arity error message (got: $err)" ;;
 esac
 teardown_test_journal
 
 # --- msg_count must be a non-negative integer -------------------------------
 setup_test_journal >/dev/null
-err="$(clast_manifest_append "$SID_A" s snap 2025-05-30T11:55:00Z 1234 2025-05-30 notanint x y 2>&1)" && rc=$? || rc=$?
+err="$(clast_manifest_append "$SID_A" s snap 2025-05-30T11:55:00Z 1234 2025-05-30 notanint x y 0 0 2>&1)" && rc=$? || rc=$?
 assert_eq "2" "$rc" "append non-integer msg_count returns 2"
 case "$err" in
   *msg_count*) _clast_test_pass "append msg_count error message" ;;
   *) _clast_test_fail "append msg_count error message (got: $err)" ;;
+esac
+teardown_test_journal
+
+# --- user/assistant counts must be non-negative integers --------------------
+setup_test_journal >/dev/null
+err="$(clast_manifest_append "$SID_A" s snap 2025-05-30T11:55:00Z 1234 2025-05-30 5 x y notanint 0 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "append non-integer user_msg_count returns 2"
+case "$err" in
+  *user_msg_count*) _clast_test_pass "append user_msg_count error message" ;;
+  *) _clast_test_fail "append user_msg_count error message (got: $err)" ;;
+esac
+err="$(clast_manifest_append "$SID_A" s snap 2025-05-30T11:55:00Z 1234 2025-05-30 5 x y 0 notanint 2>&1)" && rc=$? || rc=$?
+assert_eq "2" "$rc" "append non-integer assistant_msg_count returns 2"
+case "$err" in
+  *assistant_msg_count*) _clast_test_pass "append assistant_msg_count error message" ;;
+  *) _clast_test_fail "append assistant_msg_count error message (got: $err)" ;;
 esac
 teardown_test_journal
 
@@ -162,6 +185,12 @@ has_msg_count="$(jq -c 'select(has("msg_count"))' "$CLAST_JOURNAL_DIR/.manifest.
 assert_eq "2" "$has_msg_count" "rebuild backfills msg_count"
 msg_count_numeric="$(jq -c 'select(.msg_count | type == "number")' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
 assert_eq "2" "$msg_count_numeric" "rebuild msg_count is numeric"
+# The classification counts are likewise recoverable from the snapshot copy —
+# rebuild backfills them (both stub transcripts have no turns → 0/0).
+has_counts="$(jq -c 'select((.user_msg_count | type == "number") and (.assistant_msg_count | type == "number"))' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$has_counts" "rebuild backfills classification counts (numeric)"
+zero_counts="$(jq -c 'select(.user_msg_count == 0 and .assistant_msg_count == 0)' "$CLAST_JOURNAL_DIR/.manifest.jsonl" | grep -c .)"
+assert_eq "2" "$zero_counts" "rebuild counts are 0/0 for stub transcripts"
 teardown_test_journal
 
 # --- rebuild empty transcripts tree -----------------------------------------

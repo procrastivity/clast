@@ -58,6 +58,27 @@ $CLAST_BIN --json sessions --since -30d
 
 Filter to sessions with `curated: false` or `stale: true` (stale sessions were curated but their transcript was updated since). If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
 
+### Step 2a: Auto-dismiss no-op sessions (deterministic, no LLM)
+
+Each session row carries a deterministic `substantive` flag (computed by
+`clast-plumbing` from the transcript, cached at snapshot time). A session is
+`substantive: false` when **Claude never replied** — an empty session, one that
+contains only slash commands like `/clear`, `/model`, `/config`, or one abandoned
+before any response. These are worthless to curate. (A session driven by a *custom*
+slash command still has assistant replies, so it stays `substantive: true`.)
+
+Before generating any drafts, auto-dismiss every uncurated session with
+`substantive == false` (skip this if the user set `CLAST_WAKE_AUTODISMISS_NOOP=0`):
+
+```bash
+$CLAST_BIN sessions dismiss <session-id> --reason "auto: no substantive content (empty / slash-command-only)"
+```
+
+Do **not** call the LLM for these. Dismissal is reversible via `clast undismiss <id>`.
+Remove them from the working set, keep a count, and report it in the final summary
+(e.g. "Auto-dismissed 5 no-op session(s)."). If nothing substantive remains after this,
+print "Nothing to curate — all remaining sessions were empty or slash-command-only." and stop.
+
 ### Triage when multiple days have uncurated sessions
 
 If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage step before processing. Show a per-day breakdown:
@@ -122,6 +143,7 @@ After all sessions are processed (or user stopped early), print a summary:
 ```
 Wake complete.
 Curated: 3 sessions across 2 projects.
+Auto-dismissed (no-op): 5 sessions.
 Skipped: 1 session.
 Remaining uncurated: 0.
 
@@ -199,6 +221,7 @@ For promoted items (decisions, common-issues, workflows): currently these are tr
 ## Edge cases
 
 - **No uncurated sessions**: print "Nothing to curate — all sessions are curated or dismissed." and stop.
+- **All uncurated sessions are no-ops**: after Step 2a auto-dismisses them, nothing substantive remains — print "Nothing to curate — all remaining sessions were empty or slash-command-only." and stop.
 - **Multi-day backlog**: present the triage step (Step 2) so the user can choose scope before processing.
 - **`clast-plumbing snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
 - **`clast-plumbing show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
