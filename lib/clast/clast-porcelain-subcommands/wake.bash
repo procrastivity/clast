@@ -27,11 +27,34 @@ _clast_wake_separator() {
   printf '── %s %s\n' "$label" "$dashes"
 }
 
-# --- Preflight ---------------------------------------------------------------
+# --- Usage / preflight -------------------------------------------------------
 
+_clast_wake_usage() {
+  cat <<'EOF'
+Usage: clast wake [--auto]
+
+Interactive day curation: for each uncurated session, generate a draft journal
+entry with the LLM and accept/edit/dismiss/skip it.
+
+Flags:
+  --auto      Non-interactive: auto-accept every generated draft and write it.
+              Skips the triage menu and the per-session prompt, and does not
+              require a tty — suitable for cron/scripts. Sessions whose draft
+              fails to generate are skipped. The scan window still honors
+              CLAST_WAKE_SINCE (default -14d).
+  -h, --help  Print this usage and exit.
+
+Requires the CLAST_LLM_* env vars (see `clast --help`).
+EOF
+}
+
+# _clast_wake_preflight <auto>
+#   In interactive mode (auto=0) a tty is required so we can read choices; --auto
+#   reads nothing from the terminal, so that check is skipped.
 _clast_wake_preflight() {
-  if [[ ! -t 0 ]]; then
-    clast_porcelain_die "clast wake requires an interactive terminal (stdin is not a tty)."
+  local auto="${1:-0}"
+  if (( ! auto )) && [[ ! -t 0 ]]; then
+    clast_porcelain_die "clast wake requires an interactive terminal (stdin is not a tty). Use --auto for non-interactive curation."
   fi
   clast_porcelain_preflight_llm
 }
@@ -239,7 +262,19 @@ _clast_wake_triage() {
 # --- Main --------------------------------------------------------------------
 
 clast_cmd_wake() {
-  _clast_wake_preflight
+  local auto=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --auto)     auto=1; shift ;;
+      -h|--help)  _clast_wake_usage; return 0 ;;
+      --) shift; break ;;
+      *) clast_porcelain_log_error "wake: unknown argument '$1'"; return 2 ;;
+    esac
+  done
+
+  _clast_wake_preflight "$auto"
+
+  (( auto )) && clast_porcelain_info "Auto mode: drafts will be accepted without review."
 
   clast_porcelain_info "Snapshotting fresh transcripts..."
   if ! clast-plumbing snapshot 2>/dev/null; then
@@ -299,7 +334,8 @@ clast_cmd_wake() {
   last_day="$(jq -r '[.[].day_bucket] | sort | last' <<<"$uncurated")"
   project_count="$(jq '[.[].project] | unique | length' <<<"$uncurated")"
 
-  if (( day_count > 1 )); then
+  # Triage is an interactive scope picker; --auto processes the whole window.
+  if (( ! auto )) && (( day_count > 1 )); then
     uncurated="$(_clast_wake_triage "$uncurated" "$total" "$day_count" "$first_day" "$last_day" "$project_count")"
     total="$(jq 'length' <<<"$uncurated")"
     if (( total == 0 )); then
@@ -428,6 +464,10 @@ Revisions requested by user: ${edit_extra}"
       if ! draft="$(clast_porcelain_llm_chat "$full_system" "$full_user")"; then
         printf '\n'
         clast_porcelain_warn "LLM call failed for session $sid"
+        # No tty to prompt in auto mode — skip this session and move on.
+        if (( auto )); then
+          skipped_count=$(( skipped_count + 1 )); break
+        fi
         local retry
         printf '  [r] Retry    [s] Skip    [q] Stop\n  Choice: '
         read -r -n1 retry </dev/tty
@@ -445,11 +485,16 @@ Revisions requested by user: ${edit_extra}"
       wake_model_total="$(awk -v a="$wake_model_total" -v d="$gen_dt" 'BEGIN { printf "%.1f", a + d }')"
       clast_porcelain_info "  done in ${gen_dt}s (model total ${wake_model_total}s)"
 
-      printf '\n%s\n' "$draft"
-      printf '\n'
-
       local choice
-      choice="$(_clast_wake_prompt_choice)"
+      if (( auto )); then
+        # Auto-accept without printing the full draft or prompting — the write
+        # result below records what landed. Reuses the `a` case verbatim.
+        choice="a"
+      else
+        printf '\n%s\n' "$draft"
+        printf '\n'
+        choice="$(_clast_wake_prompt_choice)"
+      fi
 
       case "$choice" in
         a|A)
