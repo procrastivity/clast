@@ -21,6 +21,27 @@ clast_porcelain_info() { printf '%s\n' "$1"; }
 
 clast_porcelain_log_error() { printf 'clast: error: %s\n' "$1" >&2; }
 
+# --- Timing ------------------------------------------------------------------
+#
+# Shared by the porcelain subcommands that time model calls (wake, retro) so
+# their progress output stays consistent.
+
+# clast_porcelain_now — epoch seconds with fraction (GNU date). Falls back to
+# whole seconds where `%N` is unsupported (e.g. BSD/macOS date echoes a literal
+# N). Pair two readings with clast_porcelain_elapsed.
+clast_porcelain_now() {
+  local t
+  t="$(date +%s.%N 2>/dev/null)" || t="$(date +%s)"
+  [[ "$t" == *N* ]] && t="$(date +%s)"
+  printf '%s' "$t"
+}
+
+# clast_porcelain_elapsed <start> <end> — seconds between two clast_porcelain_now
+# readings, one decimal place (never negative).
+clast_porcelain_elapsed() {
+  awk -v a="$1" -v b="$2" 'BEGIN { d = b - a; if (d < 0) d = 0; printf "%.1f", d }'
+}
+
 # --- Version / usage ---------------------------------------------------------
 
 # Reuses the plumbing's clast_version helper if available (loaded by sourcing
