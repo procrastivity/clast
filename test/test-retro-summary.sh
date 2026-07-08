@@ -14,6 +14,11 @@ _CLAST_TEST_NAME="test-retro-summary"
 export PATH="$PWD/bin:$PATH"
 export TZ=UTC
 export CLAST_DAY_CUTOFF=04:00
+# Resolve prompt templates from the in-repo copy so a cold-cache summarize does
+# not emit "cannot find prompts directory" to stderr on a fresh checkout (CI has
+# no installed prompts and no CLAST_LIB). Without this the progress-silence
+# assertion below captures those loader errors and fails.
+export CLAST_LIB="$PWD/lib/clast"
 # Satisfy preflight_llm (the real curl call is stubbed away below).
 export CLAST_LLM_BASE_URL="http://stub" CLAST_LLM_API_KEY="x" CLAST_LLM_MODEL="stub"
 
