@@ -3,6 +3,20 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.6] - 2026-07-08
+
+### Build
+
+- Bump workflow actions (checkout v7, setup-node v6, install-nix-action v31) (#40)
+
+### Documentation
+
+- Add Linear project reference to AGENTS.md (#43)
+
+### Features
+
+- Show progress while summarizing (#41)
+
 ## [0.0.5] - 2026-07-06
 
 ### Bug Fixes
