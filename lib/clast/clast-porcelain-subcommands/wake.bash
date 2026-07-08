@@ -44,6 +44,13 @@ Flags:
               CLAST_WAKE_SINCE (default -14d).
   -h, --help  Print this usage and exit.
 
+Env:
+  CLAST_WAKE_SINCE            Scan window (default -14d).
+  CLAST_WAKE_AUTO_MIN_CHARS   In --auto, skip drafts whose body is shorter than
+                              this many characters (likely trivial sessions);
+                              they stay uncurated for a later interactive pass.
+                              Default 60. Set 0 to write every draft.
+
 Requires the CLAST_LLM_* env vars (see `clast --help`).
 EOF
 }
@@ -355,6 +362,11 @@ clast_cmd_wake() {
   # reviewer spends at the menu), so the run's LLM cost is legible — mirrors the
   # per-call + total timing `clast retro` reports.
   local wake_model_total="0.0"
+  # --auto guard: skip (do NOT write) a draft whose body is shorter than this
+  # many characters — likely a trivial/low-value session. Skipped sessions stay
+  # uncurated for a later interactive pass, so this is safe to tune aggressively.
+  # 0 disables the guard. Ignored in interactive mode (the reviewer decides).
+  local auto_min_chars="${CLAST_WAKE_AUTO_MIN_CHARS:-60}"
 
   while (( i < total && stop == 0 )); do
     local session
@@ -487,6 +499,20 @@ Revisions requested by user: ${edit_extra}"
 
       local choice
       if (( auto )); then
+        # Guard unattended writes: skip a draft whose body is below the minimum
+        # length (likely a trivial session). Skipped — not dismissed — so it
+        # stays uncurated and can be handled in a later interactive pass.
+        local auto_body auto_len
+        auto_body="$(_clast_wake_strip_tags_trailer "$draft")"
+        auto_body="${auto_body#"${auto_body%%[![:space:]]*}"}"   # ltrim
+        auto_body="${auto_body%"${auto_body##*[![:space:]]}"}"   # rtrim
+        auto_len=${#auto_body}
+        if (( auto_min_chars > 0 && auto_len < auto_min_chars )); then
+          clast_porcelain_info "  Draft below threshold (${auto_len} < ${auto_min_chars} chars) — skipping (stays uncurated)."
+          skipped_count=$(( skipped_count + 1 ))
+          drafting=0
+          continue
+        fi
         # Auto-accept without printing the full draft or prompting — the write
         # result below records what landed. Reuses the `a` case verbatim.
         choice="a"

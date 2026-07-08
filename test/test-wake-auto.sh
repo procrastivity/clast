@@ -28,12 +28,30 @@ source lib/clast/clast-porcelain-subcommands/wake.bash
 # --- Stubs -----------------------------------------------------------------
 
 # The draft the model "generates" — a title heading + a tags trailer so the
-# accept path exercises title/tag extraction. Set LLM_RC=1 to simulate failure.
+# accept path exercises title/tag extraction. Set LLM_RC=1 to simulate failure;
+# set DRAFT to vary the body (e.g. a short one to exercise the length guard).
 LLM_RC=0
+DRAFT='# Session: Auto Curated Thing
+
+## Goal
+Exercise the auto-accept path end to end.
+
+## What shipped
+- did the thing
+- did another thing worth recording
+
+Suggested tags: alpha, beta'
 clast_porcelain_llm_chat() {
   (( LLM_RC != 0 )) && return "$LLM_RC"
-  printf '# Session: Auto Curated Thing\n\n## What shipped\n- did the thing\n\nSuggested tags: alpha, beta\n'
+  printf '%s\n' "$DRAFT"
 }
+
+# A body-only draft that lands under the default 60-char guard.
+TINY_DRAFT='# Session: Tiny
+## Notes
+- x
+
+Suggested tags: a'
 
 # Records every `entries write` (one per auto-accept).
 WRITELOG=""
@@ -97,6 +115,42 @@ assert_eq "0" "$(_writes)" "auto fail: nothing written"
 case "$out" in *"LLM call failed"*) _clast_test_pass "auto fail: warns on failure" ;; *) _clast_test_fail "auto fail: warns on failure" >&2 ;; esac
 case "$out" in *"Skipped: 2 session(s)"*) _clast_test_pass "auto fail: both skipped" ;; *) _clast_test_fail "auto fail: both skipped"; printf '%s\n' "$out" >&2 ;; esac
 teardown_test_journal
+
+# === length guard: a too-short draft is skipped, not written ===============
+_seed
+LLM_RC=0; DRAFT="$TINY_DRAFT"
+out="$(clast_cmd_wake --auto </dev/null 2>&1)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "guard: exits 0"
+assert_eq "0" "$(_writes)" "guard: short drafts not written"
+case "$out" in *"below threshold"*"skipping (stays uncurated)"*) _clast_test_pass "guard: logs the skip reason" ;; *) _clast_test_fail "guard: logs the skip reason"; printf '%s\n' "$out" >&2 ;; esac
+case "$out" in *"Skipped: 2 session(s)"*) _clast_test_pass "guard: both short drafts skipped" ;; *) _clast_test_fail "guard: both short drafts skipped"; printf '%s\n' "$out" >&2 ;; esac
+teardown_test_journal
+
+# === length guard is tunable via CLAST_WAKE_AUTO_MIN_CHARS ==================
+# A high threshold skips even a normal draft; 0 disables the guard entirely.
+_seed
+LLM_RC=0; DRAFT="$TINY_DRAFT"
+out="$(CLAST_WAKE_AUTO_MIN_CHARS=0 clast_cmd_wake --auto </dev/null 2>&1)"
+assert_eq "2" "$(_writes)" "guard=0: writes even short drafts"
+teardown_test_journal
+
+_seed
+LLM_RC=0   # DRAFT is the default (well over 60 chars)
+out="$(CLAST_WAKE_AUTO_MIN_CHARS=100000 clast_cmd_wake --auto </dev/null 2>&1)"
+assert_eq "0" "$(_writes)" "guard=high: skips even a normal draft"
+teardown_test_journal
+
+# Reset the draft for any later cases.
+DRAFT='# Session: Auto Curated Thing
+
+## Goal
+Exercise the auto-accept path end to end.
+
+## What shipped
+- did the thing
+- did another thing worth recording
+
+Suggested tags: alpha, beta'
 
 # === without --auto and no tty, wake refuses (die) =========================
 # clast_porcelain_die calls exit, so run in a subshell to not kill the test.
