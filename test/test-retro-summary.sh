@@ -14,6 +14,11 @@ _CLAST_TEST_NAME="test-retro-summary"
 export PATH="$PWD/bin:$PATH"
 export TZ=UTC
 export CLAST_DAY_CUTOFF=04:00
+# Resolve prompt templates from the in-repo copy so a cold-cache summarize does
+# not emit "cannot find prompts directory" to stderr on a fresh checkout (CI has
+# no installed prompts and no CLAST_LIB). Without this the progress-silence
+# assertion below captures those loader errors and fails.
+export CLAST_LIB="$PWD/lib/clast"
 # Satisfy preflight_llm (the real curl call is stubbed away below).
 export CLAST_LLM_BASE_URL="http://stub" CLAST_LLM_API_KEY="x" CLAST_LLM_MODEL="stub"
 
@@ -63,8 +68,27 @@ esac
 # Day/project structure preserved from the manifest.
 case "$out" in *"== 2026-06-13 =="*"[/tmp/projA]"*) _clast_test_pass "render: day/project structure" ;; *) _clast_test_fail "render: day/project structure" >&2 ;; esac
 # Porcelain render shows the friendly project_name too (HOME=/tmp → ~/projA).
-home_out="$(HOME=/tmp clast_cmd_retro 2>/dev/null)"
+# --all so the fixtures (dated 2026-06) aren't excluded by the 7-day default.
+home_out="$(HOME=/tmp clast_cmd_retro --all 2>/dev/null)"
 case "$home_out" in *"[~/projA]"*) _clast_test_pass "render: friendly project_name" ;; *) _clast_test_fail "render: friendly project_name" >&2 ;; esac
+teardown_test_journal
+
+# === default window: last 7 days unless bounded / --all ====================
+# No window flags => a --from is injected (last 7 days) and --to stays open.
+# --all => whole corpus (from/to both null). Uses --json to read the resolved
+# bounds without depending on today's date.
+_seed
+js="$(clast_cmd_retro --json 2>/dev/null)"
+assert_eq "false" "$(jq '.from == null' <<<"$js")" "default: --from injected (bounded)"
+assert_eq "true"  "$(jq '.to == null'   <<<"$js")" "default: --to left open"
+js="$(clast_cmd_retro --all --json 2>/dev/null)"
+assert_eq "true" "$(jq '.from == null and .to == null' <<<"$js")" "--all: whole corpus (unbounded)"
+# Whole corpus reaches the 2026-06 fixtures (13/14/15 + an "unknown" bucket).
+assert_eq "4" "$(jq '.days | length' <<<"$js")" "--all: reaches the 2026-06 fixtures"
+assert_eq "true" "$(jq '[.days[].day] | any(. == "2026-06-13")' <<<"$js")" "--all: earliest fixture day present"
+# Explicit --from still overrides the default (no injection needed).
+js="$(clast_cmd_retro --from 2026-06-13 --to 2026-06-15 --json 2>/dev/null)"
+assert_eq "2026-06-13" "$(jq -r '.from' <<<"$js")" "explicit --from respected"
 teardown_test_journal
 
 # === cache hit → no LLM call ===============================================
@@ -142,6 +166,39 @@ assert_eq "0" "$(jq '[.days[].projects[].sessions[] | select(.session_id==null) 
 # Each id-less session summarized independently (two LLM calls, two cache files).
 assert_eq "2" "$(_calls)" "null sid: both id-less sessions summarized (2 calls)"
 assert_eq "2" "$(find "$CLAST_JOURNAL_DIR/.retro-summaries" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')" "null sid: a distinct cache file per id-less session"
+teardown_test_journal
+
+# === progress output goes to stderr, gated ================================
+# CLAST_RETRO_PROGRESS=always forces progress on (tests have no tty). It must
+# land on stderr (stdout stays the clean render/JSON) and carry the resolved
+# window + a per-session counter.
+_seed
+progress="$(clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+assert_eq "" "$progress" "progress: silent by default (no tty)"
+progress="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+case "$progress" in *"window: 2026-06-13 -> 2026-06-15 (work-days)"*) _clast_test_pass "progress: resolved window line" ;; *) _clast_test_fail "progress: resolved window line"; printf '%s\n' "$progress" >&2 ;; esac
+case "$progress" in *"resolved 4 session(s) across 3 day(s)"*) _clast_test_pass "progress: session/day counts" ;; *) _clast_test_fail "progress: session/day counts" >&2 ;; esac
+case "$progress" in *"[1/4]"*"[4/4]"*) _clast_test_pass "progress: per-session counter" ;; *) _clast_test_fail "progress: per-session counter" >&2 ;; esac
+# stdout must remain a clean render even with progress forced on.
+clean="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>/dev/null)"
+case "$clean" in *"clast: building work-day manifest"*) _clast_test_fail "progress: must not leak onto stdout" ;; *) _clast_test_pass "progress: stdout stays clean" ;; esac
+# CLAST_QUIET wins over the force flag.
+progress="$(CLAST_QUIET=1 CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+assert_eq "" "$progress" "progress: CLAST_QUIET silences it"
+teardown_test_journal
+
+# === progress timing: elapsed per model call + running total ===============
+# Cold cache => every session is a fresh model call, so each gets a "done in"
+# line and the final tally reports all of them queried the model.
+_seed
+progress="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+case "$progress" in *"done in "*"s (model total "*"s)"*) _clast_test_pass "timing: per-query elapsed + running total" ;; *) _clast_test_fail "timing: per-query elapsed + running total"; printf '%s\n' "$progress" >&2 ;; esac
+case "$progress" in *"summarized 4 session(s); 4 queried the model"*) _clast_test_pass "timing: final tally (cold cache)" ;; *) _clast_test_fail "timing: final tally (cold cache)"; printf '%s\n' "$progress" >&2 ;; esac
+# Warm cache => no model calls, no "done in" lines, tally shows 0 queried.
+: >"$CALLLOG"
+progress="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+case "$progress" in *"done in "*) _clast_test_fail "timing: warm cache makes no model calls" ;; *) _clast_test_pass "timing: warm cache shows no query timing" ;; esac
+case "$progress" in *"summarized 4 session(s); 0 queried the model"*) _clast_test_pass "timing: final tally (warm cache)" ;; *) _clast_test_fail "timing: final tally (warm cache)"; printf '%s\n' "$progress" >&2 ;; esac
 teardown_test_journal
 
 # === arg validation ========================================================

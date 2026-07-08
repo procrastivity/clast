@@ -9,24 +9,56 @@
 
 _clast_retrosum_usage() {
   cat <<'EOF'
-Usage: clast retro [--from DATE] [--to DATE] [--window work-days|file-dates]
-                   [--refresh] [--json]
+Usage: clast retro [--from DATE] [--to DATE] [--all]
+                   [--window work-days|file-dates] [--refresh] [--json]
 
 Condense the work retrospective (grouped by actual work day → project) into
 model-written bullets per session. Structure is deterministic; only the prose
 condensation calls the LLM. Summaries are cached per session under
 <journal>/.retro-summaries/ and reused until the session content changes.
 
+With no window flags, defaults to the last 7 days (one model call per new
+session, so an unbounded run over the whole corpus can be slow and costly).
+
 Flags:
-  --from DATE     Start of the window (inclusive). Default: corpus start.
+  --from DATE     Start of the window (inclusive). Default: 7 days ago.
   --to DATE       End of the window (inclusive). Default: corpus end.
+  --all           Cover the whole corpus (overrides the 7-day default).
   --window WHICH  work-days (default) | file-dates. See `clast-plumbing retro`.
   --refresh       Ignore cached summaries and re-summarize (rewrites the cache).
   --json          Emit the manifest with a `summary` per session (no render).
   -h, --help      Print this usage and exit.
 
+DATE accepts ISO (YYYY-MM-DD), `today`, `yesterday`, `last-week`, `-Nd`, `-Nw`.
+
 Requires the CLAST_LLM_* env vars (see `clast --help`).
 EOF
+}
+
+# _clast_retro_progress <msg>
+#   Emit a progress line to stderr so stdout (render or --json) stays clean.
+#   Silent when CLAST_QUIET is set or stderr is not a TTY; CLAST_RETRO_PROGRESS=always
+#   forces it on (used by tests, which have no tty).
+_clast_retro_progress() {
+  [[ -n "${CLAST_QUIET:-}" ]] && return 0
+  if [[ "${CLAST_RETRO_PROGRESS:-}" == "always" || -t 2 ]]; then
+    printf 'clast: %s\n' "$*" >&2
+  fi
+}
+
+# _clast_retro_now — epoch seconds with fraction (GNU date). Falls back to whole
+# seconds where `%N` is unsupported (e.g. BSD/macOS date echoes a literal N).
+_clast_retro_now() {
+  local t
+  t="$(date +%s.%N 2>/dev/null)" || t="$(date +%s)"
+  [[ "$t" == *N* ]] && t="$(date +%s)"
+  printf '%s' "$t"
+}
+
+# _clast_retro_elapsed <start> <end> — seconds between two _clast_retro_now
+# readings, one decimal place (never negative).
+_clast_retro_elapsed() {
+  awk -v a="$1" -v b="$2" 'BEGIN { d = b - a; if (d < 0) d = 0; printf "%.1f", d }'
 }
 
 # _clast_retrosum_fingerprint  (stdin → short hex/cksum on stdout)
@@ -58,8 +90,11 @@ _clast_retrosum_build_user() {
 }
 
 # _clast_retrosum_summary <project> <work_day> <session_id> <body> <cache_dir> <refresh>
-#   Echo the condensed summary. Cache hit (matching fingerprint) reuses; miss
-#   calls the LLM and writes the cache. Returns nonzero on LLM failure.
+#   Echo the condensed summary. Return code tells the caller what happened so it
+#   can time only the calls that hit the model:
+#     0 — served from cache (no model call)
+#     3 — fresh summary via a model call (success)
+#     1 — model call failed
 _clast_retrosum_summary() {
   local project="$1" work_day="$2" sid="$3" body="$4" cache_dir="$5" refresh="$6"
   local fp cache_file cached_fp
@@ -74,6 +109,7 @@ _clast_retrosum_summary() {
     fi
   fi
 
+  _clast_retro_progress "        querying model..."
   local system user summary
   system="$(clast_porcelain_load_system_prompt retro-summary-system)"
   user="$(_clast_retrosum_build_user "$project" "$work_day" "$sid" "$body")"
@@ -86,6 +122,7 @@ _clast_retrosum_summary() {
       >"$cache_file" 2>/dev/null || clast_porcelain_warn "failed to cache summary for $sid"
   fi
   printf '%s' "$summary"
+  return 3
 }
 
 # _clast_retrosum_journal_dir — resolve the journal dir (for the cache).
@@ -100,7 +137,7 @@ _clast_retrosum_journal_dir() {
 }
 
 clast_cmd_retro() {
-  local from="" to="" window="work-days" refresh=0 as_json=0
+  local from="" to="" window="work-days" refresh=0 as_json=0 all=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -108,6 +145,7 @@ clast_cmd_retro() {
       --from=*)   from="${1#*=}"; shift ;;
       --to)       [[ $# -lt 2 ]] && { clast_porcelain_log_error "retro: --to requires a value"; return 2; }; to="$2"; shift 2 ;;
       --to=*)     to="${1#*=}"; shift ;;
+      --all)      all=1; shift ;;
       --window)   [[ $# -lt 2 ]] && { clast_porcelain_log_error "retro: --window requires a value"; return 2; }; window="$2"; shift 2 ;;
       --window=*) window="${1#*=}"; shift ;;
       --refresh)  refresh=1; shift ;;
@@ -118,9 +156,17 @@ clast_cmd_retro() {
     esac
   done
 
+  # An unbounded retro means one model call per session across the whole corpus
+  # (slow and costly). Default to the last 7 days unless the caller bounded the
+  # window themselves (--from/--to) or opted into everything with --all.
+  if (( ! all )) && [[ -z "$from" && -z "$to" ]]; then
+    from="-7d"
+  fi
+
   clast_porcelain_preflight_llm
 
   # Structure + per-session bodies from the deterministic core.
+  _clast_retro_progress "building work-day manifest..."
   local -a pl=(--json retro --bodies --window "$window")
   [[ -n "$from" ]] && pl+=(--from "$from")
   [[ -n "$to" ]] && pl+=(--to "$to")
@@ -131,12 +177,26 @@ clast_cmd_retro() {
     clast_porcelain_die "retro: ${msg:-failed to build manifest}" 2
   fi
 
+  # Report the resolved window + discovered work days before the slow summarize
+  # loop — the "dates it resolved to" the user wants to see up front.
+  local pf pt pw ndays nsess daylist
+  pf="$(jq -r '.from // "(start)"'  <<<"$manifest")"
+  pt="$(jq -r '.to   // "(end)"'    <<<"$manifest")"
+  pw="$(jq -r '.window'             <<<"$manifest")"
+  ndays="$(jq '.days | length'      <<<"$manifest")"
+  nsess="$(jq '[.days[].projects[].sessions[]] | length' <<<"$manifest")"
+  daylist="$(jq -r '[.days[].day] | join(", ")' <<<"$manifest")"
+  _clast_retro_progress "window: $pf -> $pt ($pw)"
+  _clast_retro_progress "resolved $nsess session(s) across $ndays day(s): $daylist"
+
   local cache_dir
   cache_dir="$(_clast_retrosum_journal_dir)/.retro-summaries"
 
   # Summarize each session; collect key → summary.
   local -a summary_pairs=()
-  local sess sid key cache_id project work_day body title summary
+  local sess sid key cache_id project work_day body title summary pname
+  local t0 t1 dt rc
+  local idx=0 total="$nsess" queried=0 model_total="0.0"
   while IFS= read -r sess; do
     [[ -z "$sess" ]] && continue
     sid="$(jq -r '.session_id // ""' <<<"$sess")"
@@ -153,14 +213,35 @@ clast_cmd_retro() {
     work_day="$(jq -r '.work_day' <<<"$sess")"
     body="$(jq -r '.body // ""' <<<"$sess")"
     project="$(jq -r '.project_path // "(no project)"' <<<"$sess")"
+    idx=$(( idx + 1 ))
+    pname="$(jq -r '.progress_project // .project_path // "(no project)"' <<<"$sess")"
+    title="$(jq -r '.title // ""' <<<"$sess")"
+    _clast_retro_progress "[$idx/$total] $work_day  $pname  ${title:-${sid:0:8}}"
     if [[ -z "$body" ]]; then
       summary="(no body to summarize)"
-    elif ! summary="$(_clast_retrosum_summary "$project" "$work_day" "$cache_id" "$body" "$cache_dir" "$refresh")"; then
-      clast_porcelain_warn "summary failed for session ${sid:-<no id>} — leaving it unsummarized"
-      summary="(summary unavailable)"
+    else
+      # Time the call so we can report how long the model took. rc distinguishes
+      # a cache hit (0, instant) from a fresh model call (3) from a failure.
+      rc=0
+      t0="$(_clast_retro_now)"
+      summary="$(_clast_retrosum_summary "$project" "$work_day" "$cache_id" "$body" "$cache_dir" "$refresh")" || rc=$?
+      t1="$(_clast_retro_now)"
+      case "$rc" in
+        0) : ;;  # served from cache — no model call, nothing to time
+        3) dt="$(_clast_retro_elapsed "$t0" "$t1")"
+           queried=$(( queried + 1 ))
+           model_total="$(awk -v a="$model_total" -v d="$dt" 'BEGIN { printf "%.1f", a + d }')"
+           _clast_retro_progress "        done in ${dt}s (model total ${model_total}s)" ;;
+        *) clast_porcelain_warn "summary failed for session ${sid:-<no id>} — leaving it unsummarized"
+           summary="(summary unavailable)" ;;
+      esac
     fi
     summary_pairs+=("$(jq -cn --arg k "$key" --arg v "$summary" '{key:$k, summary:$v}')")
-  done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
+  done < <(jq -c '.days[].projects[] | .project_name as $pn | .sessions[] | . + {progress_project: $pn}' <<<"$manifest")
+
+  if (( total > 0 )); then
+    _clast_retro_progress "summarized $total session(s); $queried queried the model (${model_total}s)"
+  fi
 
   # Fold summaries back into the manifest and drop the raw bodies. The manifest
   # carries --bodies only as summarizer input; neither the JSON nor the render
