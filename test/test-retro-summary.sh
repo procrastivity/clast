@@ -144,6 +144,25 @@ assert_eq "2" "$(_calls)" "null sid: both id-less sessions summarized (2 calls)"
 assert_eq "2" "$(find "$CLAST_JOURNAL_DIR/.retro-summaries" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')" "null sid: a distinct cache file per id-less session"
 teardown_test_journal
 
+# === progress output goes to stderr, gated ================================
+# CLAST_RETRO_PROGRESS=always forces progress on (tests have no tty). It must
+# land on stderr (stdout stays the clean render/JSON) and carry the resolved
+# window + a per-session counter.
+_seed
+progress="$(clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+assert_eq "" "$progress" "progress: silent by default (no tty)"
+progress="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+case "$progress" in *"window: 2026-06-13 -> 2026-06-15 (work-days)"*) _clast_test_pass "progress: resolved window line" ;; *) _clast_test_fail "progress: resolved window line"; printf '%s\n' "$progress" >&2 ;; esac
+case "$progress" in *"resolved 4 session(s) across 3 day(s)"*) _clast_test_pass "progress: session/day counts" ;; *) _clast_test_fail "progress: session/day counts" >&2 ;; esac
+case "$progress" in *"[1/4]"*"[4/4]"*) _clast_test_pass "progress: per-session counter" ;; *) _clast_test_fail "progress: per-session counter" >&2 ;; esac
+# stdout must remain a clean render even with progress forced on.
+clean="$(CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>/dev/null)"
+case "$clean" in *"clast: building work-day manifest"*) _clast_test_fail "progress: must not leak onto stdout" ;; *) _clast_test_pass "progress: stdout stays clean" ;; esac
+# CLAST_QUIET wins over the force flag.
+progress="$(CLAST_QUIET=1 CLAST_RETRO_PROGRESS=always clast_cmd_retro --from 2026-06-13 --to 2026-06-15 2>&1 >/dev/null)"
+assert_eq "" "$progress" "progress: CLAST_QUIET silences it"
+teardown_test_journal
+
 # === arg validation ========================================================
 _seed
 assert_exit_code 2 clast_cmd_retro --window

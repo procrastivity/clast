@@ -29,6 +29,17 @@ Requires the CLAST_LLM_* env vars (see `clast --help`).
 EOF
 }
 
+# _clast_retro_progress <msg>
+#   Emit a progress line to stderr so stdout (render or --json) stays clean.
+#   Silent when CLAST_QUIET is set or stderr is not a TTY; CLAST_RETRO_PROGRESS=always
+#   forces it on (used by tests, which have no tty).
+_clast_retro_progress() {
+  [[ -n "${CLAST_QUIET:-}" ]] && return 0
+  if [[ "${CLAST_RETRO_PROGRESS:-}" == "always" || -t 2 ]]; then
+    printf 'clast: %s\n' "$*" >&2
+  fi
+}
+
 # _clast_retrosum_fingerprint  (stdin → short hex/cksum on stdout)
 #   Content fingerprint of a session body; changes invalidate the cache.
 _clast_retrosum_fingerprint() {
@@ -74,6 +85,7 @@ _clast_retrosum_summary() {
     fi
   fi
 
+  _clast_retro_progress "        querying model..."
   local system user summary
   system="$(clast_porcelain_load_system_prompt retro-summary-system)"
   user="$(_clast_retrosum_build_user "$project" "$work_day" "$sid" "$body")"
@@ -121,6 +133,7 @@ clast_cmd_retro() {
   clast_porcelain_preflight_llm
 
   # Structure + per-session bodies from the deterministic core.
+  _clast_retro_progress "building work-day manifest..."
   local -a pl=(--json retro --bodies --window "$window")
   [[ -n "$from" ]] && pl+=(--from "$from")
   [[ -n "$to" ]] && pl+=(--to "$to")
@@ -131,12 +144,25 @@ clast_cmd_retro() {
     clast_porcelain_die "retro: ${msg:-failed to build manifest}" 2
   fi
 
+  # Report the resolved window + discovered work days before the slow summarize
+  # loop — the "dates it resolved to" the user wants to see up front.
+  local pf pt pw ndays nsess daylist
+  pf="$(jq -r '.from // "(start)"'  <<<"$manifest")"
+  pt="$(jq -r '.to   // "(end)"'    <<<"$manifest")"
+  pw="$(jq -r '.window'             <<<"$manifest")"
+  ndays="$(jq '.days | length'      <<<"$manifest")"
+  nsess="$(jq '[.days[].projects[].sessions[]] | length' <<<"$manifest")"
+  daylist="$(jq -r '[.days[].day] | join(", ")' <<<"$manifest")"
+  _clast_retro_progress "window: $pf -> $pt ($pw)"
+  _clast_retro_progress "resolved $nsess session(s) across $ndays day(s): $daylist"
+
   local cache_dir
   cache_dir="$(_clast_retrosum_journal_dir)/.retro-summaries"
 
   # Summarize each session; collect key → summary.
   local -a summary_pairs=()
-  local sess sid key cache_id project work_day body title summary
+  local sess sid key cache_id project work_day body title summary pname
+  local idx=0 total="$nsess"
   while IFS= read -r sess; do
     [[ -z "$sess" ]] && continue
     sid="$(jq -r '.session_id // ""' <<<"$sess")"
@@ -153,6 +179,10 @@ clast_cmd_retro() {
     work_day="$(jq -r '.work_day' <<<"$sess")"
     body="$(jq -r '.body // ""' <<<"$sess")"
     project="$(jq -r '.project_path // "(no project)"' <<<"$sess")"
+    idx=$(( idx + 1 ))
+    pname="$(jq -r '.progress_project // .project_path // "(no project)"' <<<"$sess")"
+    title="$(jq -r '.title // ""' <<<"$sess")"
+    _clast_retro_progress "[$idx/$total] $work_day  $pname  ${title:-${sid:0:8}}"
     if [[ -z "$body" ]]; then
       summary="(no body to summarize)"
     elif ! summary="$(_clast_retrosum_summary "$project" "$work_day" "$cache_id" "$body" "$cache_dir" "$refresh")"; then
@@ -160,7 +190,7 @@ clast_cmd_retro() {
       summary="(summary unavailable)"
     fi
     summary_pairs+=("$(jq -cn --arg k "$key" --arg v "$summary" '{key:$k, summary:$v}')")
-  done < <(jq -c '.days[].projects[].sessions[]' <<<"$manifest")
+  done < <(jq -c '.days[].projects[] | .project_name as $pn | .sessions[] | . + {progress_project: $pn}' <<<"$manifest")
 
   # Fold summaries back into the manifest and drop the raw bodies. The manifest
   # carries --bodies only as summarizer input; neither the JSON nor the render
