@@ -46,21 +46,6 @@ _clast_retro_progress() {
   fi
 }
 
-# _clast_retro_now — epoch seconds with fraction (GNU date). Falls back to whole
-# seconds where `%N` is unsupported (e.g. BSD/macOS date echoes a literal N).
-_clast_retro_now() {
-  local t
-  t="$(date +%s.%N 2>/dev/null)" || t="$(date +%s)"
-  [[ "$t" == *N* ]] && t="$(date +%s)"
-  printf '%s' "$t"
-}
-
-# _clast_retro_elapsed <start> <end> — seconds between two _clast_retro_now
-# readings, one decimal place (never negative).
-_clast_retro_elapsed() {
-  awk -v a="$1" -v b="$2" 'BEGIN { d = b - a; if (d < 0) d = 0; printf "%.1f", d }'
-}
-
 # _clast_retrosum_fingerprint  (stdin → short hex/cksum on stdout)
 #   Content fingerprint of a session body; changes invalidate the cache.
 _clast_retrosum_fingerprint() {
@@ -223,12 +208,12 @@ clast_cmd_retro() {
       # Time the call so we can report how long the model took. rc distinguishes
       # a cache hit (0, instant) from a fresh model call (3) from a failure.
       rc=0
-      t0="$(_clast_retro_now)"
+      t0="$(clast_porcelain_now)"
       summary="$(_clast_retrosum_summary "$project" "$work_day" "$cache_id" "$body" "$cache_dir" "$refresh")" || rc=$?
-      t1="$(_clast_retro_now)"
+      t1="$(clast_porcelain_now)"
       case "$rc" in
         0) : ;;  # served from cache — no model call, nothing to time
-        3) dt="$(_clast_retro_elapsed "$t0" "$t1")"
+        3) dt="$(clast_porcelain_elapsed "$t0" "$t1")"
            queried=$(( queried + 1 ))
            model_total="$(awk -v a="$model_total" -v d="$dt" 'BEGIN { printf "%.1f", a + d }')"
            _clast_retro_progress "        done in ${dt}s (model total ${model_total}s)" ;;

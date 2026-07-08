@@ -315,6 +315,10 @@ clast_cmd_wake() {
   local curated_count=0 skipped_count=0 dismissed_count=0
   local -a curated_projects=()
   local i=0 stop=0
+  # Cumulative model time across every draft generation (excludes the time the
+  # reviewer spends at the menu), so the run's LLM cost is legible — mirrors the
+  # per-call + total timing `clast retro` reports.
+  local wake_model_total="0.0"
 
   while (( i < total && stop == 0 )); do
     local session
@@ -419,6 +423,8 @@ Revisions requested by user: ${edit_extra}"
       fi
 
       clast_porcelain_info "Generating draft..."
+      local gen_t0 gen_t1 gen_dt
+      gen_t0="$(clast_porcelain_now)"
       if ! draft="$(clast_porcelain_llm_chat "$full_system" "$full_user")"; then
         printf '\n'
         clast_porcelain_warn "LLM call failed for session $sid"
@@ -432,6 +438,12 @@ Revisions requested by user: ${edit_extra}"
           *) skipped_count=$(( skipped_count + 1 )); break ;;
         esac
       fi
+      # Only reached when the draft succeeded (every failure branch above
+      # continues or breaks), so this times just the model call.
+      gen_t1="$(clast_porcelain_now)"
+      gen_dt="$(clast_porcelain_elapsed "$gen_t0" "$gen_t1")"
+      wake_model_total="$(awk -v a="$wake_model_total" -v d="$gen_dt" 'BEGIN { printf "%.1f", a + d }')"
+      clast_porcelain_info "  done in ${gen_dt}s (model total ${wake_model_total}s)"
 
       printf '\n%s\n' "$draft"
       printf '\n'
@@ -511,4 +523,5 @@ Revisions requested by user: ${edit_extra}"
   if (( remaining > 0 )); then
     clast_porcelain_info "  Remaining: $remaining session(s) (stopped early)"
   fi
+  clast_porcelain_info "  Model time: ${wake_model_total}s"
 }
