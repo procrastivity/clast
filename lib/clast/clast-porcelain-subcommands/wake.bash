@@ -401,7 +401,10 @@ clast_cmd_wake() {
     local recorded="$rec_date"
     if [[ -n "$start_short" ]]; then
       recorded="$recorded $start_short"
-      [[ -n "$end_short" && "$end_short" != "$start_short" ]] && recorded="$recorded–$end_short"
+      # Brace the expansion: the separator is an en dash (U+2013), and bash in a
+      # UTF-8 locale reads its bytes as part of the identifier — `$recorded–` then
+      # expands as the unset name `recorded–` and `set -u` kills the run.
+      [[ -n "$end_short" && "$end_short" != "$start_short" ]] && recorded="${recorded}–${end_short}"
       recorded="$recorded $tz"
     fi
 
