@@ -166,6 +166,15 @@ Run `/brief <project>` to start working on a specific project today.
 
 (Include the `Dismissed:` line only when at least one session was dismissed this run, mirroring the CLI's summary output.)
 
+**Note:** this summary has no `Model time:` line (contrast the CLI's `wake.bash:600`, or its
+per-draft `done in Xs (model total Ys)` line at `wake.bash:499-501`), because draft generation
+*is* the current model turn, not a separately-clocked subprocess call. The CLI times a `curl` to
+an OpenAI-compatible endpoint (`clast_porcelain_llm_chat`) with
+`clast_porcelain_now`/`clast_porcelain_elapsed`; the skill's instructions have no equivalent call
+to start/stop a clock around, so there is no meaningful "model total" to render here. Same
+step-07/BDS-89 skill-only-category caveat as the promote-flow note in the per-session
+AskUserQuestion section below applies to this row too.
+
 ## Auto mode
 
 By default every session gets its own AskUserQuestion — the friction is the point, it's where
