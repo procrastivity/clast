@@ -70,6 +70,22 @@ Each is tracked as a sub-issue of BDS-82:
 - BDS-86 is a hard prerequisite for BDS-89 — the guard reads `--help` output.
 - PR #45 already closed the `wake --auto` skill contradiction; it is not in
   scope here.
+- **The CLI is the reference; the skill conforms to it.** (Beau, 2026-07-12.)
+  Wherever the CLI and a skill disagree, the default is to change the *skill*.
+  The two surfaces started in sync and drifted because development focused on
+  the CLI, so the skill is simply behind — the divergences are lag, not design.
+  This settles BDS-84's "make the CLI match the skill, or the skill match the
+  CLI" table: **make the skill match the CLI**, row by row. Deviating from this
+  default requires an explicit, stated reason — and a `cli-only` allowlist entry
+  in the BDS-89 guard so it stays honest.
+- **`clast retro` gets a plugin skill. `clast undismiss` does not.** (Beau,
+  2026-07-12.) This settles BDS-85. `retro` is mirrored as a skill; `undismiss`
+  is declared CLI-only and goes on the BDS-89 guard's allowlist with that stated
+  reason, so the guard stops flagging it. Consequence for BDS-89: the guard's
+  parity manifest covers **three** mirrored subcommands (`wake`, `brief`,
+  `retro`) plus one `cli-only` entry (`undismiss`).
+- **Issue lifecycle**: an issue moves to **In Review** in Linear once the last
+  commit for it is pushed (not Done — Done is the human's merge gate).
 
 ## Constraints
 
@@ -83,8 +99,7 @@ Each is tracked as a sub-issue of BDS-82:
 
 ## Open questions
 
-- BDS-85 is a decision: do `retro` and `undismiss` get plugin skills at all? If
-  yes, that expands the scope of the BDS-89 guard's manifest to four
-  subcommands instead of two.
+- ~~BDS-85: do `retro` and `undismiss` get plugin skills?~~ **Settled
+  2026-07-12** — see Confirmed decisions: `retro` yes, `undismiss` no.
 - Does the BDS-89 guard belong in `test/test-clast.sh`, in a new `contrib/`
   check, or in both (test + pre-commit)?

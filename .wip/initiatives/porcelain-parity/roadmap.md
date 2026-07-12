@@ -24,13 +24,13 @@ across lanes.
 - **step-02 — brief: `--help` and an arg loop** — add `_clast_brief_usage` plus flag parsing to `brief.bash`, following the shape PR #45 set for wake: `-h`/`--help` exits 0, `--` ends flags, an unknown flag exits 2 instead of being silently ignored, `$1` stays the project slug. Prerequisite for the guard in step-07. `[tracker: BDS-86]`
 
 ### Lane wake
-- **step-03 — wake: close the pre-#45 divergences** — work the drift table row by row (scan window `-14d` vs `-30d`, the promote decision/common-issue/workflow flow, per-session Dismiss, triage quit, model-call timing, the 2000-char turn cap, session id + recorded date), fixing each or recording it as an intended divergence for the guard's allowlist. `[tracker: BDS-84]`
+- **step-03 — wake: close the pre-#45 divergences** — work the drift table row by row (scan window `-14d` vs `-30d`, the promote decision/common-issue/workflow flow, per-session Dismiss, triage quit, model-call timing, the 2000-char turn cap, session id + recorded date). **Direction settled (BRIEF, 2026-07-12): make the SKILL match the CLI.** The CLI is the reference — the two surfaces started in sync and the skill fell behind because development focused on the CLI, so these divergences are lag, not design. Change the skill row by row; deviating from that default needs a stated reason plus a `cli-only` allowlist entry in the step-07 guard. `[tracker: BDS-84]`
 
 ### Lane plugin-hygiene
 - **step-04 — plugin hygiene** — reconcile `.claude-plugin/plugin.json` (`0.1.0`) with `package.json` (`0.0.6`) and extend `contrib/check-version-sync.sh` to cover the plugin manifest; get the stray `wip` `commands/`, `agents/`, and `.claude-plugin/README.md` artifacts out of the plugin root so `claude plugin install` cannot load them as clast's; single-source or delete the rotted SKILL copies embedded in `docs/reference/plugin.md`. `[tracker: BDS-88]`
 
 ### Lane coverage-decision
-- **step-05 — decide plugin coverage for `retro` and `undismiss`** — for each: mirror it as a skill, or declare it CLI-only and put it on the parity guard's allowlist with a stated reason. `undismiss` is the pointed one — `/wake` already tells plugin users to run a command they have no skill for. The outcome sets the guard's manifest scope in step-07. `[tracker: BDS-85]`
+- **step-05 — mirror `retro` as a skill; declare `undismiss` CLI-only** — **the decision is made (BRIEF, 2026-07-12): `retro` gets a plugin skill, `undismiss` does not.** So this step is now implementation, not deliberation: author `skills/retro/SKILL.md` mirroring `clast retro` (reading the shared `lib/clast/prompts/retro-summary-{system,user}.md` templates — do NOT inline a prompt copy, that is the BDS-83 mistake) and covering its flag surface (`--from`/`--to`, `--all`, `--window`, `--refresh`, `--json`); then record `undismiss` as `cli-only` with its stated reason so the step-07 guard stops flagging it. Consequence for step-07: the parity manifest covers three mirrored subcommands (`wake`, `brief`, `retro`) plus one `cli-only` entry. `[tracker: BDS-85]`
 
 ## Round 2 — Tell the truth, then guard it
 
