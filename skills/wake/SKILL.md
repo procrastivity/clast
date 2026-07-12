@@ -122,6 +122,8 @@ For each session in the list:
    ```
    This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
 
+   Before using these turns to build the draft prompt, truncate any single turn's text that exceeds ~2000 characters: keep the first 2000 characters and note how many characters were cut (e.g. "… [N more chars truncated]"). This mirrors the CLI's per-turn `turn_cap=2000` and applies independently of the 8-turn count limit above — a single oversized turn (a large pasted blob or tool dump) should not bloat the prompt.
+
 2. Read breadcrumbs for this project from yesterday:
    ```bash
    $CLAST_BIN breadcrumb --read --project <slug> --day yesterday
