@@ -3,6 +3,12 @@
 # A convenience verb over `clast-plumbing sessions undismiss`: `clast wake`
 # now prints each session's id, so recovering an accidental [d] is a direct
 # `clast undismiss <id>` without dropping down to the plumbing surface.
+#
+# Intentionally CLI-only: no skills/undismiss/SKILL.md. This is a thin,
+# model-free passthrough to `clast-plumbing sessions undismiss` (see below)
+# with no synthesis/judgment step an LLM porcelain would add. See
+# .wip/initiatives/porcelain-parity/BRIEF.md "Confirmed decisions" for the
+# full decision record.
 # shellcheck shell=bash
 
 clast_cmd_undismiss() {
