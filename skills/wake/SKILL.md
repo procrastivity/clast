@@ -134,6 +134,7 @@ For each session in the list:
    - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
+   - **Dismiss**: pipe to `$CLAST_BIN sessions dismiss <session-id> --reason "dismissed via wake"`; do not write an entry.
    - **Stop here**: end the entire `/wake` flow, leaving remaining sessions uncurated (user can resume tomorrow).
 
 ## Step 4: Final summary
@@ -144,6 +145,7 @@ After all sessions are processed (or user stopped early), print a summary:
 Wake complete.
 Curated: 3 sessions across 2 projects.
 Auto-dismissed (no-op): 5 sessions.
+Dismissed: 1 session.
 Skipped: 1 session.
 Remaining uncurated: 0.
 
@@ -156,6 +158,8 @@ Promoted:
 
 Run `/brief <project>` to start working on a specific project today.
 ```
+
+(Include the `Dismissed:` line only when at least one session was dismissed this run, mirroring the CLI's summary output.)
 
 ## Auto mode
 
@@ -208,10 +212,11 @@ After showing the draft, present:
   - `Accept + promote common-issue` — also write a common-issue file
   - `Accept + promote workflow` — also write a workflow file
   - `Edit` — user wants to revise; will prompt for changes
-  - `Skip` — do not write this entry
+  - `Skip` — do not write this entry (leaves it uncurated; can be revisited later)
+  - `Dismiss` — mark this session dismissed via `clast-plumbing sessions dismiss`; it won't be offered again
   - `Stop here` — end /wake entirely, leave remaining sessions uncurated
 
-If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting).
+If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting). If `Dismiss` is selected alongside any other option, treat as `Dismiss` only — dismissal is a permanent, terminal action for this session, so it overrides Accept/Edit/Skip/Stop here selected in the same response.
 
 When a promote option is selected, prompt the user for the title and content of that promoted item before writing.
 
