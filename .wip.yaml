@@ -36,4 +36,5 @@ initiatives:
     brief: .wip/initiatives/porcelain-parity/BRIEF.md
     roadmap: .wip/initiatives/porcelain-parity/roadmap.md
     tracker_anchor: BDS-82
+    tracker_map: {"step-01": "BDS-83", "step-02": "BDS-86", "step-03": "BDS-84", "step-04": "BDS-88", "step-05": "BDS-85", "step-06": "BDS-87", "step-07": "BDS-89"}
 current_initiative: porcelain-parity

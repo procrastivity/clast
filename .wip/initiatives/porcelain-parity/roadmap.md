@@ -20,7 +20,7 @@ sequential internally: both of its steps edit
 across lanes.
 
 ### Lane brief
-- **step-01 — brief: read the shared prompt templates** — rewrite the prompt section of `skills/brief/SKILL.md` to read `lib/clast/prompts/brief-{system,user}.md` the way `skills/wake/SKILL.md` already does, and settle the two smaller divergences (entry caps 3-per-group/8-total vs a flat `--limit 5`; `registry resolve --json` and the workspace label) as fixed or intended. `[tracker: BDS-83]`
+- **step-01 — brief: read the shared prompt templates** ✅ shipped 2026-07-11 — rewrite the prompt section of `skills/brief/SKILL.md` to read `lib/clast/prompts/brief-{system,user}.md` the way `skills/wake/SKILL.md` already does, and settle the two smaller divergences (entry caps 3-per-group/8-total vs a flat `--limit 5`; `registry resolve --json` and the workspace label) as fixed or intended. `[tracker: BDS-83]`
 - **step-02 — brief: `--help` and an arg loop** — add `_clast_brief_usage` plus flag parsing to `brief.bash`, following the shape PR #45 set for wake: `-h`/`--help` exits 0, `--` ends flags, an unknown flag exits 2 instead of being silently ignored, `$1` stays the project slug. Prerequisite for the guard in step-07. `[tracker: BDS-86]`
 
 ### Lane wake
