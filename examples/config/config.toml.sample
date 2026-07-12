@@ -30,3 +30,16 @@
 # Silence info logs (matches the global --quiet flag).
 # Env equivalent: CLAST_QUIET=1
 # quiet = false
+
+[wake]
+# How far back `clast wake` scans for uncurated sessions.
+# Env equivalent: CLAST_WAKE_SINCE
+# since = "-14d"
+
+# Auto-dismiss no-op sessions before calling the LLM.
+# Env equivalent: CLAST_WAKE_AUTODISMISS_NOOP=1
+# autodismiss_noop = true
+
+# In --auto mode, skip drafts shorter than this many chars (0 disables).
+# Env equivalent: CLAST_WAKE_AUTO_MIN_CHARS
+# auto_min_chars = 60
