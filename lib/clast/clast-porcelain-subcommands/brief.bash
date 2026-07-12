@@ -4,8 +4,9 @@
 # completions endpoint. Reads curated entries, breadcrumbs, and today's
 # sessions for a project (via clast-plumbing), then synthesizes a briefing.
 #
-# Usage: clast brief [<project-slug>]
+# Usage: clast brief [<project-slug>] [-h|--help]
 #   If no slug is given, resolves from the current working directory.
+#   -h, --help prints usage and exits.
 # shellcheck shell=bash
 
 # --- Resolve project ---------------------------------------------------------
@@ -192,7 +193,31 @@ EOF
 
 # --- Main --------------------------------------------------------------------
 
+_clast_brief_usage() {
+  cat <<'EOF'
+Usage: clast brief [<project-slug>]
+
+Replicate the /brief plugin skill: synthesize an LLM briefing from curated
+entries, breadcrumbs, and today's sessions for a project. If no slug is
+given, resolves the project from the current working directory.
+
+Flags:
+  -h, --help  Print this usage and exit.
+
+Requires the CLAST_LLM_* env vars (see `clast --help`).
+EOF
+}
+
 clast_cmd_brief() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) _clast_brief_usage; return 0 ;;
+      --)        shift; break ;;
+      -*)        clast_porcelain_log_error "brief: unknown argument '$1'"; return 2 ;;
+      *)         break ;;
+    esac
+  done
+
   clast_porcelain_preflight_llm
 
   local project
