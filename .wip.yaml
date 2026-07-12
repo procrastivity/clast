@@ -1,0 +1,39 @@
+# .wip.yaml — the wip manifest.
+#
+# Lives at REPO ROOT, always committed. The deterministic entry point
+# `wip-plumbing` reads to answer "what's installed, where, and what's next."
+# See .wip/GLOSSARY.md for every term used here.
+
+version: 1
+# --- gitignore policy -------------------------------------------------------
+# This repo commits its in-flight planning: the BRIEF and roadmap are the plan
+# of record and travel with the PR that implements them.
+gitignore:
+  commit: true
+  always_commit:
+    - .wip.yaml
+    - .wip/GLOSSARY.md
+    - .wip/backlog.md
+# --- features ---------------------------------------------------------------
+# A feature is ACTIVE iff: enabled here AND its sentinel file exists on disk.
+# Other features (lds, diataxis, changelog, direnv, solo, ...) are opt-in via
+# the `wip setup` family. Add stanzas here as you enable them.
+features:
+  wip:
+    enabled: true
+    root: .wip
+  issue-tracker: {"enabled": true, "backend": "linear"}
+  forge: {"enabled": true, "backend": "gh"}
+  solo: {"enabled": true}
+  orchestration: {"enabled": true, "backend": "duo", "source": "plugin"}
+# --- initiative registry ----------------------------------------------------
+# Populated by `wip init <slug>`. `current_initiative` selects the default.
+initiatives:
+  - slug: porcelain-parity
+    title: 'Porcelain parity: keep the clast CLI and the Claude plugin skills in sync'
+    status: in-flight
+    intake: ad-hoc
+    brief: .wip/initiatives/porcelain-parity/BRIEF.md
+    roadmap: .wip/initiatives/porcelain-parity/roadmap.md
+    tracker_anchor: BDS-82
+current_initiative: porcelain-parity

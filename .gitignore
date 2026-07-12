@@ -4,6 +4,9 @@ result
 result-*
 .direnv/
 
+# wip: derived tracker sync state, rewritten on every `wip sync`
+.wip/tracker-cache.json
+
 # Editor
 *.swp
 .idea/
