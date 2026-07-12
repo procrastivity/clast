@@ -50,10 +50,10 @@ Errors here are non-fatal — proceed even if it fails, just warn the user.
 
 ## Step 2: Enumerate uncurated sessions
 
-Query all recent sessions (last 30 days) and filter to uncurated:
+Query all recent sessions and filter to uncurated. The scan window defaults to 14 days and is configurable via `CLAST_WAKE_SINCE`:
 
 ```bash
-$CLAST_BIN --json sessions --since -30d
+$CLAST_BIN --json sessions --since "${CLAST_WAKE_SINCE:--14d}"
 ```
 
 Filter to sessions with `curated: false` or `stale: true` (stale sessions were curated but their transcript was updated since). If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
