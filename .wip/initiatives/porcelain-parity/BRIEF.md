@@ -68,8 +68,10 @@ Each is tracked as a sub-issue of BDS-82:
 - BDS-89 lands **last**. A parity guard can only assert over surfaces once
   those surfaces are actually true, so every other sub-issue closes first.
 - BDS-86 is a hard prerequisite for BDS-89 — the guard reads `--help` output.
-- PR #45 already closed the `wake --auto` skill contradiction; it is not in
-  scope here.
+- ~~PR #45 already closed the `wake --auto` skill contradiction; it is not in
+  scope here.~~ **FALSE — retracted 2026-07-12.** See "Blocked on PR #45" below.
+  This premise came from BDS-82's own description and does not hold: PR #45 is
+  still **open and unmerged**. Nothing in the merged tree closes that gap.
 - **The CLI is the reference; the skill conforms to it.** (Beau, 2026-07-12.)
   Wherever the CLI and a skill disagree, the default is to change the *skill*.
   The two surfaces started in sync and drifted because development focused on
@@ -96,6 +98,41 @@ Each is tracked as a sub-issue of BDS-82:
 - BDS-83, BDS-84, BDS-86, and BDS-88 look mutually independent (disjoint files,
   no ordering between them) and are candidates for parallel lanes. Confirm the
   file-overlap assumption before laning them; when in doubt, sequence.
+
+## Blocked on PR #45 — NEEDS BEAU (found 2026-07-12, during step-02)
+
+**BDS-82's premise is false.** It says *"PR #45 now closes that specific gap
+(Auto mode mirrored into the skill + a static assert)"* and the sub-issues are
+written on top of that. Verified against the repo:
+
+- PR #45 (`feat(wake): add --auto for non-interactive curation`, branch
+  `feat/wake-auto`) is **OPEN, `mergedAt: null`**.
+- `lib/clast/clast-porcelain-subcommands/wake.bash` on `main` and on this branch
+  has **zero** arg parsing — no `_clast_wake_usage`, no `--auto`, no `--help`.
+- `skills/wake/SKILL.md:228` **still** says unattended curation is *"not a v1
+  feature… The friction is intentional."*
+
+So the contradiction BDS-82 was opened to chase is still live, and three steps
+rest on a premise that isn't true:
+
+- **step-03 / BDS-84** — framed as the divergences that *"predate PR #45"* and
+  states *"PR #45 mirrored `--auto` into the skill."* Neither is true. Its drift
+  table is therefore incomplete: `--auto` itself is still a live divergence.
+- **step-06 / BDS-87** — its docs work is triggered by *"the moment PR #45
+  merges."* That moment hasn't happened.
+- **step-07 / BDS-89** — assumes *"`wake` got one in PR #45"* when listing which
+  subcommands already have `--help`. `wake` does **not** have one. If #45 never
+  lands, `wake` needs its own `--help` before the guard can diff it, which makes
+  BDS-86 not the only `--help` prerequisite.
+
+**The decision is Beau's** (merge #45 first, rebase this initiative on top of it,
+or absorb #45's scope into BDS-84). Do not paper over it and do not silently
+redesign the steps.
+
+**Interim sequencing (Orchestrator, 2026-07-12):** step-04 (BDS-88, plugin
+hygiene) and step-05 (BDS-85, retro skill) are wholly independent of #45, so the
+autonomous loop runs **02 → 04 → 05** and then **holds**. Steps 03, 06 and 07
+stay parked until Beau rules on #45.
 
 ## Open questions
 
