@@ -70,7 +70,7 @@ $CLAST_BIN entries read <entry-path>
 
 ## Step 3: Synthesize the briefing
 
-Using the **synthesis prompt** (see below), produce a briefing of 2–5k tokens. Structure:
+Read the shared prompt templates from `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md` and `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`, then substitute the user template placeholders `{{project}}`, `{{current_label}}`, `{{entries}}`, `{{breadcrumbs}}`, and `{{sessions}}`. Produce a briefing of 2–5k tokens. Structure:
 
 ```
 ## Brief — <project>
@@ -109,32 +109,11 @@ Brief is read-only. Never invoke write-form subcommands (`entries write`, `bread
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 
-## Synthesis prompt
+## Shared prompt templates
 
-<!-- step-13 addition: inlined synthesis prompt with explicit structure re-statement -->
+The installed prompt templates live under `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/`:
 
-```
-You are synthesizing a project briefing for the user. They are about to start work on the `{slug}` project and want a tight summary of where they left off.
+- **System prompt:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md`
+- **User prompt template:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`
 
-Recent curated entries (newest first):
-{entries_json_with_bodies}
-
-Today's breadcrumbs for this project:
-{breadcrumbs_today}
-
-Today's session activity for this project:
-{sessions_today}
-
-Produce a briefing using this structure (omit any section that has no content):
-
-- Active thread: one-line from most recent entry's "Open threads", or "None"
-- Last session: date, branch, one-line goal, work done (2-3 bullets), open threads, dead ends to avoid
-- Recent sessions: up to 5 entries with date, branch, slug, one-line goal
-- Today's breadcrumbs: timestamped list if any
-- Today's sessions: list if user has already worked today
-- Suggested next step: derived from active thread + breadcrumbs
-
-Be concise. Use the user's terminology. Don't repeat content across sections. The total briefing should be 2–5k tokens — if you're approaching that, summarize rather than list verbatim.
-
-For the "Suggested next step": prefer the most recent entry's "Open threads" content, then the most recent breadcrumb, then a synthesis of the recent work. If nothing concrete, say "No active thread."
-```
+If those files are missing, tell the user the template is unavailable and stop.
