@@ -20,7 +20,9 @@ what `clast wake` / `clast brief` and the plugin skills call under the hood.
 ## Requirements
 
 - `clast`, `clast-plumbing`, `curl`, and `jq` on `PATH`.
-- An interactive terminal for `clast wake` (it reads choices from the tty).
+- An interactive terminal for `clast wake`'s default mode (it reads choices
+  from the tty). Pass `--auto` to skip that requirement entirely — see
+  [`## clast wake`](#clast-wake--curate-the-day) for the unattended/cron path.
 - An OpenAI-compatible LLM endpoint, configured through three env vars:
 
   ```bash
@@ -53,8 +55,11 @@ package ships both under its `bin/` directory.
 clast wake
 ```
 
-1. **Triage.** It enumerates uncurated sessions from the last 30 days
-   (`clast-plumbing sessions --since -30d`). When they span more than one day it
+By default `clast wake` is interactive and requires a tty (it reads your
+choices at each step). This is the day-to-day hands-on curation flow:
+
+1. **Triage.** It enumerates uncurated sessions in the scan window set by
+   `CLAST_WAKE_SINCE` (default `-14d`). When they span more than one day it
    offers to process everything, just yesterday, the last *N* days, or to
    [dismiss](./curate-an-entry.md) everything older and process the rest. Older
    sessions are dismissed via `clast-plumbing sessions dismiss` so they won't
@@ -66,6 +71,22 @@ clast wake
    `[a] Accept  [e] Edit  [d] Dismiss  [s] Skip  [q] Stop here`. Accepting writes the
    entry with `clast-plumbing entries write`; dismissing records a
    `clast-plumbing sessions dismiss`.
+
+### `--auto` — non-interactive curation
+
+```bash
+clast wake --auto
+```
+
+Non-interactive: auto-accept every generated draft and write it. Skips the
+triage menu and the per-session prompt, and does not require a tty — suitable
+for cron/scripts. Sessions whose draft fails to generate are skipped. The scan
+window still honors `CLAST_WAKE_SINCE` (default `-14d`).
+
+`CLAST_WAKE_AUTO_MIN_CHARS` (default `60`) suppresses trivial drafts: in
+`--auto` mode, a draft whose body is shorter than this many characters is
+skipped rather than written, leaving that session uncurated for a later
+interactive pass. Set it to `0` to write every draft regardless of length.
 
 ## `clast brief` — brief a project
 
@@ -118,7 +139,10 @@ plugin. If the files are missing the porcelain falls back to built-in inline pro
 
 `clast brief` and `clast retro` are non-interactive and safe to run from a login
 shell, a shell prompt, or cron (`clast retro`'s per-session cache keeps repeat runs
-cheap). `clast wake` is interactive and expects a tty — don't run it from cron.
-To capture sessions on a schedule, automate `clast-plumbing snapshot` instead (see
-[automate with cron](./automate-with-cron.md) or [systemd](./automate-with-systemd.md)),
-then run `clast wake` by hand when you want to curate.
+cheap). `clast wake`'s default mode is interactive and expects a tty, but
+`clast wake --auto` is cron/systemd-safe and is the intended unattended path —
+see [`## clast wake`](#clast-wake--curate-the-day) for what it skips. Interactive
+mode (no flag) remains the default for hands-on curation. See
+[automate with cron](./automate-with-cron.md) or
+[systemd](./automate-with-systemd.md) for a worked `clast wake --auto` example,
+alongside automating `clast-plumbing snapshot` to capture sessions on a schedule.
