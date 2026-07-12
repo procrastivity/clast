@@ -1,6 +1,6 @@
 ---
 name: wake
-description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/wake", "wake", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /brief; for mid-session pivots use session-brief.'
+description: 'Generate curated journal entries from yesterday''s Claude Code sessions across all projects. Use when the user says "/wake", "wake", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday''s sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. Supports an opt-in auto mode when the user explicitly asks to curate everything without review ("do them all", "don''t ask me") — the equivalent of `clast wake --auto`. This is the once-per-day curation flow; for per-project briefings use /brief; for mid-session pivots use session-brief.'
 ---
 
 # Wake
@@ -81,7 +81,7 @@ print "Nothing to curate — all remaining sessions were empty or slash-command-
 
 ### Triage when multiple days have uncurated sessions
 
-If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage step before processing. Show a per-day breakdown:
+If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage step before processing. (In [Auto mode](#auto-mode) skip triage entirely and process the whole window.) Show a per-day breakdown:
 
 ```
 Found 45 uncurated sessions across 5 days (2026-05-26 to 2026-05-30).
@@ -128,7 +128,7 @@ For each session in the list:
 
 4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in <project> at HH:MM:".
 
-5. Present the **promotion question** (see below) via AskUserQuestion.
+5. Present the **promotion question** (see below) via AskUserQuestion. (In [Auto mode](#auto-mode) skip this and accept the draft, subject to the length guard.)
 
 6. Handle the response:
    - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
@@ -147,6 +147,8 @@ Auto-dismissed (no-op): 5 sessions.
 Skipped: 1 session.
 Remaining uncurated: 0.
 
+(In Auto mode, also report: "Skipped (below length threshold): N sessions.")
+
 Promoted:
   Decisions: 1
   Common-issues: 0
@@ -154,6 +156,35 @@ Promoted:
 
 Run `/brief <project>` to start working on a specific project today.
 ```
+
+## Auto mode
+
+By default every session gets its own AskUserQuestion — the friction is the point, it's where
+curation happens. But if the user **explicitly** asks to curate everything without reviewing it
+("do them all", "don't ask me", "no prompts", "just write them all"), switch to auto mode.
+
+This mirrors `clast wake --auto` in the CLI porcelain, and behaves the same way:
+
+- **Skip the triage step** (Step 2) even when the backlog spans multiple days. The whole scan
+  window is processed.
+- **Skip the per-session promotion question** (Step 3, item 5). Accept and write every draft via
+  the normal `entries write` path in "Writing the entry" below. Nothing is promoted — promotion
+  requires a human choice.
+- **Length guard.** Before writing, take the draft body *without* the suggested-tags trailer and
+  trim surrounding whitespace. If it is shorter than `CLAST_WAKE_AUTO_MIN_CHARS` characters
+  (default `60`; `0` disables the guard), **skip** it — do not write it, and do **not** dismiss
+  it. It stays uncurated so it can be handled in a later interactive pass. Report it as
+  `Draft below threshold (N < M chars) — skipping (stays uncurated).`
+- **A draft that fails to generate is skipped**, not retried — there's no reviewer to ask.
+- Step 2a no-op auto-dismissal still runs first, unchanged.
+- Don't print each draft in full; the write confirmation is the record of what landed.
+
+Everything else is unchanged. Announce the mode up front ("Auto mode: drafts will be accepted
+without review.") and report the counts in the Step 4 summary, including how many were skipped
+for being under the length threshold.
+
+For unattended/cron curation outside a Claude Code session, the CLI equivalent is
+`clast wake --auto`.
 
 ## Draft generation prompt
 
@@ -225,4 +256,4 @@ For promoted items (decisions, common-issues, workflows): currently these are tr
 - **Multi-day backlog**: present the triage step (Step 2) so the user can choose scope before processing.
 - **`clast-plumbing snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
 - **`clast-plumbing show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
-- **User says "do them all without prompting"**: not a v1 feature. Each session gets its own AskUserQuestion. The friction is intentional — it's where curation happens.
+- **User says "do them all without prompting"**: switch to [Auto mode](#auto-mode) — accept and write every draft, skipping triage and the per-session question, with the `CLAST_WAKE_AUTO_MIN_CHARS` length guard applied. This is opt-in only: the interactive per-session AskUserQuestion stays the default, because the friction is where curation happens.

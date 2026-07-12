@@ -158,6 +158,27 @@ _assert_skill_wake_cli_commands() {
   return "$ok"
 }
 
+# The skill must mirror the porcelain's `clast wake --auto` batch mode. Without
+# this the two surfaces drift: the CLI grows a flag while SKILL.md goes on
+# telling the model that unattended curation does not exist.
+_assert_skill_wake_auto_mode() {
+  local skill=skills/wake/SKILL.md
+  local ok=0
+  for token in 'Auto mode' 'CLAST_WAKE_AUTO_MIN_CHARS' 'clast wake --auto'; do
+    if ! grep -qF -- "$token" "$skill"; then
+      printf 'wake SKILL.md: auto mode not mirrored — missing: %s\n' "$token" >&2
+      ok=1
+    fi
+  done
+  # The pre-`--auto` skill disavowed batch mode outright. That sentence must not
+  # come back — it contradicts the porcelain.
+  if grep -qF -- 'not a v1 feature' "$skill"; then
+    printf 'wake SKILL.md: stale disavowal of batch mode ("not a v1 feature")\n' >&2
+    ok=1
+  fi
+  return "$ok"
+}
+
 _assert_plugin_assets() {
   local ok=0
   if ! jq -e . .claude-plugin/plugin.json >/dev/null; then
@@ -186,6 +207,8 @@ _assert_plugin_assets() {
   if ! _assert_skill_wake_triggers; then ok=1; fi
   printf 'plugin asset check: wake/SKILL.md CLI commands\n'
   if ! _assert_skill_wake_cli_commands; then ok=1; fi
+  printf 'plugin asset check: wake/SKILL.md auto mode mirrors --auto\n'
+  if ! _assert_skill_wake_auto_mode; then ok=1; fi
   return "$ok"
 }
 
@@ -208,6 +231,7 @@ declare -a suites=(
   test/test-retro-summary.sh
   test/test-retro-prov.sh
   test/test-brief.sh
+  test/test-wake-auto.sh
   test/test-breadcrumb.sh
   test/test-doctor.sh
   test/test-stats.sh
