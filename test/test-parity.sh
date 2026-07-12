@@ -5,18 +5,23 @@
 # usage function directly (test-wake-auto.sh's pattern) rather than
 # subprocessing `clast <cmd> --help`.
 #
-# Assertions implemented here (1-4; 5-6 land in later commits as additional
-# functions called from the bottom of this file, matching test-clast.sh's
-# own plain-sequential-call style):
+# Assertions implemented here (1-5; 6 lands in a later commit as an
+# additional function called from the bottom of this file, matching
+# test-clast.sh's own plain-sequential-call style):
 #   1. Bidirectional --help<->manifest diff for wake/brief/retro (the
 #      subcommands with a usage_fn): every flag/env in --help must be a
 #      manifest row (direction A), and every mirrored manifest row for that
 #      subcommand must appear in its own --help (direction B).
 #   2. Every mirrored flag/env row is mentioned in its skill_md_or_reason
 #      SKILL.md file.
-#   3. Every cli-only/skill_only row has a non-empty, non-placeholder reason.
+#   3. Every cli-only/skill_only/internal row has a non-empty, non-placeholder
+#      reason.
 #   4. The shared CLAST_WAKE_SINCE default matches between wake.bash and
 #      skills/wake/SKILL.md.
+#   5. Every bare CLAST_* env var read in lib/clast/**.bash is either an
+#      `internal` manifest exemption or documented in
+#      docs/reference/config.md; every `internal` exemption row must itself
+#      still have a live read site (self-expiring).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -196,7 +201,7 @@ assert_parity_3_reason_nonempty() {
   local sub kind key reason
   while IFS=$'\t' read -r sub kind key reason; do
     case "$kind" in
-      cli-only|skill_only) ;;
+      cli-only|skill_only|internal) ;;
       *) continue ;;
     esac
     if _parity_is_placeholder_reason "$reason"; then
@@ -247,11 +252,72 @@ assert_parity_4_wake_since_default() {
   fi
 }
 
+# --- Assertion 5: CLAST_* value reads vs docs/reference/config.md -----------
+#
+# Scoped per Decision 6: bare (no leading underscore) ${CLAST_X...}/$CLAST_X
+# value reads across lib/clast/**.bash. Two exemption mechanisms:
+#   - the _SOURCED family (module-sourcing guards, e.g. _CLAST_LIB_SOURCED)
+#     is a suffix *pattern*, not an enumerable name, so it stays a
+#     code-level exclusion here rather than a manifest row. In practice
+#     these are already excluded by the "bare, no leading underscore"
+#     scoping (the guards are named _CLAST_*_SOURCED), but the suffix check
+#     is kept as an explicit belt-and-suspenders guard against a
+#     differently-prefixed guard being added later.
+#   - everything else exempt (dispatcher-internal plumbing, test-only hooks)
+#     is data: an `internal` manifest row, self-expiring below.
+
+# _parity_scan_clast_var_reads — bare CLAST_* names read (not assigned) in
+# lib/clast/**.bash, one per line, deduplicated.
+_parity_scan_clast_var_reads() {
+  # shellcheck disable=SC2016  # literal ${CLAST_...}/$CLAST_... patterns, not expansion
+  grep -rhoE '\$\{CLAST_[A-Z_]+[:}]|\$CLAST_[A-Z_]+' lib/clast --include='*.bash' \
+    | sed -E 's/^\$\{?//; s/[:}]$//' \
+    | sort -u
+}
+
+assert_parity_5_env_vars_documented() {
+  local docs_file="docs/reference/config.md"
+  local var
+  local -A internal_seen=()
+
+  while IFS= read -r var; do
+    [[ -z "$var" ]] && continue
+    case "$var" in
+      *_SOURCED) continue ;;  # module-sourcing guard family, not an enumerable name
+    esac
+    if _parity_manifest_has '*' internal "$var"; then
+      internal_seen["$var"]=1
+      _clast_test_pass "assertion5: $var is an internal exemption (test/parity.tsv)"
+      continue
+    fi
+    if grep -Fq -- "$var" "$docs_file"; then
+      _clast_test_pass "assertion5: $var documented in $docs_file"
+    else
+      _clast_test_fail "assertion5: $var documented in $docs_file"
+      printf '       ERROR: %s is read from the environment in lib/clast/**.bash but not documented in %s\n' "$var" "$docs_file" >&2
+    fi
+  done < <(_parity_scan_clast_var_reads)
+
+  # Self-expiry: every `internal` manifest row must have matched a live read
+  # site above, or the exemption is stale and must be deleted.
+  local sub kind key reason
+  while IFS=$'\t' read -r sub kind key reason; do
+    [[ "$kind" == "internal" ]] || continue
+    if [[ -n "${internal_seen[$key]:-}" ]]; then
+      _clast_test_pass "assertion5: internal exemption $key has a live read site"
+    else
+      _clast_test_fail "assertion5: internal exemption $key has a live read site"
+      printf '       ERROR: stale exemption %s: no read sites found in lib/clast/**.bash, delete this row\n' "$key" >&2
+    fi
+  done < <(grep -v '^#' "$PARITY_TSV")
+}
+
 # --- Run ----------------------------------------------------------------------
 
 assert_parity_1_help_vs_manifest
 assert_parity_2_mentioned_in_skill_md
 assert_parity_3_reason_nonempty
 assert_parity_4_wake_since_default
+assert_parity_5_env_vars_documented
 
 clast_test_summary

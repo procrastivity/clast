@@ -3,9 +3,14 @@
 # kind: flag/env (mirrored CLI<->skill surface, column 4 = skill_md path) |
 #   skill_only (capability the skill has that the CLI intentionally lacks,
 #   column 4 = stated reason) | cli-only (subcommand-level row, flag_or_env
-#   is n/a, column 4 = stated reason). The global-env rows below use
-#   subcommand "*" to mean "applies to wake, brief, and retro alike" rather
-#   than repeating the row three times.
+#   is n/a, column 4 = stated reason) | internal (a CLAST_* var that is read
+#   from the environment in lib/clast/**.bash but is dispatcher-internal
+#   plumbing or a test-only hook, never user-set config — column 3 = var
+#   name, column 4 = stated reason; exempts the var from assertion 5's
+#   docs/reference/config.md check, self-expiring if the var no longer has a
+#   live read site — see test-parity.sh). The global-env/internal rows below
+#   use subcommand "*" to mean "applies to wake, brief, and retro alike"
+#   rather than repeating the row three times.
 wake	flag	--auto	skills/wake/SKILL.md
 wake	env	CLAST_WAKE_SINCE	skills/wake/SKILL.md
 wake	env	CLAST_WAKE_AUTO_MIN_CHARS	skills/wake/SKILL.md
@@ -22,3 +27,7 @@ undismiss	cli-only	n/a	Intentionally CLI-only: a thin, model-free passthrough to
 *	env	CLAST_LLM_BASE_URL	docs/reference/config.md (shared by wake, brief, and retro; not subcommand-specific)
 *	env	CLAST_LLM_API_KEY	docs/reference/config.md (shared by wake, brief, and retro; not subcommand-specific)
 *	env	CLAST_LLM_MODEL	docs/reference/config.md (shared by wake, brief, and retro; not subcommand-specific)
+*	internal	CLAST_LIB	Dispatcher bootstrap path, read via ${CLAST_LIB:-...} in clast-lib.bash and clast-porcelain-lib.bash to locate the lib directory; never user-set config.
+*	internal	CLAST_JSON	Internal carrier for the --json flag across ~15 subcommands; users set the flag, not the variable.
+*	internal	CLAST_COMMAND_MARKER_RE	Internal regex constant, assigned once in clast-classify-lib.bash, read twice; not user-tunable.
+*	internal	CLAST_NOW_EPOCH	Test-only time-freeze hook (see its comment at clast-lib.bash:137); not user-set config.
