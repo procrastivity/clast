@@ -225,6 +225,14 @@ If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is 
 
 When a promote option is selected, prompt the user for the title and content of that promoted item before writing.
 
+**Note:** the promote-to-decision/common-issue/workflow options above are a deliberate skill-only
+capability, not CLI lag — the CLI's interactive menu (`_clast_wake_prompt_choice` in `wake.bash`)
+never had promote options at all, because the skill *is* the LLM turn and can synthesize a
+decision/common-issue/workflow body inline, something a keystroke-driven CLI menu has no analog
+for. Because this isn't a CLI flag or `CLAST_*` env var, step-07's BDS-89 parity guard needs to
+either add a "skill-only" allowlist category or consciously scope itself to CLI flags/env vars
+only — it doesn't fit the existing `cli-only` category the way `undismiss` does.
+
 ## Editing handler
 
 If the user selects `Edit`:
