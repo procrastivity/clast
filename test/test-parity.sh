@@ -5,9 +5,7 @@
 # usage function directly (test-wake-auto.sh's pattern) rather than
 # subprocessing `clast <cmd> --help`.
 #
-# Assertions implemented here (1-5; 6 lands in a later commit as an
-# additional function called from the bottom of this file, matching
-# test-clast.sh's own plain-sequential-call style):
+# Assertions implemented here (1-6):
 #   1. Bidirectional --help<->manifest diff for wake/brief/retro (the
 #      subcommands with a usage_fn): every flag/env in --help must be a
 #      manifest row (direction A), and every mirrored manifest row for that
@@ -22,6 +20,8 @@
 #      `internal` manifest exemption or documented in
 #      docs/reference/config.md; every `internal` exemption row must itself
 #      still have a live read site (self-expiring).
+#   6. Every `- **options**:` AskUserQuestion block in skills/*/SKILL.md has
+#      at most 4 options (BDS-100's hard cap).
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -312,6 +312,40 @@ assert_parity_5_env_vars_documented() {
   done < <(grep -v '^#' "$PARITY_TSV")
 }
 
+# --- Assertion 6: AskUserQuestion options capped at 4 -----------------------
+#
+# Scans every skills/*/SKILL.md for `- **options**:` blocks (the convention
+# all three SKILL.md files use for AskUserQuestion). Counts the
+# two-space-indented bullet items immediately following each such line until
+# a non-bullet line, and asserts <=4 (BDS-100's hard cap). Bullet-counting on
+# the established convention, not a markdown AST — all three files use one
+# consistent list style.
+
+# _parity_option_block_counts <file> — prints "<line_no> <count>" for each
+# `- **options**:` block in the file.
+_parity_option_block_counts() {
+  awk '
+    /^- \*\*options\*\*:$/ { pending = NR; count = 0; next }
+    pending && /^  - / { count++; next }
+    pending { print pending, count; pending = 0 }
+    END { if (pending) print pending, count }
+  ' "$1"
+}
+
+assert_parity_6_askuserquestion_option_cap() {
+  local file line_no count
+  for file in skills/*/SKILL.md; do
+    while read -r line_no count; do
+      if (( count <= 4 )); then
+        _clast_test_pass "assertion6: $file:$line_no options block has <=4 options ($count)"
+      else
+        _clast_test_fail "assertion6: $file:$line_no options block has <=4 options"
+        printf '       ERROR: %s:%d AskUserQuestion options block has %d options (max 4)\n' "$file" "$line_no" "$count" >&2
+      fi
+    done < <(_parity_option_block_counts "$file")
+  done
+}
+
 # --- Run ----------------------------------------------------------------------
 
 assert_parity_1_help_vs_manifest
@@ -319,5 +353,6 @@ assert_parity_2_mentioned_in_skill_md
 assert_parity_3_reason_nonempty
 assert_parity_4_wake_since_default
 assert_parity_5_env_vars_documented
+assert_parity_6_askuserquestion_option_cap
 
 clast_test_summary
