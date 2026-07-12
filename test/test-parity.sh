@@ -39,6 +39,31 @@ source lib/clast/clast-porcelain-subcommands/brief.bash
 source lib/clast/clast-porcelain-subcommands/retro.bash
 
 PARITY_TSV="test/parity.tsv"
+PARITY_KNOWN_RED_TSV="test/parity-known-red.tsv"
+
+# --- Baseline helpers (Decision 5: self-expiring known-violation list) ------
+#
+# test/parity-known-red.tsv rows are assertion<TAB>scope<TAB>identifier<TAB>
+# ticket. Each baselineable assertion (1, 5, 6) calls _parity_baseline_check
+# from its own fail branch with the exact scope/identifier it already
+# computed for that violation, so the two can never drift apart. A match is a
+# silent pass (and marks the row "seen" for the self-expiry check at the
+# bottom of the file); no match is a hard failure — fail-closed is preserved
+# for anything not pre-listed in the baseline.
+
+declare -A _PARITY_BASELINE_SEEN=()
+
+# _parity_baseline_check <assertion> <scope> <identifier> — true (0) and
+# marks the row "seen" if it matches a baseline row; false (1) otherwise.
+_parity_baseline_check() {
+  local assertion="$1" scope="$2" identifier="$3"
+  awk -F'\t' -v a="$assertion" -v s="$scope" -v i="$identifier" '
+    $0 !~ /^#/ && $1 == a && $2 == s && $3 == i { found = 1 }
+    END { exit !found }
+  ' "$PARITY_KNOWN_RED_TSV" || return 1
+  _PARITY_BASELINE_SEEN["$assertion"$'\t'"$scope"$'\t'"$identifier"]=1
+  return 0
+}
 
 # --- Manifest helpers --------------------------------------------------------
 
@@ -110,6 +135,8 @@ _parity_assert_1_subcommand() {
     [[ -z "$tok" ]] && continue
     if _parity_manifest_has "$sub" flag "$tok"; then
       _clast_test_pass "assertion1 A: $sub $tok is in the manifest"
+    elif _parity_baseline_check 1 "$sub" "$tok"; then
+      _clast_test_pass "assertion1 A: $sub $tok is in the manifest (baselined, see test/parity-known-red.tsv)"
     else
       _clast_test_fail "assertion1 A: $sub $tok is in the manifest"
       printf '       ERROR: %s --help documents flag %s with no test/parity.tsv row\n' "$sub" "$tok" >&2
@@ -120,6 +147,8 @@ _parity_assert_1_subcommand() {
     [[ -z "$tok" ]] && continue
     if _parity_manifest_has "$sub" env "$tok"; then
       _clast_test_pass "assertion1 A: $sub $tok is in the manifest"
+    elif _parity_baseline_check 1 "$sub" "$tok"; then
+      _clast_test_pass "assertion1 A: $sub $tok is in the manifest (baselined, see test/parity-known-red.tsv)"
     else
       _clast_test_fail "assertion1 A: $sub $tok is in the manifest"
       printf '       ERROR: %s --help documents env %s with no test/parity.tsv row\n' "$sub" "$tok" >&2
@@ -135,6 +164,8 @@ _parity_assert_1_subcommand() {
       flag)
         if grep -Fxq -- "$key" <<<"$flags"; then
           _clast_test_pass "assertion1 B: $sub $key ($kind) is in --help"
+        elif _parity_baseline_check 1 "$sub" "$key"; then
+          _clast_test_pass "assertion1 B: $sub $key ($kind) is in --help (baselined, see test/parity-known-red.tsv)"
         else
           _clast_test_fail "assertion1 B: $sub $key ($kind) is in --help"
           printf '       ERROR: test/parity.tsv lists %s flag %s but %s --help does not document it\n' "$sub" "$key" "$sub" >&2
@@ -143,6 +174,8 @@ _parity_assert_1_subcommand() {
       env)
         if grep -Fxq -- "$key" <<<"$envs"; then
           _clast_test_pass "assertion1 B: $sub $key ($kind) is in --help"
+        elif _parity_baseline_check 1 "$sub" "$key"; then
+          _clast_test_pass "assertion1 B: $sub $key ($kind) is in --help (baselined, see test/parity-known-red.tsv)"
         else
           _clast_test_fail "assertion1 B: $sub $key ($kind) is in --help"
           printf '       ERROR: test/parity.tsv lists %s env %s but %s --help does not document it\n' "$sub" "$key" "$sub" >&2
@@ -292,6 +325,8 @@ assert_parity_5_env_vars_documented() {
     fi
     if grep -Fq -- "$var" "$docs_file"; then
       _clast_test_pass "assertion5: $var documented in $docs_file"
+    elif _parity_baseline_check 5 "$var" "undocumented"; then
+      _clast_test_pass "assertion5: $var documented in $docs_file (baselined, see test/parity-known-red.tsv)"
     else
       _clast_test_fail "assertion5: $var documented in $docs_file"
       printf '       ERROR: %s is read from the environment in lib/clast/**.bash but not documented in %s\n' "$var" "$docs_file" >&2
@@ -338,12 +373,42 @@ assert_parity_6_askuserquestion_option_cap() {
     while read -r line_no count; do
       if (( count <= 4 )); then
         _clast_test_pass "assertion6: $file:$line_no options block has <=4 options ($count)"
+      elif _parity_baseline_check 6 "$file" "$line_no"; then
+        _clast_test_pass "assertion6: $file:$line_no options block has <=4 options (baselined, see test/parity-known-red.tsv)"
       else
         _clast_test_fail "assertion6: $file:$line_no options block has <=4 options"
         printf '       ERROR: %s:%d AskUserQuestion options block has %d options (max 4)\n' "$file" "$line_no" "$count" >&2
       fi
     done < <(_parity_option_block_counts "$file")
   done
+}
+
+# --- Baseline self-expiry ----------------------------------------------------
+#
+# Runs after every baselineable assertion (1, 5, 6) has had a chance to mark
+# its matching rows "seen". Any row never matched against a live violation
+# means the underlying bug no longer reproduces — a hard error naming the
+# stale row (Decision 5's "shrink-only" rule). A row with an empty/
+# placeholder ticket is also a hard error (assertion 3's no-bare-entries
+# rule, reused).
+
+assert_parity_baseline_self_expiry() {
+  local assertion scope identifier ticket
+  while IFS=$'\t' read -r assertion scope identifier ticket; do
+    if _parity_is_placeholder_reason "$ticket"; then
+      _clast_test_fail "baseline: $assertion/$scope/$identifier has a non-empty ticket"
+      printf '       ERROR: test/parity-known-red.tsv row %s/%s/%s has an empty/placeholder ticket column\n' "$assertion" "$scope" "$identifier" >&2
+    else
+      _clast_test_pass "baseline: $assertion/$scope/$identifier has a non-empty ticket"
+    fi
+
+    if [[ -n "${_PARITY_BASELINE_SEEN["$assertion"$'\t'"$scope"$'\t'"$identifier"]:-}" ]]; then
+      _clast_test_pass "baseline: $assertion/$scope/$identifier still reproduces"
+    else
+      _clast_test_fail "baseline: $assertion/$scope/$identifier still reproduces"
+      printf '       ERROR: stale baseline entry %s/%s/%s (ticket %s): violation no longer reproduces, delete this line\n' "$assertion" "$scope" "$identifier" "$ticket" >&2
+    fi
+  done < <(grep -v '^#' "$PARITY_KNOWN_RED_TSV")
 }
 
 # --- Run ----------------------------------------------------------------------
@@ -354,5 +419,6 @@ assert_parity_3_reason_nonempty
 assert_parity_4_wake_since_default
 assert_parity_5_env_vars_documented
 assert_parity_6_askuserquestion_option_cap
+assert_parity_baseline_self_expiry
 
 clast_test_summary

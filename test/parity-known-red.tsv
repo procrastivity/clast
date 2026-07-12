@@ -1,0 +1,23 @@
+# Self-expiring baseline of known, ticketed parity violations for
+# test/test-parity.sh (Decision 5). Tab-separated:
+# assertion<TAB>scope<TAB>identifier<TAB>ticket
+# Each row must match a violation currently reproducing in the tree, using
+# the exact scope/identifier values the owning assertion's fail branch
+# already computes (see _parity_baseline_check callers in test-parity.sh):
+#   assertion 1 (bidirectional --help<->manifest diff): scope = subcommand,
+#     identifier = the flag/env token.
+#   assertion 5 (CLAST_* vs docs/reference/config.md): scope = the var name,
+#     identifier = the literal "undocumented" (assertion 5 has exactly one
+#     failure mode).
+#   assertion 6 (AskUserQuestion option cap): scope = the SKILL.md path,
+#     identifier = the options-block's line number.
+# Self-expiry: a row that stops matching a live violation is itself a hard
+# error (delete it). A row with an empty/placeholder ticket is itself a hard
+# error. This file only ever shrinks as BDS-100/BDS-101 get fixed.
+1	wake	CLAST_WAKE_AUTODISMISS_NOOP	BDS-101
+5	CLAST_AUTHOR	undocumented	BDS-101
+5	CLAST_MACHINE	undocumented	BDS-101
+5	CLAST_RETRO_PROGRESS	undocumented	BDS-101
+5	CLAST_VERBOSE	undocumented	BDS-101
+6	skills/wake/SKILL.md	100	BDS-100
+6	skills/wake/SKILL.md	223	BDS-100
