@@ -1,8 +1,8 @@
 # `clast` — Skill Prompts
 
-> Reference doc. Read [What is clast?](../explanation/what-is-clast.md) first. This doc spec's the Claude Code plugin: the three skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
+> Reference doc. Read [What is clast?](../explanation/what-is-clast.md) first. This doc spec's the Claude Code plugin: the two skills, their `SKILL.md` content, their internal LLM prompt templates, and the `AskUserQuestion` option sets.
 
-Three skills total: `wake`, `brief`, and (optional, deferred to v1.1) `breadcrumb`. Plus a `SessionStart` hook script.
+Two skills total: `wake` and `brief`. Plus a `SessionStart` hook script.
 
 The core principle: skills are **thin LLM layers over the CLI**. Every skill follows the same shape: gather data via `clast-plumbing` subcommands, do the LLM work (drafting, synthesis, prompting), then write back via `clast-plumbing` subcommands. Skills never read or write the journal directly.
 
@@ -20,166 +20,13 @@ A `SKILL.md` file has YAML frontmatter (name + description) and a body that beco
 
 **Purpose:** The primary curation point. Snapshot fresh transcripts, iterate yesterday's sessions, generate a draft entry per session, prompt the user to accept/edit/promote, write accepted entries via `clast-plumbing entries write`.
 
-### `SKILL.md` content
+`wake` is the primary curation point: it snapshots fresh transcripts, then walks through yesterday's uncurated sessions one at a time, generating a draft journal entry for each. The user accepts, edits, or skips each draft via `AskUserQuestion`, optionally promoting decisions, common-issues, or workflows along the way, and accepted entries are written via `clast-plumbing entries write`.
 
-```markdown
----
-name: wake
-description: Generate curated journal entries from yesterday's Claude Code sessions across all projects. Use when the user says "/wake", "wake", "morning briefing", "catch me up on yesterday", "what did I work on yesterday", "review my day", "process yesterday's sessions", or otherwise signals they want to curate prior work across projects at the start of a new day. Runs `clast-plumbing snapshot` to ensure fresh data, then walks through each uncurated session from yesterday and proposes a draft entry the user can accept, edit, or skip. Prompts for promotion of decisions, common-issues, and workflows per accepted session. This is the once-per-day curation flow; for per-project briefings use /brief; for mid-session pivots use session-brief.
----
-
-# Wake
-
-Process yesterday's Claude Code sessions across all projects. For each session, generate a draft journal entry and walk the user through accepting/editing/skipping it.
-
-## Why this exists
-
-Curation at end-of-session has high friction (the user wants to stop, not summarize). Curation at start-of-next-day has lower friction (fresh eyes, easier to decide what's worth keeping). `/wake` is that start-of-next-day flow.
-
-The transcripts themselves are captured automatically by the SessionStart hook + cron — the user never has to remember to log anything. What `/wake` does is **curate the captured transcripts into durable entries the user controls**, and prompt for promotion of decisions, common-issues, and workflows along the way.
-
-## Step 1: Ensure fresh data
-
-Run `clast-plumbing snapshot` (idempotent; silent on no-op). This guarantees we're not missing anything that ran since the last hook fire.
-
-```bash
-clast-plumbing snapshot
-```
-
-Errors here are non-fatal — proceed even if it fails, just warn the user.
-
-## Step 2: Enumerate uncurated sessions
-
-```bash
-clast-plumbing sessions --since -30d --json
-```
-
-Filter to sessions with `curated: false`. If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
-
-If uncurated sessions span more than one day (e.g., after a weekend or break), present a triage prompt so the user can choose: process all, yesterday only, choose how many days back, or dismiss older sessions and process the rest. If only one day has uncurated sessions, skip triage and process directly.
-
-Group sessions by project for presentation. Order: most recent project first, sessions chronological within each project.
-
-## Step 3: For each session, generate a draft
-
-For each session in the list:
-
-1. Read session details:
-   ```bash
-   clast-plumbing show <session-id> --full --turns 8 --json
-   ```
-   This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
-
-2. Read breadcrumbs for this project from yesterday:
-   ```bash
-   clast-plumbing breadcrumb --read --project <slug> --day yesterday
-   ```
-
-3. Generate a draft entry using the **draft generation prompt** (see below).
-
-4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in <project> at HH:MM:".
-
-5. Present the **promotion question** (see below) via AskUserQuestion.
-
-6. Handle the response:
-   - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
-   - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
-   - **Skip**: do not write.
-   - **Stop here**: end the entire `/wake` flow, leaving remaining sessions uncurated (user can resume tomorrow).
-
-## Step 4: Final summary
-
-After all sessions are processed (or user stopped early), print a summary:
-
-```
-Wake complete.
-Curated: 3 sessions across 2 projects.
-Skipped: 1 session.
-Remaining uncurated: 0.
-
-Promoted:
-  Decisions: 1
-  Common-issues: 0
-  Workflows: 1
-
-Run `/brief <project>` to start working on a specific project today.
-```
-
-## Draft generation prompt
-
-The prompt templates live in `lib/clast/prompts/` so they are shared between the plugin skill and the porcelain `clast wake` subcommand:
-
-- **System prompt:** [`lib/clast/prompts/wake-draft-system.md`](../../lib/clast/prompts/wake-draft-system.md)
-- **User prompt template:** [`lib/clast/prompts/wake-draft-user.md`](../../lib/clast/prompts/wake-draft-user.md)
-
-The user prompt template uses `{{placeholder}}` syntax: `{{project}}`, `{{branch}}`, `{{start}}`, `{{end}}`, `{{msg_count}}`, `{{first_turns}}`, `{{last_turns}}`, `{{breadcrumbs}}`.
-
-When generating each draft, read those files, substitute the placeholders with session data, and use them as the system and user messages respectively.
-
-## AskUserQuestion: promotion options per session
-
-After showing the draft, present:
-
-- **question**: "What would you like to do with this draft?"
-- **header**: "Session draft"
-- **multiSelect**: true
-- **options**:
-  - `Accept`
-  - `Accept + promote decision` — also write a decision file
-  - `Accept + promote common-issue` — also write a common-issue file
-  - `Accept + promote workflow` — also write a workflow file
-  - `Edit` — user wants to revise; will prompt for changes
-  - `Skip` — do not write this entry
-  - `Stop here` — end /wake entirely, leave remaining sessions uncurated
-
-If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting).
-
-When a promote option is selected, prompt the user for the title and content of that promoted item before writing.
-
-## Editing handler
-
-If the user selects `Edit`:
-
-1. Ask "What should change?"
-2. Take their answer as a feedback note.
-3. Regenerate the draft, including their feedback in the prompt as "Revisions requested by user: <feedback>".
-4. Show the new draft.
-5. Present the same promotion options again. Loop until the user stops editing.
-
-## Writing the entry
-
-When the user accepts:
-
-1. Extract the suggested tags from the draft (the user may have edited them).
-2. Pipe the entry body (without the suggested-tags trailer) to `clast-plumbing entries write`:
-
-```bash
-clast-plumbing entries write \
-  --session <session-id> \
-  --slug <session-slug> \
-  --tags <tag1>,<tag2>,<tag3> \
-  --title "<title>" \
-  --body-stdin
-```
-
-(Sending the markdown body via stdin, ending with EOF.)
-
-3. If the write succeeds, append a one-line confirmation to the running summary.
-
-For promoted items (decisions, common-issues, workflows): currently these are tracked inside the entry's body for v1. **TODO for v1.1: separate `clast-plumbing decisions write` / `clast-plumbing common-issues write` / `clast-plumbing workflows write` subcommands and a directory structure to match.** Note this in the user-facing summary so the user knows they're folded into the entry for now.
-
-## Edge cases
-
-- **No sessions from yesterday**: print "No sessions from yesterday." and stop.
-- **All sessions already curated**: print "All sessions from yesterday already curated." and stop.
-- **`clast-plumbing snapshot` fails**: warn the user, then attempt to proceed with whatever's already in the manifest.
-- **`clast-plumbing show` fails for a specific session**: skip that session, note it in the final summary, continue with the rest.
-- **User says "do them all without prompting"**: not a v1 feature. Each session gets its own AskUserQuestion. The friction is intentional — it's where curation happens.
-```
+Full step-by-step implementation: [skills/wake/SKILL.md](../../skills/wake/SKILL.md).
 
 ### Draft generation prompt — design notes (not for the SKILL.md itself)
 
-A few intentional choices in the prompt template above worth flagging:
+A few intentional choices in the wake draft-generation prompt worth flagging:
 
 - **"Don't speculate about why an approach was abandoned"** — this is the WHY-of-dead-ends gap I flagged repeatedly. The skill explicitly invites the user to fill it in rather than letting the LLM guess.
 - **"Use the user's terminology"** — Beau works in a heavy proper-noun world (`xesapps`, `xcind`, `vw_Consumer_Fields_All`, `Wyvern`, `Xciton`). The LLM should preserve these as-is, not rephrase them.
@@ -193,94 +40,9 @@ A few intentional choices in the prompt template above worth flagging:
 
 **Purpose:** Per-project briefing synthesized from recent entries + today's breadcrumbs. Fast, read-only. Used when starting work in a specific repo today.
 
-### `SKILL.md` content
+`brief` produces a per-project briefing synthesized from recent curated entries plus today's breadcrumbs. It's fast and read-only — used when starting work in a specific repo today, resolving the project from the current working directory (or an optional slug argument) and never writing anything back.
 
-```markdown
----
-name: brief
-description: Synthesize a briefing for the current project (or a named one) so the user can resume work without re-explaining context. Use when the user says "/brief", "brief me", "catch me up", "where was I", "what was I working on", "load last session", "resume", or otherwise signals they want prior context for the project they're about to work on. Optionally accepts a project slug like "/brief xesapps". Reads recent curated entries and today's breadcrumbs from `~/.claude/journal/` and produces a 2–5k-token briefing. This is the per-project read flow; for cross-project daily curation use /wake; for mid-session pivots use session-brief.
----
-
-# Brief
-
-Synthesize a briefing for the current (or named) project so the user can resume without re-explaining context.
-
-## Why this exists
-
-`/wake` curates yesterday's work into entries. `/brief` reads those entries back when starting work in a specific repo. The two are complementary: one writes, one reads.
-
-## Step 1: Resolve the project
-
-If the user passed a slug as an argument (`/brief xesapps`), use it directly. Otherwise resolve from current working directory:
-
-```bash
-clast-plumbing registry resolve "$(pwd)"
-```
-
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
-
-## Step 2: Gather data
-
-In parallel:
-
-```bash
-# Recent curated entries for this project (newest first)
-clast-plumbing entries --project <slug> --limit 5 --json
-
-# Today's breadcrumbs for this project
-clast-plumbing breadcrumb --read --project <slug> --day today
-
-# Today's session activity (if any — user might have started already)
-clast-plumbing sessions --day today --project <slug> --json
-```
-
-For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):
-
-```bash
-clast-plumbing entries read <entry-path>
-```
-
-## Step 3: Synthesize the briefing
-
-Using the **synthesis prompt** (see below), produce a briefing of 2–5k tokens. Structure:
-
-```
-## Brief — <project>
-
-**Active thread:** <one-line from most recent entry's "Open threads" section, or "None">
-
-**Last session:** <date> on branch `<branch>`: <one-line goal>
-- Work done: <2-3 bullets condensed from most recent entry>
-- Open threads: <bullets, if any>
-- Dead ends to avoid: <bullets, if any>
-
-**Recent sessions:** (up to 5)
-- <date> [<branch>] <slug>: <one-line goal>
-
-**Today's breadcrumbs:** (if any)
-- HH:MM — <text>
-
-**Today's sessions:** (if user has already worked today)
-- HH:MM start: <branch>, <msg-count> messages
-
-**Suggested next step:** <derived from active thread + breadcrumbs>
-```
-
-End with one of:
-
-- "Resume? Active thread: '<thread>'. Suggested next step: <step>."
-- "No active thread. Last session ended cleanly. What are you working on today?"
-
-## Step 4: Don't write anything
-
-Brief is read-only. Never invoke `clast-plumbing entries write` or `clast-plumbing breadcrumb` from this skill.
-
-## Edge cases
-
-- **No entries for project**: print "No curated entries for `<slug>` yet. Run `/wake` to process recent sessions, or run `clast-plumbing sessions --project <slug>` to see what's available." and stop.
-- **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
-- **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
-```
+Full step-by-step implementation: [skills/brief/SKILL.md](../../skills/brief/SKILL.md).
 
 ### Synthesis prompt — internal
 
@@ -310,53 +72,6 @@ Produce a briefing using this structure (omit any section that has no content):
 Be concise. Use the user's terminology. Don't repeat content across sections. The total briefing should be 2–5k tokens — if you're approaching that, summarize rather than list verbatim.
 
 For the "Suggested next step": prefer the most recent entry's "Open threads" content, then the most recent breadcrumb, then a synthesis of the recent work. If nothing concrete, say "No active thread."
-```
-
----
-
-## Skill 3: `breadcrumb` (optional, v1.1)
-
-**Recommendation:** defer to v1.1. The bare `clast-plumbing breadcrumb "<text>"` command is already trivial. A skill wrapper adds value mostly when context inference is needed.
-
-If shipped:
-
-### `SKILL.md` content
-
-```markdown
----
-name: breadcrumb
-description: Leave a quick in-flight note for tomorrow's wake to surface. Use when the user says "/breadcrumb", "leave a breadcrumb", "note for tomorrow", "remind me", "make a note", or otherwise signals they want to capture a one-line hint without breaking flow. The hint is appended to today's breadcrumb file for the current project. Different from /handoff (which doesn't exist in clast) and from session-brief (which generates a copy-to-clipboard brief for /clear pivots).
----
-
-# Breadcrumb
-
-Append a one-line hint to today's breadcrumb file for the current project.
-
-## Step 1: Resolve project
-
-```bash
-clast-plumbing registry resolve "$(pwd)"
-```
-
-If unresolved, ask the user: "Which project should this breadcrumb attach to?" Show registered slugs as options via AskUserQuestion, plus a "Global (no project)" option.
-
-## Step 2: Extract the text
-
-Take everything after the skill trigger as the breadcrumb text. If the user invoked it with no body, ask: "What would you like to note?"
-
-## Step 3: Write
-
-```bash
-clast-plumbing breadcrumb --project <slug> "<text>"
-# or for global:
-clast-plumbing breadcrumb --global "<text>"
-```
-
-## Step 4: Confirm
-
-Print: "Breadcrumb recorded for `<slug>` at HH:MM."
-
-That's it. Don't summarize, don't ask follow-up questions, don't suggest next steps. This is meant to be lightweight — the user is mid-flow.
 ```
 
 ---
@@ -425,14 +140,3 @@ Lives in `examples/cron/crontab.sample`:
 ```
 
 For systemd-timer users: `examples/cron/systemd-timer.sample` should provide a `.service` + `.timer` pair with the same behavior.
-
----
-
-## Open questions about skills
-
-Pulled forward from the plan doc; resolve when implementing:
-
-1. **Should `/wake` accept a `--day` argument** (e.g., `/wake last-week` to process the whole week)? Recommendation: yes, but lower priority. Default stays "yesterday".
-2. **Should the draft generation prompt be exposed for user override** (e.g., a config file with their preferred entry template)? Recommendation: defer to v1.1. Iterate on the default first.
-3. **What happens if `AskUserQuestion` is interrupted partway through `/wake`** (user kills Claude)? Recommendation: nothing — accepted entries are already written, skipped ones can be revisited tomorrow.
-4. **Should `/brief` print to a file** for easy copy-paste, or just to chat? Recommendation: chat only. Add a `clast briefing --project <slug>` CLI command in v1.1 if file output is wanted.
