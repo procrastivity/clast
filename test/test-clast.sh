@@ -306,6 +306,7 @@ declare -a suites=(
   test/test-stats.sh
   test/test-install.sh
   test/test-migrate-slug.sh
+  test/test-parity.sh
 )
 
 fail=0
