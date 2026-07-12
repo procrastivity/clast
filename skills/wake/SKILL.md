@@ -131,7 +131,7 @@ For each session in the list:
 
 3. Generate a draft entry using the **draft generation prompt** (see below).
 
-4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in <project> at HH:MM:".
+4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in `<project>` (id: `<session-id>`, recorded: `<date>` `<start>`–`<end>` `<tz>`):".
 
 5. Present the **promotion question** (see below) via AskUserQuestion. (In [Auto mode](#auto-mode) skip this and accept the draft, subject to the length guard.)
 
