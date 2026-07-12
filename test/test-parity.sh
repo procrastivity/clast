@@ -5,7 +5,7 @@
 # usage function directly (test-wake-auto.sh's pattern) rather than
 # subprocessing `clast <cmd> --help`.
 #
-# Assertions implemented here (1-3; 4-6 land in later commits as additional
+# Assertions implemented here (1-4; 5-6 land in later commits as additional
 # functions called from the bottom of this file, matching test-clast.sh's
 # own plain-sequential-call style):
 #   1. Bidirectional --help<->manifest diff for wake/brief/retro (the
@@ -15,6 +15,8 @@
 #   2. Every mirrored flag/env row is mentioned in its skill_md_or_reason
 #      SKILL.md file.
 #   3. Every cli-only/skill_only row has a non-empty, non-placeholder reason.
+#   4. The shared CLAST_WAKE_SINCE default matches between wake.bash and
+#      skills/wake/SKILL.md.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -206,10 +208,50 @@ assert_parity_3_reason_nonempty() {
   done < <(grep -v '^#' "$PARITY_TSV")
 }
 
+# --- Assertion 4: shared CLAST_WAKE_SINCE default matches CLI<->skill -------
+
+# _parity_wake_since_default <file> — the default token from that file's
+# ${CLAST_WAKE_SINCE:-...} occurrence, or empty if not found.
+_parity_wake_since_default() {
+  # shellcheck disable=SC2016  # literal ${CLAST_WAKE_SINCE:-...} pattern, not expansion
+  grep -o '${CLAST_WAKE_SINCE:-[^}]*}' "$1" | head -n1 | sed -E 's/^\$\{CLAST_WAKE_SINCE:-(.*)\}$/\1/'
+}
+
+assert_parity_4_wake_since_default() {
+  local cli_file="lib/clast/clast-porcelain-subcommands/wake.bash"
+  local skill_file="skills/wake/SKILL.md"
+  local cli_default skill_default
+
+  cli_default="$(_parity_wake_since_default "$cli_file")"
+  skill_default="$(_parity_wake_since_default "$skill_file")"
+
+  if [[ -z "$cli_default" ]]; then
+    _clast_test_fail "assertion4: \${CLAST_WAKE_SINCE:-...} found in $cli_file"
+    # shellcheck disable=SC2016  # literal ${CLAST_WAKE_SINCE:-...} pattern, not expansion
+    printf '       ERROR: no ${CLAST_WAKE_SINCE:-...} occurrence found in %s\n' "$cli_file" >&2
+    return
+  fi
+  if [[ -z "$skill_default" ]]; then
+    _clast_test_fail "assertion4: \${CLAST_WAKE_SINCE:-...} found in $skill_file"
+    # shellcheck disable=SC2016  # literal ${CLAST_WAKE_SINCE:-...} pattern, not expansion
+    printf '       ERROR: no ${CLAST_WAKE_SINCE:-...} occurrence found in %s\n' "$skill_file" >&2
+    return
+  fi
+
+  if [[ "$cli_default" == "$skill_default" ]]; then
+    _clast_test_pass "assertion4: CLAST_WAKE_SINCE default matches ($cli_default)"
+  else
+    _clast_test_fail "assertion4: CLAST_WAKE_SINCE default matches"
+    printf '       ERROR: %s default is %q but %s default is %q\n' \
+      "$cli_file" "$cli_default" "$skill_file" "$skill_default" >&2
+  fi
+}
+
 # --- Run ----------------------------------------------------------------------
 
 assert_parity_1_help_vs_manifest
 assert_parity_2_mentioned_in_skill_md
 assert_parity_3_reason_nonempty
+assert_parity_4_wake_since_default
 
 clast_test_summary
