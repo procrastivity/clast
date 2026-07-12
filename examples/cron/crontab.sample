@@ -12,5 +12,12 @@
 # Alternative: once daily for hands-off archival.
 # 10 4 * * * /usr/local/bin/clast-plumbing snapshot >/dev/null 2>&1
 
+# Alternative: curate the day unattended with `clast wake --auto`.
+# Requires CLAST_LLM_BASE_URL / CLAST_LLM_API_KEY / CLAST_LLM_MODEL set
+# explicitly in this crontab -- cron does not source your login shell's
+# profile, so without these the job silently no-ops instead of curating.
+# See docs/guides/automate-with-cron.md#curating-unattended.
+# 0 6 * * * /usr/local/bin/clast wake --auto >/dev/null 2>&1
+
 # Alternative: no cron. Rely on the SessionStart hook installed with the plugin.
 # The hook covers most use cases already; cron is only useful when you want capture without ever opening Claude.
