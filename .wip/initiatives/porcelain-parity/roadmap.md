@@ -43,7 +43,7 @@ that the wake `--since` default matches across surfaces, so the docs must be
 true and steps 01-05 must have settled before it can pass.
 
 - **step-06 — docs: porcelain flags, and kill the stale cron claims** ✅ shipped 2026-07-12 — delete the "`clast wake` is interactive and expects a tty — don't run it from cron" assertions in `docs/guides/run-without-claude-code.md`, which `--auto` makes false; document `--auto` and `CLAST_WAKE_AUTO_MIN_CHARS`; add a `clast wake --auto` example to the cron and systemd guides; add the missing `[wake]` block to `examples/config/config.toml.sample`; decide whether porcelain flags belong in `docs/reference/cli.md`, which today documents `clast-plumbing` only. Do not hand-edit `CHANGELOG.md` — git-cliff generates it. `[tracker: BDS-87]`
-- **step-07 — the parity drift guard** — add `test/parity.tsv` (per subcommand: each flag and `CLAST_*` var, tagged `mirrored` or `cli-only`) and `test/test-parity.sh` asserting the five checks, registered in the `suites=()` array in `test/test-clast.sh`. It must fail closed: an unclassified flag is an error, so drift is caught by forcing a decision when the flag is added. `[tracker: BDS-89]`
+- **step-07 — the parity drift guard** ✅ shipped 2026-07-12 — add `test/parity.tsv` (per subcommand: each flag and `CLAST_*` var, tagged `mirrored` or `cli-only`) and `test/test-parity.sh` asserting the five checks, registered in the `suites=()` array in `test/test-clast.sh`. It must fail closed: an unclassified flag is an error, so drift is caught by forcing a decision when the flag is added. `[tracker: BDS-89]`
 
 ---
 
