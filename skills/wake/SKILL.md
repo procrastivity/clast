@@ -102,6 +102,9 @@ Then present via AskUserQuestion:
   - `Yesterday only` — only process yesterday's sessions
   - `Choose days back` — prompt for a number, process only that many days back
   - `Dismiss older, process recent` — prompt for how many days to keep, dismiss the rest via `$CLAST_BIN sessions dismiss`, then process what remains
+  - `Quit` — end `/wake` now; nothing processed
+
+If `Quit` is selected, stop the entire `/wake` flow immediately — do not process, dismiss, or write anything, and skip the rest of Step 2/Step 3/Step 4 entirely. This differs from the per-session `Stop here` option (see below): `Stop here` is chosen after some sessions have already been processed, so the run ends with a partial summary of what was done; `Quit` at triage ends the run before any session in this backlog has been touched, so zero sessions are processed.
 
 If only one day has uncurated sessions, skip triage and process directly.
 
