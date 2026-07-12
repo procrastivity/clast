@@ -43,9 +43,10 @@ If the user passed a slug as an argument (`/brief xesapps`), use it directly. Ot
 
 ```bash
 $CLAST_BIN registry resolve "$(pwd)"
+$CLAST_BIN registry resolve "$(pwd)" --json 2>/dev/null | jq -r '.label // empty'
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
+Use the first command's output as the project slug for the rest of the brief, and the second command's `.label` field as `current_label` for the user prompt. If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -53,7 +54,7 @@ In parallel:
 
 ```bash
 # Recent curated entries for this project (newest first)
-$CLAST_BIN --json entries --project <slug> --limit 5
+$CLAST_BIN --json entries --project <slug>
 
 # Today's breadcrumbs for this project
 $CLAST_BIN breadcrumb --read --project <slug> --day today
@@ -61,6 +62,15 @@ $CLAST_BIN breadcrumb --read --project <slug> --day today
 # Today's session activity (if any — user might have started already)
 $CLAST_BIN --json sessions --day today --project <slug>
 ```
+
+For entries, follow the CLI's grouping policy exactly:
+
+1. Treat each entry's workspace key as `.label // .branch // "default"`.
+2. Deduplicate those keys in newest-first order of first appearance.
+3. If the current workspace label was resolved from `pwd` and that label appears in the list, hoist that group to the front.
+4. Read up to 3 entries per group and stop after 8 entries total.
+5. When there is more than one group, render a header before each group: `## Workspace: <label> (branch: <branch>)`.
+6. When there is only one group, keep the output flat with no workspace headers (same as today).
 
 For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):
 
@@ -70,34 +80,7 @@ $CLAST_BIN entries read <entry-path>
 
 ## Step 3: Synthesize the briefing
 
-Using the **synthesis prompt** (see below), produce a briefing of 2–5k tokens. Structure:
-
-```
-## Brief — <project>
-
-**Active thread:** <one-line from most recent entry's "Open threads" section, or "None">
-
-**Last session:** <date> on branch `<branch>`: <one-line goal>
-- Work done: <2-3 bullets condensed from most recent entry>
-- Open threads: <bullets, if any>
-- Dead ends to avoid: <bullets, if any>
-
-**Recent sessions:** (up to 5)
-- <date> [<branch>] <slug>: <one-line goal>
-
-**Today's breadcrumbs:** (if any)
-- HH:MM — <text>
-
-**Today's sessions:** (if user has already worked today)
-- HH:MM start: <branch>, <msg-count> messages
-
-**Suggested next step:** <derived from active thread + breadcrumbs>
-```
-
-End with one of:
-
-- "Resume? Active thread: '<thread>'. Suggested next step: <step>."
-- "No active thread. Last session ended cleanly. What are you working on today?"
+Read the shared prompt templates from `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md` and `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`, then substitute the user template placeholders `{{project}}`, `{{current_label}}`, `{{entries}}`, `{{breadcrumbs}}`, and `{{sessions}}`. The output structure is defined by `brief-system.md`; change it there, not in this skill.
 
 ## Step 4: Don't write anything
 
@@ -109,32 +92,11 @@ Brief is read-only. Never invoke write-form subcommands (`entries write`, `bread
 - **Slug resolves but no entries and no sessions**: print "Project `<slug>` registered but has no journal activity yet."
 - **Today's session count > 5**: summarize ("worked 12 sessions today, most recent 16:22 on branch `loop-guard-ngram`") rather than listing all.
 
-## Synthesis prompt
+## Shared prompt templates
 
-<!-- step-13 addition: inlined synthesis prompt with explicit structure re-statement -->
+The installed prompt templates live under `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/`:
 
-```
-You are synthesizing a project briefing for the user. They are about to start work on the `{slug}` project and want a tight summary of where they left off.
+- **System prompt:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md`
+- **User prompt template:** `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`
 
-Recent curated entries (newest first):
-{entries_json_with_bodies}
-
-Today's breadcrumbs for this project:
-{breadcrumbs_today}
-
-Today's session activity for this project:
-{sessions_today}
-
-Produce a briefing using this structure (omit any section that has no content):
-
-- Active thread: one-line from most recent entry's "Open threads", or "None"
-- Last session: date, branch, one-line goal, work done (2-3 bullets), open threads, dead ends to avoid
-- Recent sessions: up to 5 entries with date, branch, slug, one-line goal
-- Today's breadcrumbs: timestamped list if any
-- Today's sessions: list if user has already worked today
-- Suggested next step: derived from active thread + breadcrumbs
-
-Be concise. Use the user's terminology. Don't repeat content across sections. The total briefing should be 2–5k tokens — if you're approaching that, summarize rather than list verbatim.
-
-For the "Suggested next step": prefer the most recent entry's "Open threads" content, then the most recent breadcrumb, then a synthesis of the recent work. If nothing concrete, say "No active thread."
-```
+If those files are missing, tell the user the template is unavailable and stop.

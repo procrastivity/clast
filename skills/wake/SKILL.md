@@ -50,10 +50,10 @@ Errors here are non-fatal — proceed even if it fails, just warn the user.
 
 ## Step 2: Enumerate uncurated sessions
 
-Query all recent sessions (last 30 days) and filter to uncurated:
+Query all recent sessions and filter to uncurated. The scan window defaults to 14 days and is configurable via `CLAST_WAKE_SINCE`:
 
 ```bash
-$CLAST_BIN --json sessions --since -30d
+$CLAST_BIN --json sessions --since "${CLAST_WAKE_SINCE:--14d}"
 ```
 
 Filter to sessions with `curated: false` or `stale: true` (stale sessions were curated but their transcript was updated since). If none remain, print "Nothing to curate — all sessions are curated or dismissed." and stop.
@@ -102,6 +102,9 @@ Then present via AskUserQuestion:
   - `Yesterday only` — only process yesterday's sessions
   - `Choose days back` — prompt for a number, process only that many days back
   - `Dismiss older, process recent` — prompt for how many days to keep, dismiss the rest via `$CLAST_BIN sessions dismiss`, then process what remains
+  - `Quit` — end `/wake` now; nothing processed
+
+If `Quit` is selected, stop the entire `/wake` flow immediately — do not process, dismiss, or write anything, and skip the rest of Step 2/Step 3/Step 4 entirely. This differs from the per-session `Stop here` option (see below): `Stop here` is chosen after some sessions have already been processed, so the run ends with a partial summary of what was done; `Quit` at triage ends the run before any session in this backlog has been touched, so zero sessions are processed.
 
 If only one day has uncurated sessions, skip triage and process directly.
 
@@ -119,6 +122,8 @@ For each session in the list:
    ```
    This returns metadata + first 8 and last 8 turns of the transcript (text only, no tool calls — kept compact).
 
+   Before using these turns to build the draft prompt, truncate any single turn's text that exceeds ~2000 characters: keep the first 2000 characters and note how many characters were cut (e.g. "… [N more chars truncated]"). This mirrors the CLI's per-turn `turn_cap=2000` and applies independently of the 8-turn count limit above — a single oversized turn (a large pasted blob or tool dump) should not bloat the prompt.
+
 2. Read breadcrumbs for this project from yesterday:
    ```bash
    $CLAST_BIN breadcrumb --read --project <slug> --day yesterday
@@ -126,7 +131,7 @@ For each session in the list:
 
 3. Generate a draft entry using the **draft generation prompt** (see below).
 
-4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in <project> at HH:MM:".
+4. Display the draft to the user inside a fenced markdown code block, with a brief preamble: "Here's a draft for the X session in `<project>` (id: `<session-id>`, recorded: `<date>` `<start>`–`<end>` `<tz>`):".
 
 5. Present the **promotion question** (see below) via AskUserQuestion. (In [Auto mode](#auto-mode) skip this and accept the draft, subject to the length guard.)
 
@@ -134,6 +139,7 @@ For each session in the list:
    - **Accept** (any combination of accept-flavored options): pipe the draft to `clast-plumbing entries write` via stdin.
    - **Edit**: prompt the user for what to change, regenerate the draft incorporating their feedback, loop.
    - **Skip**: do not write.
+   - **Dismiss**: pipe to `$CLAST_BIN sessions dismiss <session-id> --reason "dismissed via wake"`; do not write an entry.
    - **Stop here**: end the entire `/wake` flow, leaving remaining sessions uncurated (user can resume tomorrow).
 
 ## Step 4: Final summary
@@ -144,6 +150,7 @@ After all sessions are processed (or user stopped early), print a summary:
 Wake complete.
 Curated: 3 sessions across 2 projects.
 Auto-dismissed (no-op): 5 sessions.
+Dismissed: 1 session.
 Skipped: 1 session.
 Remaining uncurated: 0.
 
@@ -156,6 +163,17 @@ Promoted:
 
 Run `/brief <project>` to start working on a specific project today.
 ```
+
+(Include the `Dismissed:` line only when at least one session was dismissed this run, mirroring the CLI's summary output.)
+
+**Note:** this summary has no `Model time:` line (contrast the CLI's `wake.bash:600`, or its
+per-draft `done in Xs (model total Ys)` line at `wake.bash:499-501`), because draft generation
+*is* the current model turn, not a separately-clocked subprocess call. The CLI times a `curl` to
+an OpenAI-compatible endpoint (`clast_porcelain_llm_chat`) with
+`clast_porcelain_now`/`clast_porcelain_elapsed`; the skill's instructions have no equivalent call
+to start/stop a clock around, so there is no meaningful "model total" to render here. Same
+step-07/BDS-89 skill-only-category caveat as the promote-flow note in the per-session
+AskUserQuestion section below applies to this row too.
 
 ## Auto mode
 
@@ -208,12 +226,21 @@ After showing the draft, present:
   - `Accept + promote common-issue` — also write a common-issue file
   - `Accept + promote workflow` — also write a workflow file
   - `Edit` — user wants to revise; will prompt for changes
-  - `Skip` — do not write this entry
+  - `Skip` — do not write this entry (leaves it uncurated; can be revisited later)
+  - `Dismiss` — mark this session dismissed via `clast-plumbing sessions dismiss`; it won't be offered again
   - `Stop here` — end /wake entirely, leave remaining sessions uncurated
 
-If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting).
+If `Skip` and `Stop here` are both selected, treat as `Stop here`. If `Edit` is selected alongside any accept option, treat as `Edit` first (the user wants to revise before accepting). If `Dismiss` is selected alongside any other option, treat as `Dismiss` only — dismissal is a permanent, terminal action for this session, so it overrides Accept/Edit/Skip/Stop here selected in the same response.
 
 When a promote option is selected, prompt the user for the title and content of that promoted item before writing.
+
+**Note:** the promote-to-decision/common-issue/workflow options above are a deliberate skill-only
+capability, not CLI lag — the CLI's interactive menu (`_clast_wake_prompt_choice` in `wake.bash`)
+never had promote options at all, because the skill *is* the LLM turn and can synthesize a
+decision/common-issue/workflow body inline, something a keystroke-driven CLI menu has no analog
+for. Because this isn't a CLI flag or `CLAST_*` env var, step-07's BDS-89 parity guard needs to
+either add a "skill-only" allowlist category or consciously scope itself to CLI flags/env vars
+only — it doesn't fit the existing `cli-only` category the way `undismiss` does.
 
 ## Editing handler
 

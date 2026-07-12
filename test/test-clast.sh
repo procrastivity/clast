@@ -179,6 +179,69 @@ _assert_skill_wake_auto_mode() {
   return "$ok"
 }
 
+_assert_skill_retro_frontmatter() {
+  local skill=skills/retro/SKILL.md
+  local ok=0
+  if [[ ! -f "$skill" ]]; then
+    printf 'retro SKILL.md: file not found\n' >&2
+    return 1
+  fi
+  if [[ "$(head -1 "$skill")" != '---' ]]; then
+    printf 'retro SKILL.md: must begin with ---\n' >&2
+    ok=1
+  fi
+  if ! awk '/^---$/{n++; if(n==2){found=1; exit}} END{exit !found}' \
+       <(head -50 "$skill"); then
+    printf 'retro SKILL.md: closing --- not found within first 50 lines\n' >&2
+    ok=1
+  fi
+  if ! grep -q '^name: retro$' "$skill"; then
+    printf 'retro SKILL.md: missing name: retro\n' >&2
+    ok=1
+  fi
+  local key_count
+  key_count=$(awk '/^---$/{n++; next} n==1 && /^[A-Za-z_-]+:/{c++} END{print c+0}' "$skill")
+  if [[ "$key_count" -ne 2 ]]; then
+    printf 'retro SKILL.md: frontmatter must contain exactly two keys (found %d)\n' "$key_count" >&2
+    ok=1
+  fi
+  local desc_line
+  desc_line=$(grep -c '^description:' "$skill" || true)
+  if [[ "$desc_line" -lt 1 ]]; then
+    printf 'retro SKILL.md: missing description field\n' >&2
+    ok=1
+  fi
+  local desc_len
+  desc_len=$(awk '/^description:/{p=1} p{s=s $0} /^---$/ && NR>1{p=0} END{print length(s)}' "$skill")
+  if [[ "$desc_len" -lt 100 ]]; then
+    printf 'retro SKILL.md: description field too short (%d chars)\n' "$desc_len" >&2
+    ok=1
+  fi
+  return "$ok"
+}
+_assert_skill_retro_triggers() {
+  local skill=skills/retro/SKILL.md
+  local ok=0
+  for phrase in '/retro' 'work retrospective' 'summarize my week'; do
+    if ! grep -q "$phrase" "$skill"; then
+      printf 'retro SKILL.md: missing trigger phrase: %s\n' "$phrase" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+_assert_skill_retro_cli_commands() {
+  local skill=skills/retro/SKILL.md
+  local ok=0
+  for cmd in 'CLAST_BIN --json retro --bodies' 'CLAST_BIN --json retro --bodies --window'; do
+    if ! grep -q "$cmd" "$skill"; then
+      printf 'retro SKILL.md: missing CLI command: %s\n' "$cmd" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+
 _assert_plugin_assets() {
   local ok=0
   if ! jq -e . .claude-plugin/plugin.json >/dev/null; then
@@ -209,6 +272,12 @@ _assert_plugin_assets() {
   if ! _assert_skill_wake_cli_commands; then ok=1; fi
   printf 'plugin asset check: wake/SKILL.md auto mode mirrors --auto\n'
   if ! _assert_skill_wake_auto_mode; then ok=1; fi
+  printf 'plugin asset check: retro/SKILL.md frontmatter\n'
+  if ! _assert_skill_retro_frontmatter; then ok=1; fi
+  printf 'plugin asset check: retro/SKILL.md trigger phrases\n'
+  if ! _assert_skill_retro_triggers; then ok=1; fi
+  printf 'plugin asset check: retro/SKILL.md CLI commands\n'
+  if ! _assert_skill_retro_cli_commands; then ok=1; fi
   return "$ok"
 }
 
@@ -237,6 +306,7 @@ declare -a suites=(
   test/test-stats.sh
   test/test-install.sh
   test/test-migrate-slug.sh
+  test/test-parity.sh
 )
 
 fail=0

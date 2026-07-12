@@ -35,6 +35,28 @@ includes commented-out alternatives:
 Pick what matches your appetite. Idempotence means there's no cost to running
 more often than strictly needed.
 
+## Curating unattended
+
+`clast wake --auto` is also safe to run from cron: it skips the interactive
+triage menu and the per-session accept/edit/dismiss prompt entirely, never
+blocks on a tty, and suppresses trivial drafts via `CLAST_WAKE_AUTO_MIN_CHARS`
+(default `60`) so short or junk drafts don't pile up unreviewed.
+
+```cron
+0 6 * * * /usr/local/bin/clast wake --auto >/dev/null 2>&1
+```
+
+**Cron does not source your login shell's profile.** `clast wake` needs three
+env vars — `CLAST_LLM_BASE_URL`, `CLAST_LLM_API_KEY`, `CLAST_LLM_MODEL` — and
+if they're only set in your `.bashrc`/`.zshrc`, cron never sees them. Set them
+explicitly, either as `CLAST_LLM_*=...` lines at the top of the crontab or via
+a wrapper script that sources your profile before invoking `clast`. Skip this
+and the job doesn't error — it just silently no-ops, which is the most common
+way this kind of cron job goes unnoticed.
+
+See [`## clast wake`](./run-without-claude-code.md#clast-wake--curate-the-day)
+for the full `--auto` flag and env-var reference.
+
 ## When you don't need cron
 
 If you installed the Claude Code plugin, its `SessionStart` hook already runs

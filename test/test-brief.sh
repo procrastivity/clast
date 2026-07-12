@@ -13,6 +13,8 @@ _CLAST_TEST_NAME="test-brief"
 export PATH="$PWD/bin:$PATH"
 
 # Only function definitions are needed; sourcing has no side effects.
+# shellcheck source=lib/clast/clast-porcelain-lib.bash
+source lib/clast/clast-porcelain-lib.bash
 # shellcheck source=lib/clast/clast-porcelain-subcommands/brief.bash
 source lib/clast/clast-porcelain-subcommands/brief.bash
 
@@ -146,5 +148,15 @@ case "$out" in
   *) _clast_test_fail "gather: falls back to branch as group key"; printf '%s\n' "$out" >&2 ;;
 esac
 teardown_test_journal
+
+# === arg validation ========================================================
+export CLAST_LLM_BASE_URL="http://stub" CLAST_LLM_API_KEY="x" CLAST_LLM_MODEL="stub"
+assert_exit_code 2 clast_cmd_brief --bogus
+out="$(clast_cmd_brief --help 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "help: exits 0"
+case "$out" in *"Usage: clast brief"*) _clast_test_pass "help: usage text" ;; *) _clast_test_fail "help: usage text"; printf '%s\n' "$out" >&2 ;; esac
+out="$(clast_cmd_brief -- xesapps 2>/dev/null)" && rc=$? || rc=$?
+assert_eq "0" "$rc" "dashdash: exits 0"
+case "$out" in *"Briefing for project: xesapps"*) _clast_test_pass "dashdash: positional slug preserved" ;; *) _clast_test_fail "dashdash: positional slug preserved"; printf '%s\n' "$out" >&2 ;; esac
 
 clast_test_summary
