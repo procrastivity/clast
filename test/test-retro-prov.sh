@@ -75,8 +75,9 @@ source lib/clast/clast-porcelain-subcommands/retro.bash
 clast_porcelain_llm_chat() { printf -- '- **Shipped:** stub\n'; }
 
 _seed
-# shellcheck disable=SC2119  # intentional no-arg call (full-corpus retro)
-pout="$(clast_cmd_retro 2>/dev/null)"
+# Use the full corpus so this provenance/interrupted render test is not tied
+# to clast retro's rolling default window.
+pout="$(clast_cmd_retro --all 2>/dev/null)"
 case "$pout" in
   *"(filed 2026-07-05; work day reconstructed from session snapshots)"*) _clast_test_pass "porcelain: provenance note" ;;
   *) _clast_test_fail "porcelain: provenance note"; printf '%s\n' "$pout" >&2 ;;
