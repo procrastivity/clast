@@ -99,7 +99,33 @@ Each is tracked as a sub-issue of BDS-82:
   no ordering between them) and are candidates for parallel lanes. Confirm the
   file-overlap assumption before laning them; when in doubt, sequence.
 
-## Blocked on PR #45 — NEEDS BEAU (found 2026-07-12, during step-02)
+## ~~Blocked on PR #45~~ — RESOLVED 2026-07-12: Beau merged it
+
+**Beau merged PR #45** (merge commit `d4a27e5`). Verified on `origin/main`:
+`wake.bash` now has `_clast_wake_usage` and `--auto`, and
+`skills/wake/SKILL.md` no longer claims auto-curation is "not a v1 feature" —
+it documents `--auto`. **BDS-82's premise is now TRUE**, and the three steps
+that rested on it are UNPARKED: step-03 (BDS-84), step-06 (BDS-87), step-07
+(BDS-89).
+
+Two consequences carry forward:
+- **BDS-84's drift table is valid as written** — it was authored for a post-#45
+  world, and that is now the world. `--auto` is mirrored; the remaining rows are
+  the genuine pre-#45 divergences.
+- **BDS-89's guard now has a `wake --help` to diff.** BDS-86 was *not* the only
+  `--help` prerequisite (see below), but both `brief` and `wake` now have one, so
+  the guard can cover all of `wake`, `brief`, `retro` + the `undismiss` allowlist
+  entry.
+
+Any branch doing this work must be **rebased onto `main` at or after `d4a27e5`**
+before touching wake — otherwise it is coding against a tree where `--auto` does
+not exist.
+
+The original finding is preserved below for the record.
+
+---
+
+## Blocked on PR #45 — NEEDS BEAU (found 2026-07-12, during step-02) — NOW RESOLVED, see above
 
 **BDS-82's premise is false.** It says *"PR #45 now closes that specific gap
 (Auto mode mirrored into the skill + a static assert)"* and the sub-issues are
@@ -129,10 +155,11 @@ rest on a premise that isn't true:
 or absorb #45's scope into BDS-84). Do not paper over it and do not silently
 redesign the steps.
 
-**Interim sequencing (Orchestrator, 2026-07-12):** step-04 (BDS-88, plugin
-hygiene) and step-05 (BDS-85, retro skill) are wholly independent of #45, so the
-autonomous loop runs **02 → 04 → 05** and then **holds**. Steps 03, 06 and 07
-stay parked until Beau rules on #45.
+~~**Interim sequencing (Orchestrator, 2026-07-12):** the loop runs **02 → 04 →
+05** and then **holds**; steps 03, 06 and 07 stay parked until Beau rules on
+#45.~~ **Superseded — Beau merged #45.** Full sequencing resumes: **04 → 05 →
+rebase onto `main` (≥ `d4a27e5`) → 03 → 06 → 07**, with the guard (07) last as
+always.
 
 ## Open questions
 
