@@ -80,34 +80,7 @@ $CLAST_BIN entries read <entry-path>
 
 ## Step 3: Synthesize the briefing
 
-Read the shared prompt templates from `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md` and `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`, then substitute the user template placeholders `{{project}}`, `{{current_label}}`, `{{entries}}`, `{{breadcrumbs}}`, and `{{sessions}}`. Produce a briefing of 2–5k tokens. Structure:
-
-```
-## Brief — <project>
-
-**Active thread:** <one-line from most recent entry's "Open threads" section, or "None">
-
-**Last session:** <date> on branch `<branch>`: <one-line goal>
-- Work done: <2-3 bullets condensed from most recent entry>
-- Open threads: <bullets, if any>
-- Dead ends to avoid: <bullets, if any>
-
-**Recent sessions:** (up to 5)
-- <date> [<branch>] <slug>: <one-line goal>
-
-**Today's breadcrumbs:** (if any)
-- HH:MM — <text>
-
-**Today's sessions:** (if user has already worked today)
-- HH:MM start: <branch>, <msg-count> messages
-
-**Suggested next step:** <derived from active thread + breadcrumbs>
-```
-
-End with one of:
-
-- "Resume? Active thread: '<thread>'. Suggested next step: <step>."
-- "No active thread. Last session ended cleanly. What are you working on today?"
+Read the shared prompt templates from `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-system.md` and `$CLAUDE_PLUGIN_ROOT/lib/clast/prompts/brief-user.md`, then substitute the user template placeholders `{{project}}`, `{{current_label}}`, `{{entries}}`, `{{breadcrumbs}}`, and `{{sessions}}`. The output structure is defined by `brief-system.md`; change it there, not in this skill.
 
 ## Step 4: Don't write anything
 
