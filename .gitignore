@@ -15,3 +15,10 @@ result-*
 # OS
 .DS_Store
 Thumbs.db
+
+# Preventative guard: never let a wip-plugin-style checkout artifact
+# (commands/, agents/, .claude-plugin/README.md) be picked up as
+# clast's own plugin content.
+/commands/
+/agents/
+/.claude-plugin/README.md
