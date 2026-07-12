@@ -43,9 +43,10 @@ If the user passed a slug as an argument (`/brief xesapps`), use it directly. Ot
 
 ```bash
 $CLAST_BIN registry resolve "$(pwd)"
+$CLAST_BIN registry resolve "$(pwd)" --json 2>/dev/null | jq -r '.label // empty'
 ```
 
-If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
+Use the first command's output as the project slug for the rest of the brief, and the second command's `.label` field as `current_label` for the user prompt. If `pwd` doesn't resolve and no slug was given: print "Not in a registered project. Run `clast-plumbing registry add .` first, or invoke as `/brief <slug>`." and stop.
 
 ## Step 2: Gather data
 
@@ -53,7 +54,7 @@ In parallel:
 
 ```bash
 # Recent curated entries for this project (newest first)
-$CLAST_BIN --json entries --project <slug> --limit 5
+$CLAST_BIN --json entries --project <slug>
 
 # Today's breadcrumbs for this project
 $CLAST_BIN breadcrumb --read --project <slug> --day today
@@ -61,6 +62,15 @@ $CLAST_BIN breadcrumb --read --project <slug> --day today
 # Today's session activity (if any — user might have started already)
 $CLAST_BIN --json sessions --day today --project <slug>
 ```
+
+For entries, follow the CLI's grouping policy exactly:
+
+1. Treat each entry's workspace key as `.label // .branch // "default"`.
+2. Deduplicate those keys in newest-first order of first appearance.
+3. If the current workspace label was resolved from `pwd` and that label appears in the list, hoist that group to the front.
+4. Read up to 3 entries per group and stop after 8 entries total.
+5. When there is more than one group, render a header before each group: `## Workspace: <label> (branch: <branch>)`.
+6. When there is only one group, keep the output flat with no workspace headers (same as today).
 
 For each entry returned, also read the body if it'll fit (file sizes are typically 1–5KB each):
 
