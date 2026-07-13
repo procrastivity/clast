@@ -12,7 +12,8 @@ cd "$PROJECT_ROOT"
 usage() {
   echo "Usage: contrib/release --major | --minor | --patch"
   echo
-  echo "Bumps the version in package.json and flake.nix (lockstep),"
+  echo "Bumps the version in package.json, flake.nix, and the plugin"
+  echo "manifest (lockstep),"
   echo "regenerates CHANGELOG.md via git-cliff, commits 'release: vX.Y.Z',"
   echo "pushes the branch, then creates and pushes the annotated v{version}"
   echo "tag. The tag push triggers the release workflow."
@@ -69,10 +70,15 @@ TAG="v${NEW_VERSION}"
 
 echo "Releasing ${CURRENT_VERSION} -> ${NEW_VERSION} (tag ${TAG}) on branch ${BRANCH}"
 
-# --- Edit package.json (jq into temp file + mv so a jq error cannot truncate) ---
+# --- Edit package.json and the plugin manifest (jq into temp file + mv so a jq
+#     error cannot truncate) ---
 
 tmp=$(mktemp)
 jq --arg v "$NEW_VERSION" '.version = $v' package.json >"$tmp" && mv "$tmp" package.json
+
+tmp=$(mktemp)
+jq --arg v "$NEW_VERSION" '.version = $v' .claude-plugin/plugin.json >"$tmp" \
+  && mv "$tmp" .claude-plugin/plugin.json
 
 # --- Edit flake.nix (single-line literal; sed -i.bak is BSD/GNU portable) ---
 
@@ -104,7 +110,7 @@ make nix-smoke
 
 # --- Commit the bump ---
 
-git add package.json flake.nix CHANGELOG.md
+git add package.json flake.nix .claude-plugin/plugin.json CHANGELOG.md
 git commit -m "release: v${NEW_VERSION}"
 
 # --- Push the branch, then create and push the tag ---
