@@ -3,6 +3,23 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.7] - 2026-07-13
+
+### Bug Fixes
+
+- Brace expansion before the en dash in the recorded window
+
+### Documentation
+
+- Remove references to original planning system
+
+### Features
+
+- Report model-call timing per draft (#44)
+- Add --auto for non-interactive curation
+- Skip too-short drafts in --auto (length guard)
+- Mirror --auto batch mode into the /wake skill
+
 ## [0.0.6] - 2026-07-08
 
 ### Build
