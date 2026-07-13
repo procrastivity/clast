@@ -3,6 +3,12 @@
 All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/),
 generated via [git-cliff](https://git-cliff.org/).
+## [0.0.8] - 2026-07-13
+
+### Bug Fixes
+
+- Correct hooks.json schema and sync plugin.json version
+
 ## [0.0.7] - 2026-07-13
 
 ### Bug Fixes

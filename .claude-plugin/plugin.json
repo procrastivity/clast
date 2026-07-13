@@ -1,6 +1,6 @@
 {
   "name": "clast",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Capture, curate, and surface Claude Code session history across all your projects.",
   "homepage": "https://github.com/procrastivity/clast",
   "author": {
