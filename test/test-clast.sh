@@ -185,8 +185,18 @@ _assert_plugin_assets() {
     printf 'plugin asset check: .claude-plugin/plugin.json is not valid JSON\n' >&2
     ok=1
   fi
-  if ! jq -e '.hooks | type == "array" and length == 1' hooks/hooks.json >/dev/null; then
-    printf 'plugin asset check: hooks/hooks.json must have exactly one hook entry\n' >&2
+  # `hooks` is a record keyed by event name, each event holding matcher groups
+  # of {type, command} handlers. An array here fails Claude Code's schema at
+  # load time and the hook silently never runs.
+  if ! jq -e '
+    (.hooks | type) == "object"
+    and (.hooks | keys) == ["SessionStart"]
+    and (.hooks.SessionStart | length) == 1
+    and (.hooks.SessionStart[0].hooks | length) == 1
+    and (.hooks.SessionStart[0].hooks[0].type) == "command"
+    and (.hooks.SessionStart[0].hooks[0].command | endswith("/hooks/snapshot.sh"))
+  ' hooks/hooks.json >/dev/null; then
+    printf 'plugin asset check: hooks/hooks.json must map SessionStart to one command hook running snapshot.sh\n' >&2
     ok=1
   fi
   if ! shellcheck --shell=bash hooks/snapshot.sh; then
