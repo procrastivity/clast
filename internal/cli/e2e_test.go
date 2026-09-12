@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -427,6 +428,12 @@ func TestUninstallLoop_RemovesExactlyTheThreeSkillTreesAndUnsplices(t *testing.T
 // must restore settings.json to those exact pre-install bytes (the
 // emptied-group cascade undoing exactly what Splice's auto-vivification
 // added) and leave no skill trees behind.
+// projection's own step-05 seal sweep grows this test into the Matter's
+// full cross-verb smoke: install -> doctor clean -> uninstall -> doctor
+// clean -> settings byte-identical, in one chain, rather than the two
+// halves TestDoctor_InstallDriftLifecycle's "clean install"/"uninstall
+// returns to clean" subtests and this test's own settings-restoration
+// assertion previously proved in isolation from each other.
 func TestUninstallLoop_RoundTripRestoresSettingsByteIdentical(t *testing.T) {
 	skills := t.TempDir()
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
@@ -458,6 +465,11 @@ func TestUninstallLoop_RoundTripRestoresSettingsByteIdentical(t *testing.T) {
 	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
 		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
+
+	if codes, exit := doctorFindings(t, env); len(codes) != 0 || exit != 0 {
+		t.Fatalf("doctor after install: findings=%v exit=%d, want none and 0", codes, exit)
+	}
+
 	if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
 		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
@@ -467,6 +479,10 @@ func TestUninstallLoop_RoundTripRestoresSettingsByteIdentical(t *testing.T) {
 		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
 			t.Fatalf("after uninstall, %s still exists", skillDir)
 		}
+	}
+
+	if codes, exit := doctorFindings(t, env); len(codes) != 0 || exit != 0 {
+		t.Fatalf("doctor after uninstall: findings=%v exit=%d, want none and 0", codes, exit)
 	}
 
 	afterRoundTrip, err := os.ReadFile(settingsPath)
@@ -2514,7 +2530,16 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 // step 06 seal sweep adds the three codes this Matter's own verbs raise
 // that weren't already on the table: not-found.asset (`plumbing asset`),
 // and brief's own validation.not-a-git-repo/validation.unknown-locator
-// pair (V8's "how V10 and V22 read together" finding).
+// pair (V8's "how V10 and V22 read together" finding). projection's own
+// step-05 seal sweep adds the install-family posture: one refusal
+// (refusal.modified-harness-target stands in for the shared
+// harness.RefusalCode vocabulary — TestInstall_RefusalCodes/
+// TestUninstall_RefusalCodes already drive every one of its three states
+// exhaustively, so one representative here is enough), the uninstall-side
+// not-found (not-found.harness-not-installed), and
+// validation.malformed-settings raised by the splice itself through
+// `install` (previously only driven through `doctor`, in
+// TestDoctor_InstallDriftLifecycle).
 func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	fx := journaltest.New(t)
 	a := journal.SessionKey{Harness: "claude", NativeID: "ambiguous-a"}
@@ -2528,6 +2553,22 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 
 	unregisteredDir := initGitRepo(t, "unregistered-seal")
 	outsideGitDir := t.TempDir() // no .git anywhere above it
+
+	modifiedSkills := t.TempDir()
+	modifiedEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + modifiedSkills}
+	makeModified(t, modifiedSkills, modifiedEnv)
+
+	neverInstalledEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + t.TempDir()}
+
+	malformedSettingsSkills := t.TempDir()
+	malformedSettingsPath := filepath.Join(t.TempDir(), "settings.json")
+	malformedEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + malformedSettingsSkills, "CLAST_CLAUDE_SETTINGS_PATH=" + malformedSettingsPath}
+	if r := run(t, malformedEnv, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("seeding validation.malformed-settings fixture: install exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if err := os.WriteFile(malformedSettingsPath, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		name     string
@@ -2545,6 +2586,9 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 		{"not-found.asset", []string{"plumbing", "asset", "no/such/asset.md", "--json"}, env, "", "not-found.asset", 1},
 		{"validation.not-a-git-repo", []string{"plumbing", "brief", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, outsideGitDir, "validation.not-a-git-repo", 1},
 		{"validation.unknown-locator", []string{"plumbing", "brief", "no-such-project", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, "", "validation.unknown-locator", 1},
+		{"refusal.modified-harness-target", []string{"install", "claude-code", "--json"}, modifiedEnv, "", "refusal.modified-harness-target", 3},
+		{"not-found.harness-not-installed", []string{"uninstall", "claude-code", "--json"}, neverInstalledEnv, "", "not-found.harness-not-installed", 1},
+		{"validation.malformed-settings", []string{"install", "claude-code", "--json"}, malformedEnv, "", "validation.malformed-settings", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -3574,6 +3618,130 @@ func TestSeal_OverrideAppliesWithNoReinstall(t *testing.T) {
 	}
 	if human.stdout != overrideContent {
 		t.Errorf("human mode stdout = %q, want the override's own content verbatim", human.stdout)
+	}
+}
+
+// skillAssetInstructionRe matches a projected SKILL.md's own "Read `clast
+// plumbing asset flows/<shape>.md` and follow it exactly as written."
+// instruction line and captures the asset path it names.
+var skillAssetInstructionRe = regexp.MustCompile("`clast plumbing asset (flows/[a-z]+\\.md)`")
+
+// skillInstructionAssetPath extracts the flows/<shape>.md path an
+// installed SKILL.md's own instruction names, by regex over its actual
+// bytes — never hardcoded, so this proves the test is reading what the
+// INSTALLED skill really says rather than what it is assumed to say.
+func skillInstructionAssetPath(t *testing.T, skillMD []byte) string {
+	t.Helper()
+	m := skillAssetInstructionRe.FindSubmatch(skillMD)
+	if m == nil {
+		t.Fatalf("SKILL.md carries no \"clast plumbing asset flows/<shape>.md\" instruction:\n%s", skillMD)
+	}
+	return string(m[1])
+}
+
+// TestSeal_InstalledSkillReadsFlowThroughAsset is projection's own step-05
+// seal sweep addition: the seal condition's "installed skills read flows
+// through asset" clause. Every existing flow-asset test (this file's own
+// TestPlumbingAsset_FlowAssets_EmbeddedLink_ServesExactBytes and
+// TestSeal_OverrideAppliesWithNoReinstall, both shape-documents' seal
+// sweep) drives `plumbing asset flows/<shape>.md` directly — proving the
+// asset chain itself, never that a REAL installed skill actually names
+// that call. This test closes that gap by crossing the projection
+// boundary for real:
+//  1. installs claude-code through the same skills/settings seams every
+//     other install test uses;
+//  2. reads the projected ~/.claude/skills/<shape>/SKILL.md straight off
+//     disk;
+//  3. extracts its own "clast plumbing asset flows/<shape>.md" instruction
+//     by regex, rather than assuming the path;
+//  4. RUNS that exact instruction and confirms the shipped flow's content
+//     comes back;
+//  5. plants a live $XDG_CONFIG_HOME override AFTER the install — no
+//     re-install, no rebuild — and re-runs the SAME installed
+//     instruction, confirming the override wins: the M18 no-re-install
+//     promise crossing the projection boundary, and the installed
+//     SKILL.md itself staying byte-identical throughout (the override
+//     took effect without regenerating anything).
+func TestSeal_InstalledSkillReadsFlowThroughAsset(t *testing.T) {
+	for _, shape := range claudeCodeSkillNames {
+		t.Run(shape, func(t *testing.T) {
+			skills := t.TempDir()
+			settingsPath := filepath.Join(t.TempDir(), "settings.json")
+			xdg := t.TempDir()
+			env := []string{
+				"CLAST_CLAUDE_SKILLS_DIR=" + skills,
+				"CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath,
+				"XDG_CONFIG_HOME=" + xdg,
+			}
+
+			if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+				t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+			}
+
+			skillMDPath := filepath.Join(skills, shape, "SKILL.md")
+			skillMD, err := os.ReadFile(skillMDPath)
+			if err != nil {
+				t.Fatalf("reading installed %s: %v", skillMDPath, err)
+			}
+			assetPath := skillInstructionAssetPath(t, skillMD)
+			if want := "flows/" + shape + ".md"; assetPath != want {
+				t.Fatalf("installed %s skill's instruction names %q, want %q", shape, assetPath, want)
+			}
+
+			// Run the installed skill's own instruction verbatim, no
+			// override planted yet: the shipped flow content comes back.
+			r := run(t, env, "plumbing", "asset", assetPath, "--json")
+			if r.exitCode != 0 {
+				t.Fatalf("plumbing asset %s --json: exit=%d, want 0; stderr=%q", assetPath, r.exitCode, r.stderr)
+			}
+			var payload assetPayload
+			if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+				t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+			}
+			wantShipped := flowAssetFixtureContent(t, shape)
+			if payload.Content != string(wantShipped) {
+				t.Errorf("content before override mismatch for %s: got %d bytes, want the shipped file's %d bytes", assetPath, len(payload.Content), len(wantShipped))
+			}
+			if payload.Link != "embedded" {
+				t.Errorf("link before override = %q, want %q", payload.Link, "embedded")
+			}
+
+			// Plant a live override after the fact — no re-install, no
+			// rebuild — then re-run the SAME installed instruction.
+			overrideDir := filepath.Join(xdg, "clast", "flows")
+			if err := os.MkdirAll(overrideDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			overrideContent := "# " + shape + " — flow\n\noverridden for the installed-skill seal proof; no re-install, no rebuild.\n"
+			if err := os.WriteFile(filepath.Join(overrideDir, shape+".md"), []byte(overrideContent), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			r2 := run(t, env, "plumbing", "asset", assetPath, "--json")
+			if r2.exitCode != 0 {
+				t.Fatalf("plumbing asset %s --json (after override): exit=%d, want 0; stderr=%q", assetPath, r2.exitCode, r2.stderr)
+			}
+			var payload2 assetPayload
+			if err := json.Unmarshal([]byte(r2.stdout), &payload2); err != nil {
+				t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r2.stdout)
+			}
+			if payload2.Link != "override" {
+				t.Errorf("link after override = %q, want %q (M18: takes effect with no re-install)", payload2.Link, "override")
+			}
+			if payload2.Content != overrideContent {
+				t.Errorf("content after override = %q, want the override's own content verbatim", payload2.Content)
+			}
+
+			// The installed SKILL.md itself never changed: the override
+			// crossed the projection boundary without a second install.
+			skillMDAfter, err := os.ReadFile(skillMDPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(skillMDAfter) != string(skillMD) {
+				t.Errorf("installed %s SKILL.md changed after planting an override — it must apply live, not by regenerating the skill", shape)
+			}
+		})
 	}
 }
 
