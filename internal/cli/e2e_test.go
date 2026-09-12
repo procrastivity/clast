@@ -1437,6 +1437,90 @@ func TestPlumbingShow_UnknownTranscriptFormat_JSONEnvelope(t *testing.T) {
 	}
 }
 
+// --- plumbing: `clast plumbing breadcrumbs` (SURFACE V19, list side) ---
+
+// TestPlumbingBreadcrumbs_JSON_ScopesByProjectAndGlobal seeds a fixture
+// day with a project-scoped and a global crumb, then confirms --project
+// and --global each narrow to the right one, and neither flag lists both.
+func TestPlumbingBreadcrumbs_JSON_ScopesByProjectAndGlobal(t *testing.T) {
+	fx := journaltest.New(t)
+	slug := "clast"
+	fx.Breadcrumb("framework", time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC), &slug, "project note")
+	fx.Breadcrumb("framework", time.Date(2026, 9, 11, 11, 0, 0, 0, time.UTC), nil, "global note")
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	type payload struct {
+		Breadcrumbs []struct {
+			Slug *string `json:"slug"`
+			Text string  `json:"text"`
+		} `json:"breadcrumbs"`
+	}
+
+	r := run(t, env, "plumbing", "breadcrumbs", "--day", "2026-09-11", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var all payload
+	if err := json.Unmarshal([]byte(r.stdout), &all); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(all.Breadcrumbs) != 2 {
+		t.Fatalf("no-flag breadcrumbs = %+v, want 2 (every crumb in the bucket)", all.Breadcrumbs)
+	}
+
+	r = run(t, env, "plumbing", "breadcrumbs", "--day", "2026-09-11", "--project", "clast", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs --project: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var scoped payload
+	if err := json.Unmarshal([]byte(r.stdout), &scoped); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(scoped.Breadcrumbs) != 1 || scoped.Breadcrumbs[0].Text != "project note" {
+		t.Fatalf("--project clast breadcrumbs = %+v, want exactly the project-scoped crumb", scoped.Breadcrumbs)
+	}
+
+	r = run(t, env, "plumbing", "breadcrumbs", "--day", "2026-09-11", "--global", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs --global: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var global payload
+	if err := json.Unmarshal([]byte(r.stdout), &global); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(global.Breadcrumbs) != 1 || global.Breadcrumbs[0].Text != "global note" {
+		t.Fatalf("--global breadcrumbs = %+v, want exactly the global crumb", global.Breadcrumbs)
+	}
+}
+
+// TestPlumbingBreadcrumbs_ProjectAndGlobalMutuallyExclusive confirms
+// combining --project and --global is a usage error (exit 2), Cobra's own
+// mutually-exclusive-flag-group machinery.
+func TestPlumbingBreadcrumbs_ProjectAndGlobalMutuallyExclusive(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "breadcrumbs", "--project", "clast", "--global")
+	if r.exitCode != 2 {
+		t.Fatalf("plumbing breadcrumbs --project --global: exit=%d, want 2 (usage); stderr=%q", r.exitCode, r.stderr)
+	}
+}
+
+// TestPlumbingBreadcrumbs_Human_NoCrumbs confirms the empty-bucket case
+// prints a plain line rather than an empty table.
+func TestPlumbingBreadcrumbs_Human_NoCrumbs(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "breadcrumbs")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "no breadcrumbs" {
+		t.Errorf("stdout = %q, want %q", r.stdout, "no breadcrumbs")
+	}
+}
+
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
 // under it (V2: plumbing verbs are never porcelain).

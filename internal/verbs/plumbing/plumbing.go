@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/procrastivity/clast/internal/iostreams"
+	breadcrumbsverb "github.com/procrastivity/clast/internal/verbs/breadcrumbs"
 	captureverb "github.com/procrastivity/clast/internal/verbs/capture"
 	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
@@ -45,5 +46,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(clonesverb.Command(streams))
 	cmd.AddCommand(sessionsverb.Command(streams))
 	cmd.AddCommand(showverb.Command(streams))
+	cmd.AddCommand(breadcrumbsverb.Command(streams))
 	return cmd
 }
