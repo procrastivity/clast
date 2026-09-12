@@ -3,6 +3,7 @@ package journal
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -160,6 +161,26 @@ func RemoveCuration(root, shard string, key SessionKey) error {
 		return fmt.Errorf("journal: removing %s: %w", path, err)
 	}
 	return nil
+}
+
+// WriteEntry atomically writes data as key's entry.md under shard — the
+// one MODEL §4 document this package named a path for (EntryPath) but
+// never learned to write, because nothing wrote one until curate
+// (SURFACE V14; state-verbs step 01). data is opaque bytes: this
+// function never marshals, parses, or validates it — a caller-supplied
+// document is the entry package's job to validate (M9 boundary) before
+// it ever reaches here. Mirrors WriteSession/WriteCuration's own
+// ensure-root-then-write-atomically shape, but skips writeDocument's JSON
+// encoding step in favor of writeBytesAtomic directly.
+func WriteEntry(root, shard string, key SessionKey, data []byte) error {
+	path := EntryPath(root, shard, key)
+	if err := EnsureRoot(root); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("journal: creating %s: %w", filepath.Dir(path), err)
+	}
+	return writeBytesAtomic(path, data)
 }
 
 // Project is project.json, shared across every machine with a clone of

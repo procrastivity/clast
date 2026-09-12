@@ -121,7 +121,15 @@ func writeJSONAtomic(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("journal: encoding %s: %w", path, err)
 	}
+	return writeBytesAtomic(path, data)
+}
 
+// writeBytesAtomic writes data to path verbatim via temp-file-and-rename —
+// the same atomic discipline writeJSONAtomic applies after marshalling,
+// factored out so a caller with already-opaque bytes (WriteEntry, records.go)
+// gets the identical write guarantee without going through JSON at all.
+// path's parent directory must already exist (EnsureRoot's/the caller's job).
+func writeBytesAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
 	if err != nil {
