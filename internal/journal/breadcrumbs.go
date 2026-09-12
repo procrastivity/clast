@@ -168,7 +168,7 @@ func ReadBreadcrumbs(root, fileDate string) (entries []BreadcrumbEntry, diags []
 // day+1 entries that genuinely belong to day+1 (e.g. one written at
 // 09:00 stays on day+1 under a 04:00 cutoff).
 func ReadBreadcrumbsForDay(root string, day Day, c Cutoff) (entries []BreadcrumbEntry, diags []Diagnostic, err error) {
-	next, err := day.addDays(1)
+	next, err := day.AddDays(1)
 	if err != nil {
 		return nil, nil, err
 	}

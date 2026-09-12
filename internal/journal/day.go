@@ -99,10 +99,13 @@ func (c Cutoff) DayOf(t time.Time) Day {
 	return Day(d.Format(dayShardLayout))
 }
 
-// addDays shifts d by n calendar days (n may be negative), parsing and
+// AddDays shifts d by n calendar days (n may be negative), parsing and
 // re-formatting through UTC purely to do calendar arithmetic — d carries
-// no time-of-day or zone of its own.
-func (d Day) addDays(n int) (Day, error) {
+// no time-of-day or zone of its own. Exported so a query layer outside
+// this package can derive a "--since -Nd" bound (N days before a day
+// bucket) the same way ParseDay's own "-Nd"/"yesterday" cases do
+// internally.
+func (d Day) AddDays(n int) (Day, error) {
 	t, err := time.ParseInLocation(dayShardLayout, string(d), time.UTC)
 	if err != nil {
 		return "", fmt.Errorf("journal: %q is not a valid day bucket: %w", d, err)
@@ -124,13 +127,13 @@ func ParseDay(arg string, cutoff Cutoff) (Day, error) {
 	case arg == "today":
 		return cutoff.DayOf(now()), nil
 	case arg == "yesterday":
-		return cutoff.DayOf(now()).addDays(-1)
+		return cutoff.DayOf(now()).AddDays(-1)
 	case strings.HasPrefix(arg, "-") && strings.HasSuffix(arg, "d"):
 		n, err := parseNonNegativeInt(arg[1 : len(arg)-1])
 		if err != nil {
 			return "", fmt.Errorf("journal: invalid day argument %q: %w", arg, err)
 		}
-		return cutoff.DayOf(now()).addDays(-n)
+		return cutoff.DayOf(now()).AddDays(-n)
 	default:
 		if _, err := time.Parse(dayShardLayout, arg); err != nil {
 			return "", fmt.Errorf(`journal: invalid day argument %q: want "YYYY-MM-DD", "today", "yesterday", or "-Nd"`, arg)

@@ -168,6 +168,26 @@ func (f *Fixture) WithProject(shard string, key journal.SessionKey, project jour
 	return f
 }
 
+// WithMachine re-reads shard/key's already-authored session.json, sets its
+// Machine field, and writes it back — the session-capture machine
+// (MODEL §4's session.json "machine"), distinct from Curated/Dismissed's
+// own machine parameter (who curated it, curation.json's "machine"). A
+// separate fluent step for the same reason WithProject is: most fixture
+// sessions are fine with the default ("framework"), so only a test that
+// actually needs a session captured on a named machine reaches for this.
+func (f *Fixture) WithMachine(shard string, key journal.SessionKey, machine string) *Fixture {
+	f.t.Helper()
+	sess, ok, err := journal.ReadSession(f.root, shard, key)
+	if err != nil || !ok {
+		f.t.Fatalf("fixture: WithMachine: ReadSession(%s/%s): ok=%v err=%v", shard, key.DirName(), ok, err)
+	}
+	sess.Machine = machine
+	if err := journal.WriteSession(f.root, shard, key, sess); err != nil {
+		f.t.Fatalf("fixture: WithMachine: WriteSession(%s/%s): %v", shard, key.DirName(), err)
+	}
+	return f
+}
+
 // Project authors projects/<slug>/project.json.
 func (f *Fixture) Project(slug string, p journal.Project) *Fixture {
 	f.t.Helper()
