@@ -13,7 +13,12 @@
 // the V5 day/duration grammar (Cutoff, ParseDay, ParseDuration). walk.go
 // enumerates the tree (Walk) and derives curation state and staleness
 // from what it finds (WalkItem.State/Stale, M7). locator.go resolves a
-// V4 session locator (Resolve) against a Walk result.
+// V4 session locator (Resolve) against a Walk result. projects.go
+// enumerates the registry side of the tree — every project.json
+// (ListProjects) and, per project, every clones.<machine>.json across
+// every machine that has one (ListClones, M5) — the read side a later
+// registry resolution layer (internal/registry) builds on; this package
+// still owns every path those reads touch.
 //
 // One posture holds across every read in the package: a missing document
 // returns empty, never an error; a malformed one is a counted

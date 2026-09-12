@@ -20,6 +20,17 @@ const dayShardLayout = "2006-01-02"
 // machine name without depending on the real host's.
 var hostname = os.Hostname
 
+// Hostname resolves the local machine name — the same value AppendBreadcrumb
+// stamps into breadcrumbs/YYYY-MM-DD.<machine>.jsonl and WriteClones' callers
+// stamp into clones.<machine>.json (MODEL M5) — through the hostname seam
+// above. Exported so a caller outside this package (the registry resolution
+// layer's "this machine's registered clones" lookup, M15) can learn the
+// current machine without this package growing a second seam for the same
+// fact.
+func Hostname() (string, error) {
+	return hostname()
+}
+
 // AppendBreadcrumb appends one breadcrumb line to this machine's file,
 // breadcrumbs/YYYY-MM-DD.<machine>.jsonl. The file date is b.At's own
 // local calendar date, not an independent clock read: for the only real

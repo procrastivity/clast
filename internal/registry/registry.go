@@ -22,4 +22,13 @@
 // (Remotes). ulid.go is the monotonic ULID generator (Source, NewSource)
 // and the shape test (IsIdentityShaped) label validation and locator
 // dispatch read against.
+//
+// resolve.go is that later step: it loads the registry (every project and
+// its clones, read through internal/journal's ListProjects/ListClones —
+// the one package allowed to touch journal paths) into a View, resolves
+// "the current clone" for a directory (ResolveCurrentClone, M15/M17), and
+// dispatches a locator to a project or a clone by shape (ResolveProject,
+// ResolveClone, M16) for the verb layer's later use. It raises its own
+// sentinel-style errors rather than clasterr — mapping those onto clasterr
+// codes is the verb layer's job, not this package's.
 package registry
