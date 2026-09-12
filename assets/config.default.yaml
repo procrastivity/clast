@@ -1,4 +1,15 @@
-# Shipped default tool config. The user override lives at
-# $XDG_CONFIG_HOME/clast/config.yaml and merges over this key-by-key.
-# No keys yet — verbs add their own as they earn tool-config scope.
-{}
+# Shipped default tool config (SURFACE V31 — five knobs; env carries
+# one secret, CLAST_LLM_API_KEY). The user override lives at
+# $XDG_CONFIG_HOME/clast/config.yaml and merges over this key-by-key
+# (C5.2). CLAST_JOURNAL_DIR exists solely as a C2.6 test seam.
+journal_dir: ""            # empty = $XDG_DATA_HOME/clast/journal (M6)
+day_cutoff: "04:00"        # M8
+since: "-14d"              # the recent window: sessions default,
+                           #   wake working set (V7/V17)
+capture:
+  auto_dismiss_noop: true  # M3
+wake:
+  auto_min_chars: 60
+llm:
+  base_url: ""             # OpenAI-compatible endpoint (V12)
+  model: ""
