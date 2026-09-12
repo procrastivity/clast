@@ -56,11 +56,15 @@ type result struct {
 // when the caller does not set it — the suite must never read this host's
 // real skill installs (C2.7; wip found this live: a stamped tree from an
 // older build failed doctor inside tests that never mentioned skills).
+// XDG_CACHE_HOME joins this list with llm-verbs/step-05: `clast retro`
+// writes its own fingerprinted summary cache under
+// $XDG_CACHE_HOME/clast/retro/, and this suite must never read or write
+// this host's own real cache tree either.
 // Add each new harness's seam var to this list when adding a target.
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append(os.Environ(), env...)
-	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR"} {
+	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR", "XDG_CACHE_HOME"} {
 		set := false
 		for _, e := range env {
 			if strings.HasPrefix(e, name+"=") {
@@ -4090,5 +4094,212 @@ func TestBrief_UnregisteredCwd_RefusesUnknownClone(t *testing.T) {
 	envelope := parseErrorEnvelope(t, r.stderr)
 	if envelope.Error.Code != "refusal.unknown-clone" {
 		t.Errorf("error code = %q, want %q", envelope.Error.Code, "refusal.unknown-clone")
+	}
+}
+
+// --- porcelain: `clast retro [<day>]` (SURFACE V11, llm-verbs/step-05) ---
+
+// writeCapturedOnlySession seeds a session with no curation.json at all
+// (state `captured`) — retro's own "no entry body" case (flows/retro.md
+// §2's Decision: it lists in §3 by state and title, with no summary).
+func writeCapturedOnlySession(t *testing.T, root, shard string, key journal.SessionKey, startedAt time.Time, proj journal.SessionProject) {
+	t.Helper()
+	if err := journal.WriteSession(root, shard, key, journal.Session{
+		Harness: key.Harness, SessionID: key.NativeID, Machine: "framework",
+		Project: &proj, Branch: "main",
+		StartedAt: startedAt, LastActiveAt: startedAt.Add(20 * time.Minute), CapturedAt: startedAt.Add(25 * time.Minute),
+		Counts: journal.SessionCounts{User: 1, Assistant: 1}, Substantive: true,
+		Transcript: journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "s-" + key.NativeID},
+	}); err != nil {
+		t.Fatalf("writeCapturedOnlySession: WriteSession(%s): %v", key.DirName(), err)
+	}
+}
+
+// TestRetro_JSON_HappyPath_AgainstStub drives `clast retro <day> --json`
+// against a fixture day with one curated session (an entry body to
+// summarize) and one merely-captured session (no entry body, no
+// summary): exit 0, the stub sees exactly one request, the curated
+// session's entry carries the stub's canned completion as `summary`, and
+// the captured-only session lists with no summary at all. Human mode
+// prints a "Summaries" section carrying the same condensed text.
+func TestRetro_JSON_HappyPath_AgainstStub(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	cacheHome := t.TempDir()
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	dev := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+
+	const day = "2026-04-01"
+	curated := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
+	writeBriefEntry(t, journalDir, day, curated, time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC), dev, "shipped the retro cache")
+	capturedOnly := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
+	writeCapturedOnlySession(t, journalDir, day, capturedOnly, time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC), dev)
+
+	stub := llmtest.New(t, "- Shipped: the retro cache")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "XDG_CACHE_HOME=" + cacheHome,
+		"CLAST_LLM_API_KEY=sk-test-key",
+	}
+
+	r := run(t, env, "retro", day, "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("retro --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Day      string `json:"day"`
+		Projects []struct {
+			Project  string `json:"project"`
+			Sessions []struct {
+				SessionID string `json:"session_id"`
+				Title     string `json:"title"`
+			} `json:"sessions"`
+			Entries []struct {
+				SessionID string `json:"session_id"`
+				Title     string `json:"title"`
+				Body      string `json:"body"`
+				Summary   string `json:"summary"`
+			} `json:"entries"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Projects) != 1 || payload.Projects[0].Project != "widget" {
+		t.Fatalf("projects = %+v, want one project %q", payload.Projects, "widget")
+	}
+	proj := payload.Projects[0]
+	if len(proj.Sessions) != 2 {
+		t.Fatalf("sessions = %+v, want both the curated and captured-only session listed", proj.Sessions)
+	}
+	if len(proj.Entries) != 1 || proj.Entries[0].SessionID != curated.NativeID {
+		t.Fatalf("entries = %+v, want exactly the curated session", proj.Entries)
+	}
+	if proj.Entries[0].Summary != "- Shipped: the retro cache" {
+		t.Errorf("entries[0].summary = %q, want the stub's canned completion", proj.Entries[0].Summary)
+	}
+	if proj.Entries[0].Body == "" {
+		t.Error("entries[0].body = \"\", want the raw entry body still present (additive shape)")
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests, want exactly 1 (one entry-bearing session)", len(reqs))
+	}
+
+	human := run(t, env, "retro", day)
+	if human.exitCode != 0 {
+		t.Fatalf("retro (human): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if !strings.Contains(human.stdout, "### Summaries") || !strings.Contains(human.stdout, "- Shipped: the retro cache") {
+		t.Errorf("retro (human) stdout = %q, want a Summaries section carrying the condensed text", human.stdout)
+	}
+}
+
+// TestRetro_EmptyWindow_NoLLMConfigNeeded_NoRequests drives `clast retro`
+// for a day with no sessions at all: it plants an llm config pointing at
+// a stub configured to fail every request and deliberately carries no
+// CLAST_LLM_API_KEY — if the command ever constructed an llm.Client, it
+// would fail. It doesn't: HasEntries is false, so command.go's own
+// empty-before-client gate skips both NewClient and CacheDir entirely,
+// and the run still exits 0 reporting the (otherwise) empty window.
+func TestRetro_EmptyWindow_NoLLMConfigNeeded_NoRequests(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, "must never be called for a window with no entry-bearing session")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "XDG_CACHE_HOME=" + t.TempDir(),
+		"CLAST_LLM_API_KEY=",
+	}
+
+	r := run(t, env, "retro", "2026-04-02", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("retro --json (empty window): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Projects []json.RawMessage `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Projects) != 0 {
+		t.Errorf("projects = %v, want none", payload.Projects)
+	}
+	if reqs := stub.Requests(); len(reqs) != 0 {
+		t.Fatalf("stub captured %d requests, want 0 (no entry-bearing session in the window)", len(reqs))
+	}
+
+	human := run(t, env, "retro", "2026-04-02")
+	if human.exitCode != 0 {
+		t.Fatalf("retro (human, empty window): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if !strings.Contains(human.stdout, "Nothing happened") {
+		t.Errorf("retro (human, empty window) stdout = %q, want it to report the empty window readably", human.stdout)
+	}
+}
+
+// TestRetro_Cache_HitOnSecondRun_RefreshOnThird drives the same day three
+// times against one persistent $XDG_CACHE_HOME: run 1 calls the endpoint
+// and populates the cache; run 2 (no --refresh) must hit the cache and
+// make no request at all (V11: "an unchanged entry is not re-summarized
+// on a later run"); run 3 (--refresh) must bypass the cache, call the
+// endpoint again, and report the refreshed completion.
+func TestRetro_Cache_HitOnSecondRun_RefreshOnThird(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	cacheHome := t.TempDir()
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	dev := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+	const day = "2026-04-03"
+	key := journal.SessionKey{Harness: "claude", NativeID: "cache-01"}
+	writeBriefEntry(t, journalDir, day, key, time.Date(2026, 4, 3, 9, 0, 0, 0, time.UTC), dev, "cache me")
+
+	stub := llmtest.New(t, "- Shipped: run one")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "XDG_CACHE_HOME=" + cacheHome,
+		"CLAST_LLM_API_KEY=sk-test-key",
+	}
+
+	firstRun := run(t, env, "retro", day, "--json")
+	if firstRun.exitCode != 0 {
+		t.Fatalf("retro --json (run 1): exit=%d, want 0; stderr=%q", firstRun.exitCode, firstRun.stderr)
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests after run 1, want exactly 1", len(reqs))
+	}
+	if !strings.Contains(firstRun.stdout, "- Shipped: run one") {
+		t.Errorf("run 1 stdout = %q, want the stub's first completion", firstRun.stdout)
+	}
+
+	// Run 2: fail every request — a cache hit must mean this is never
+	// dialed.
+	stub.Fail(500, "must never be called on run 2 (cache hit)")
+	secondRun := run(t, env, "retro", day, "--json")
+	if secondRun.exitCode != 0 {
+		t.Fatalf("retro --json (run 2): exit=%d, want 0; stderr=%q", secondRun.exitCode, secondRun.stderr)
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests after run 2, want still exactly 1 (cache hit, no new request)", len(reqs))
+	}
+	if !strings.Contains(secondRun.stdout, "- Shipped: run one") {
+		t.Errorf("run 2 stdout = %q, want the cached first completion", secondRun.stdout)
+	}
+
+	// Run 3: --refresh must force a new request despite the cache entry.
+	stub.SetResponse("- Shipped: run three, refreshed")
+	thirdRun := run(t, env, "retro", day, "--refresh", "--json")
+	if thirdRun.exitCode != 0 {
+		t.Fatalf("retro --json (run 3, --refresh): exit=%d, want 0; stderr=%q", thirdRun.exitCode, thirdRun.stderr)
+	}
+	if reqs := stub.Requests(); len(reqs) != 2 {
+		t.Fatalf("stub captured %d requests after run 3, want exactly 2 (run 1 + the --refresh request)", len(reqs))
+	}
+	if !strings.Contains(thirdRun.stdout, "- Shipped: run three, refreshed") {
+		t.Errorf("run 3 stdout = %q, want the refreshed completion", thirdRun.stdout)
 	}
 }

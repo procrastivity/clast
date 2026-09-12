@@ -17,6 +17,7 @@ import (
 	installverb "github.com/procrastivity/clast/internal/verbs/install"
 	manifestverb "github.com/procrastivity/clast/internal/verbs/manifest"
 	plumbingverb "github.com/procrastivity/clast/internal/verbs/plumbing"
+	retroverb "github.com/procrastivity/clast/internal/verbs/retroverb"
 	uninstallverb "github.com/procrastivity/clast/internal/verbs/uninstall"
 	versionverb "github.com/procrastivity/clast/internal/verbs/version"
 )
@@ -61,6 +62,7 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	// manifest walk hard-errors without it (C3.2).
 	cobra.EnableCommandSorting = false
 	root.AddCommand(briefverb.Command(streams))
+	root.AddCommand(retroverb.Command(streams))
 	root.AddCommand(initverb.Command(streams))
 	root.AddCommand(breadcrumbverb.Command(streams))
 	root.AddCommand(doctorverb.Command(streams, build, root))
