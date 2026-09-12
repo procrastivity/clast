@@ -3,12 +3,14 @@ package retroverb_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/config"
 	"github.com/procrastivity/clast/internal/entry"
 	"github.com/procrastivity/clast/internal/journal"
@@ -254,6 +256,37 @@ func TestSummarize_CorruptCacheFile_TreatedAsMiss(t *testing.T) {
 	}
 	if got := summaries["claude-sess-01"]; got != "- Shipped: fresh despite corruption" {
 		t.Errorf("summary after corruption = %q, want the freshly computed completion", got)
+	}
+}
+
+// TestSummarize_LLMRequestFailure_WrapsAsRetroCode confirms a failed
+// request surfaces as retro.llm-request-failed (mirroring briefverb's own
+// TestSynthesize_LLMRequestFailure_WrapsAsBriefCode) — this code had no
+// test anywhere before llm-verbs/step-07's seal sweep, unlike brief's and
+// wake's own equivalents.
+func TestSummarize_LLMRequestFailure_WrapsAsRetroCode(t *testing.T) {
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, `{"error": "boom"}`)
+	t.Setenv("CLAST_LLM_API_KEY", "sk-test-key")
+
+	client, err := llm.NewClient(cfgWith(stub.URL(), "gpt-test"))
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+
+	day := journal.Day("2026-09-11")
+	result := oneEntryResult(day, "body")
+
+	_, _, err = retroverb.Summarize(context.Background(), result, client, t.TempDir(), false)
+	if err == nil {
+		t.Fatal("Summarize: want error, got nil")
+	}
+	var terr *clasterr.Error
+	if !errors.As(err, &terr) {
+		t.Fatalf("Summarize error is not a *clasterr.Error: %v (%T)", err, err)
+	}
+	if terr.Code != "retro.llm-request-failed" {
+		t.Errorf("Code = %q, want %q", terr.Code, "retro.llm-request-failed")
 	}
 }
 

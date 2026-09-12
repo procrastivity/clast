@@ -1729,18 +1729,31 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 
 	cases := []struct {
 		name       string
+		wantKind   string
 		wantUsage  string
 		wantSchema bool
 	}{
-		{"plumbing sessions", "", true},
-		{"plumbing show", "<session>", true},
-		{"plumbing breadcrumbs", "", false},
-		{"plumbing stats", "", false},
-		{"breadcrumb", "<text>", false},
-		{"plumbing asset", "<path>", true},
-		{"plumbing wake", "", true},
-		{"plumbing brief", "[<project>]", true},
-		{"plumbing retro", "[<day>]", true},
+		{"plumbing sessions", "plumbing", "", true},
+		{"plumbing show", "plumbing", "<session>", true},
+		{"plumbing breadcrumbs", "plumbing", "", false},
+		{"plumbing stats", "plumbing", "", false},
+		{"breadcrumb", "plumbing", "<text>", false},
+		{"plumbing asset", "plumbing", "<path>", true},
+		{"plumbing wake", "plumbing", "", true},
+		{"plumbing brief", "plumbing", "[<project>]", true},
+		{"plumbing retro", "plumbing", "[<day>]", true},
+		// The three top-level shape verbs (SURFACE V1/V9-V11, llm-verbs/
+		// step-07 seal sweep): kind llm (not plumbing, C3.2's audience/
+		// determinism axes cross here), unqualified names (top level, not
+		// under the plumbing namespace), and — like every schema-less
+		// plumbing query above — no outputSchema at all: C3.7's
+		// no-speculative-schema posture applies to these three exactly the
+		// way query-verbs' own manifest assertions established for
+		// breadcrumbs/stats (no consumer parses wake/brief/retro's --json
+		// today).
+		{"wake", "llm", "[--auto]", false},
+		{"brief", "llm", "[<project>]", false},
+		{"retro", "llm", "[<day>]", false},
 	}
 	byName := map[string]struct {
 		Name         string
@@ -1763,8 +1776,8 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 			t.Errorf("manifest carries no verb named %q", c.name)
 			continue
 		}
-		if v.Kind != "plumbing" {
-			t.Errorf("%s: kind = %q, want plumbing (C3.2)", c.name, v.Kind)
+		if v.Kind != c.wantKind {
+			t.Errorf("%s: kind = %q, want %q (C3.2)", c.name, v.Kind, c.wantKind)
 		}
 		if v.Usage != c.wantUsage {
 			t.Errorf("%s: usage = %q, want %q (C3.8)", c.name, v.Usage, c.wantUsage)
@@ -1983,6 +1996,42 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	unregisteredDir := initGitRepo(t, "unregistered-seal")
 	outsideGitDir := t.TempDir() // no .git anywhere above it
 
+	// llm-verbs/step-07 seal sweep: this Matter's own V34 codes, end to
+	// end — validation.llm-not-configured and validation.llm-api-key-missing
+	// (internal/llm.NewClient's own two-check order) plus
+	// brief.llm-request-failed/retro.llm-request-failed (the two shape
+	// verbs whose flow has no "skip on failure" escape hatch, so a request
+	// failure always surfaces as a real process error — unlike wake's own
+	// wake.llm-request-failed/wake.prompt-unavailable, which flows/wake.md
+	// §2's Auto mode section and RunInteractive's own disposition loop
+	// both convert into a skip before it ever reaches command.go, so
+	// neither wake code can appear as a process-level exit at all; that
+	// pair stays unit-tested only, in wakeverb_test.go, by design).
+	// Each needs a project with real material so the run reaches past the
+	// empty-before-client gate.
+	llmCodesJournal := t.TempDir()
+	if err := journal.WriteProject(llmCodesJournal, "llmcodes", journal.Project{ID: "p-llmcodes", Slug: "llmcodes"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	llmCodesCutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	llmCodesDay := llmCodesCutoff.DayOf(time.Now())
+	writeBriefEntry(t, llmCodesJournal, string(llmCodesDay),
+		journal.SessionKey{Harness: "claude", NativeID: "llmcodes-01"}, noonOn(t, llmCodesDay),
+		journal.SessionProject{ID: "p-llmcodes", Slug: "llmcodes", Clone: "c1", Label: "dev", Path: "/dev"},
+		"an entry for the V34 codes sweep")
+
+	xdgNoConfig := t.TempDir()    // no config.yaml at all
+	xdgUnreachable := t.TempDir() // base_url/model set, no API key
+	writeLLMConfig(t, xdgUnreachable, "http://127.0.0.1:1", "gpt-test")
+
+	failingStub := llmtest.New(t, "unused")
+	failingStub.Fail(500, "seal sweep: must fail so the request-failed code surfaces")
+	xdgFailingStub := t.TempDir()
+	writeLLMConfig(t, xdgFailingStub, failingStub.URL(), "gpt-test")
+
 	cases := []struct {
 		name     string
 		args     []string
@@ -1999,6 +2048,30 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 		{"not-found.asset", []string{"plumbing", "asset", "no/such/asset.md", "--json"}, env, "", "not-found.asset", 1},
 		{"validation.not-a-git-repo", []string{"plumbing", "brief", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, outsideGitDir, "validation.not-a-git-repo", 1},
 		{"validation.unknown-locator", []string{"plumbing", "brief", "no-such-project", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, "", "validation.unknown-locator", 1},
+		{
+			"validation.llm-not-configured",
+			[]string{"brief", "llmcodes", "--json"},
+			[]string{"CLAST_JOURNAL_DIR=" + llmCodesJournal, "XDG_CONFIG_HOME=" + xdgNoConfig, "CLAST_LLM_API_KEY=sk-test-key"},
+			"", "validation.llm-not-configured", 1,
+		},
+		{
+			"validation.llm-api-key-missing",
+			[]string{"brief", "llmcodes", "--json"},
+			[]string{"CLAST_JOURNAL_DIR=" + llmCodesJournal, "XDG_CONFIG_HOME=" + xdgUnreachable, "CLAST_LLM_API_KEY="},
+			"", "validation.llm-api-key-missing", 1,
+		},
+		{
+			"brief.llm-request-failed",
+			[]string{"brief", "llmcodes", "--json"},
+			[]string{"CLAST_JOURNAL_DIR=" + llmCodesJournal, "XDG_CONFIG_HOME=" + xdgFailingStub, "CLAST_LLM_API_KEY=sk-test-key"},
+			"", "brief.llm-request-failed", 1,
+		},
+		{
+			"retro.llm-request-failed",
+			[]string{"retro", string(llmCodesDay), "--json"},
+			[]string{"CLAST_JOURNAL_DIR=" + llmCodesJournal, "XDG_CONFIG_HOME=" + xdgFailingStub, "CLAST_LLM_API_KEY=sk-test-key"},
+			"", "retro.llm-request-failed", 1,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -4494,5 +4567,355 @@ func TestWake_EmptyWorkingSet_NoLLMConfigNeeded(t *testing.T) {
 	}
 	if !strings.Contains(human.stdout, "Nothing to curate") {
 		t.Errorf("wake (human, empty) stdout = %q, want it to report the empty working set readably", human.stdout)
+	}
+}
+
+// editedWakeDraft is what fakeEditorScript rewrites the temp file to —
+// distinct from wakeQualifyingDraft so a test can tell whether the
+// accepted entry carries the ORIGINAL draft or the edited one.
+const editedWakeDraft = "# Session: edited via a fake $EDITOR\n\n" +
+	"## Goal\nProve the edit path's revised content is what actually gets curated.\n\n" +
+	"Suggested tags: edited\n"
+
+// fakeEditorScript writes a standalone shell script to dir that ignores
+// whatever openEditor's temp file already contains and overwrites it with
+// editedWakeDraft — a non-interactive stand-in for a real $EDITOR (vim,
+// nano, ...), the same posture openEditor's own doc comment calls for
+// ("a test fixture script that rewrites the file and exits"). Returns the
+// script's absolute path, ready to use as $EDITOR verbatim (no arguments
+// needed: openEditor appends the temp file path as the last argument).
+func fakeEditorScript(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "fake-editor.sh")
+	script := "#!/bin/sh\ncat > \"$1\" <<'CLASTDRAFTEOF'\n" + editedWakeDraft + "CLASTDRAFTEOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake $EDITOR script: %v", err)
+	}
+	return path
+}
+
+// TestWake_Interactive_EditThroughRealEditor_AgainstStub drives `clast
+// wake --json` (interactive) over a one-session working set, choosing
+// Edit (menu choice "2") before Accept: interactive_test.go's own unit
+// tests only ever exercise the $EDITOR-unset fallback
+// (TestRunInteractive_EditUnsetEditor_SkipsWithMessage) — this is the
+// full edit round trip end to end through the built binary, $EDITOR
+// pointed at fakeEditorScript, confirming the entry `plumbing curate`
+// ultimately writes carries the EDITED draft's title, not the original
+// one the LLM stub returned first (llm-verbs/step-07 seal sweep: flagged
+// as unit-only in the step brief, e2e'd here since a fake $EDITOR script
+// makes it cheap).
+func TestWake_Interactive_EditThroughRealEditor_AgainstStub(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+
+	now := time.Now()
+	key := journal.SessionKey{Harness: "claude", NativeID: "wake-edit-01"}
+	wakeSessionWithTranscript(t, journalDir, now.Add(-3*time.Hour).Format("2006-01-02"), key, now.Add(-3*time.Hour))
+
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	editor := fakeEditorScript(t, t.TempDir())
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key",
+		"EDITOR=" + editor,
+	}
+
+	// "2" (Edit) -> fake $EDITOR rewrites the draft -> back to the main
+	// menu with the edited draft shown -> "1" (Accept) -> "4" (no more
+	// promotions).
+	r := runWithStdin(t, env, "2\n1\n4\n", "wake", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --json (edit): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered int `json:"considered"`
+		Accepted   int `json:"accepted"`
+		Skipped    int `json:"skipped"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 1 || payload.Accepted != 1 || payload.Skipped != 0 {
+		t.Fatalf("payload = %+v, want considered=1 accepted=1 skipped=0", payload)
+	}
+
+	show := run(t, env, "plumbing", "show", key.DirName(), "--json")
+	if show.exitCode != 0 {
+		t.Fatalf("plumbing show: exit=%d, want 0; stderr=%q", show.exitCode, show.stderr)
+	}
+	var showPayload struct {
+		Entry struct {
+			Title string `json:"title"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(show.stdout), &showPayload); err != nil {
+		t.Fatalf("plumbing show --json stdout: %v; stdout=%q", err, show.stdout)
+	}
+	if showPayload.Entry.Title != "edited via a fake $EDITOR" {
+		t.Errorf("entry.title = %q, want the EDITED draft's title, not the stub's original", showPayload.Entry.Title)
+	}
+}
+
+// TestWake_Interactive_Dismiss_WritesManualReason_UndismissRevives drives
+// `clast wake --json` (interactive), dismissing the one session in the
+// working set (menu choice "3"): confirms wake's own dismiss path
+// (interactive.go's disposition, dismiss.Run(..., dismiss.DefaultReason,
+// ...)) writes the exact same default reason ("manual") `plumbing
+// dismiss`'s own --reason flag defaults to (SURFACE V15), and that
+// `plumbing undismiss` — sealed by state-verbs, in a different Matter —
+// revives it straight back to captured exactly like any other dismissed
+// session. This is the llm-verbs/state-verbs composition the step brief
+// calls for: nothing about undismiss's own behavior is wake-specific, but
+// nothing had driven a wake-authored dismissal into it before.
+func TestWake_Interactive_Dismiss_WritesManualReason_UndismissRevives(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+
+	now := time.Now()
+	key := journal.SessionKey{Harness: "claude", NativeID: "wake-dismiss-01"}
+	shard := now.Add(-3 * time.Hour).Format("2006-01-02")
+	wakeSessionWithTranscript(t, journalDir, shard, key, now.Add(-3*time.Hour))
+
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := runWithStdin(t, env, "3\n", "wake", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --json (dismiss): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Dismissed int `json:"dismissed"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Dismissed != 1 {
+		t.Fatalf("dismissed = %d, want 1", payload.Dismissed)
+	}
+
+	curation, ok, err := journal.ReadCuration(journalDir, shard, key)
+	if err != nil || !ok || curation.State != journal.StateDismissed {
+		t.Fatalf("curation after wake dismiss: state=%q ok=%v err=%v, want dismissed", curation.State, ok, err)
+	}
+	if curation.Reason == nil || *curation.Reason != "manual" {
+		t.Fatalf("reason = %v, want \"manual\" (dismiss.DefaultReason, SURFACE V15)", curation.Reason)
+	}
+
+	undismiss := run(t, env, "plumbing", "undismiss", key.DirName(), "--json")
+	if undismiss.exitCode != 0 {
+		t.Fatalf("plumbing undismiss: exit=%d, want 0; stderr=%q", undismiss.exitCode, undismiss.stderr)
+	}
+	if _, ok, err := journal.ReadCuration(journalDir, shard, key); err != nil || ok {
+		t.Fatalf("curation after undismiss: ok=%v err=%v, want ok=false (captured, no curation.json)", ok, err)
+	}
+}
+
+// TestWake_Auto_StaleSession_ReCurates_ThroughTopLevelVerb drives `clast
+// wake --auto --json` against a stale curated session (already curated,
+// but its transcript grew since — MODEL M7) end to end through the built
+// binary: flows/wake.md §6 says a stale session walks §2-§5 exactly like
+// a fresh captured one, and accepting it re-curates in place rather than
+// revoking the prior entry first. wakeverb's own unit test
+// (TestRunAuto_StaleSession_OfferedAsRecuration) proves this against
+// RunAuto directly; this is the same property through the actual process
+// boundary — Cobra parsing, exitcode, a real llm.Client dialing a real
+// loopback stub (the step brief's own ask: "stale re-curation through the
+// top-level wake against a stale fixture").
+func TestWake_Auto_StaleSession_ReCurates_ThroughTopLevelVerb(t *testing.T) {
+	fx := journaltest.New(t)
+	xdg := t.TempDir()
+
+	now := time.Now()
+	key := journal.SessionKey{Harness: "claude", NativeID: "wake-stale-01"}
+	shard := now.Add(-3 * time.Hour).Format("2006-01-02")
+	// Curated against a shorter transcript than what's on disk now (M7:
+	// stale = curated && transcript != transcript_at_curation).
+	fx.CuratedStale(shard, key,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "grown"},
+		journal.TranscriptStamp{Lines: 1, SHA256: "original"},
+		now.Add(-3*time.Hour), now.Add(-2*time.Hour), "framework", "old title before the session grew",
+	).WithTranscript(shard, key, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello, grown"}}`+"\n"))
+
+	pre, ok, err := journal.ReadCuration(fx.Root(), shard, key)
+	if err != nil || !ok || pre.State != journal.StateCurated {
+		t.Fatalf("fixture precondition: curation = %+v ok=%v err=%v, want curated", pre, ok, err)
+	}
+
+	draft := "# Session: session grew, updated summary\n\n" +
+		"## Goal\nCapture the additional turns the transcript picked up after curation.\n\n" +
+		"## What shipped\n- Documented the newer turns.\n\n" +
+		"Suggested tags: followup\n"
+	stub := llmtest.New(t, draft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root(), "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := run(t, env, "wake", "--auto", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --auto --json (stale): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered int `json:"considered"`
+		Accepted   int `json:"accepted"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --auto --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 1 || payload.Accepted != 1 {
+		t.Fatalf("payload = %+v, want considered=1 accepted=1 (the stale session re-curated)", payload)
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests, want exactly 1", len(reqs))
+	}
+
+	show := run(t, env, "plumbing", "show", key.DirName(), "--json")
+	if show.exitCode != 0 {
+		t.Fatalf("plumbing show: exit=%d, want 0; stderr=%q", show.exitCode, show.stderr)
+	}
+	var showPayload struct {
+		Curation struct {
+			State string `json:"state"`
+		} `json:"curation"`
+		Stale bool `json:"stale"`
+		Entry struct {
+			Title string `json:"title"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(show.stdout), &showPayload); err != nil {
+		t.Fatalf("plumbing show --json stdout: %v; stdout=%q", err, show.stdout)
+	}
+	if showPayload.Curation.State != "curated" {
+		t.Errorf("curation.state = %q, want curated", showPayload.Curation.State)
+	}
+	if showPayload.Stale {
+		t.Error("stale = true, want false — re-curation must clear staleness")
+	}
+	if showPayload.Entry.Title != "session grew, updated summary" {
+		t.Errorf("entry.title = %q, want the fresh re-curated draft's title, not the old one", showPayload.Entry.Title)
+	}
+}
+
+// TestSeal_CrossFormParity_WakeAutoConsumesExactlyThePlumbingFacts is the
+// V6 cross-form parity smoke the step brief calls for: SURFACE V6 says a
+// shape is one flow, defined once, that both delivery forms read — so the
+// verb form's own LLM request should carry exactly the facts the flow's
+// §1-§2 plumbing calls themselves expose, not some independently derived
+// rendering. This drives `plumbing wake --json`, `plumbing show
+// --transcript --max-turn-chars 2000 --json`, and `plumbing breadcrumbs
+// --json` raw against a fixture journal, then confirms `wake --auto`'s
+// own request to the stub carries the exact transcript text `plumbing
+// show` rendered and the exact breadcrumb text `plumbing breadcrumbs`
+// listed. One test, not a parity framework.
+func TestSeal_CrossFormParity_WakeAutoConsumesExactlyThePlumbingFacts(t *testing.T) {
+	fx := journaltest.New(t)
+	xdg := t.TempDir()
+
+	cutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	today := cutoff.DayOf(time.Now())
+	yesterday, err := today.AddDays(-1)
+	if err != nil {
+		t.Fatalf("AddDays: %v", err)
+	}
+
+	key := journal.SessionKey{Harness: "claude", NativeID: "parity-01"}
+	proj := journal.SessionProject{ID: "p-parity", Slug: "parity", Clone: "c1", Label: "dev", Path: "/dev"}
+	fx.Captured(string(today), key, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "s-parity"}, noonOn(t, today)).
+		WithProject(string(today), key, proj).
+		WithTranscript(string(today), key, []byte(`{"type":"user","uuid":"u1","message":{"content":"xyzzy-parity-marker: a distinctive line only the real transcript carries"}}`+"\n"))
+	fx.Breadcrumb("framework", noonOn(t, yesterday), &proj.Slug, "plugh-parity-crumb: a distinctive breadcrumb only yesterday's note carries")
+
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	// §1 raw: the working set `plumbing wake` itself returns.
+	wakeJSON := run(t, env, "plumbing", "wake", "--json")
+	if wakeJSON.exitCode != 0 {
+		t.Fatalf("plumbing wake --json: exit=%d, want 0; stderr=%q", wakeJSON.exitCode, wakeJSON.stderr)
+	}
+	var wakePayload struct {
+		Sessions []struct {
+			Harness   string `json:"harness"`
+			SessionID string `json:"session_id"`
+			Project   *struct {
+				Slug string `json:"slug"`
+			} `json:"project"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(wakeJSON.stdout), &wakePayload); err != nil {
+		t.Fatalf("plumbing wake --json stdout: %v; stdout=%q", err, wakeJSON.stdout)
+	}
+	if len(wakePayload.Sessions) != 1 {
+		t.Fatalf("plumbing wake --json sessions = %+v, want exactly 1", wakePayload.Sessions)
+	}
+	row := wakePayload.Sessions[0]
+	if row.Project == nil || row.Project.Slug != "parity" {
+		t.Fatalf("plumbing wake row project = %+v, want slug %q", row.Project, "parity")
+	}
+	locator := row.Harness + "-" + row.SessionID
+
+	// §2 raw: the transcript flows/wake.md §2 says to read, capped at
+	// --max-turn-chars 2000, plus yesterday's breadcrumbs for the
+	// session's own project.
+	showJSON := run(t, env, "plumbing", "show", locator, "--transcript", "--max-turn-chars", "2000", "--json")
+	if showJSON.exitCode != 0 {
+		t.Fatalf("plumbing show --transcript --json: exit=%d, want 0; stderr=%q", showJSON.exitCode, showJSON.stderr)
+	}
+	var showPayload struct {
+		Turns []struct {
+			Text string `json:"text"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal([]byte(showJSON.stdout), &showPayload); err != nil {
+		t.Fatalf("plumbing show --json stdout: %v; stdout=%q", err, showJSON.stdout)
+	}
+	if len(showPayload.Turns) != 1 || !strings.Contains(showPayload.Turns[0].Text, "xyzzy-parity-marker") {
+		t.Fatalf("plumbing show turns = %+v, want the fixture's own transcript text", showPayload.Turns)
+	}
+
+	crumbsJSON := run(t, env, "plumbing", "breadcrumbs", "--day", "yesterday", "--project", row.Project.Slug, "--json")
+	if crumbsJSON.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs --json: exit=%d, want 0; stderr=%q", crumbsJSON.exitCode, crumbsJSON.stderr)
+	}
+	var crumbsPayload struct {
+		Breadcrumbs []struct {
+			Text string `json:"text"`
+		} `json:"breadcrumbs"`
+	}
+	if err := json.Unmarshal([]byte(crumbsJSON.stdout), &crumbsPayload); err != nil {
+		t.Fatalf("plumbing breadcrumbs --json stdout: %v; stdout=%q", err, crumbsJSON.stdout)
+	}
+	if len(crumbsPayload.Breadcrumbs) != 1 || !strings.Contains(crumbsPayload.Breadcrumbs[0].Text, "plugh-parity-crumb") {
+		t.Fatalf("plumbing breadcrumbs = %+v, want the fixture's own crumb", crumbsPayload.Breadcrumbs)
+	}
+
+	// Now drive the verb form: `wake --auto` must have consumed exactly
+	// those two facts to build its LLM request — not some independently
+	// re-derived rendering.
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	llmEnv := append(append([]string{}, env...), "XDG_CONFIG_HOME="+xdg, "CLAST_LLM_API_KEY=sk-test-key")
+
+	r := run(t, llmEnv, "wake", "--auto", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --auto --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	reqs := stub.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests, want exactly 1", len(reqs))
+	}
+	var userContent string
+	for _, m := range reqs[0].Messages {
+		if m.Role == "user" {
+			userContent = m.Content
+		}
+	}
+	if !strings.Contains(userContent, "xyzzy-parity-marker") {
+		t.Errorf("wake --auto's own LLM request user content = %q, want it to carry plumbing show's exact transcript text", userContent)
+	}
+	if !strings.Contains(userContent, "plugh-parity-crumb") {
+		t.Errorf("wake --auto's own LLM request user content = %q, want it to carry plumbing breadcrumbs' exact text", userContent)
 	}
 }
