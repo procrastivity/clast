@@ -12,6 +12,7 @@ package registry
 import (
 	"fmt"
 
+	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/source"
 	"github.com/procrastivity/clast/internal/source/claude"
 )
@@ -54,4 +55,39 @@ func Lookup(name string) (source.Source, bool) {
 		}
 	}
 	return nil, false
+}
+
+// LookupTranscriptRenderer finds the renderer among All whose
+// TranscriptFormats (source.TranscriptRenderer, an OPTIONAL interface —
+// not every registered source implements it) declares format —
+// session.json's own transcript.format (M10). It reports false when no
+// registered source covers format, never when a source merely lacks a
+// renderer at all.
+func LookupTranscriptRenderer(format string) (source.TranscriptRenderer, bool) {
+	for _, s := range All {
+		r, ok := s.(source.TranscriptRenderer)
+		if !ok {
+			continue
+		}
+		for _, f := range r.TranscriptFormats() {
+			if f == format {
+				return r, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// ValidateTranscriptFormat resolves format through
+// LookupTranscriptRenderer, or returns validation.unknown-transcript-format
+// (V18/V34) when no registered source renders it — the one place that
+// error is raised, so `show --transcript` (and any later consumer) never
+// has to re-derive its message.
+func ValidateTranscriptFormat(format string) (source.TranscriptRenderer, error) {
+	r, ok := LookupTranscriptRenderer(format)
+	if !ok {
+		return nil, clasterr.New("validation.unknown-transcript-format",
+			fmt.Sprintf("no renderer for transcript format %q on this build", format))
+	}
+	return r, nil
 }

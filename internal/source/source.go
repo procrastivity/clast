@@ -117,3 +117,35 @@ type Source interface {
 // it to the journal's own write primitive, so sources stay out of
 // journal path composition and tests can bind it to a scratch directory.
 type WriteArtifact func(relPath string, r io.Reader) error
+
+// Turn is one rendered conversation turn: who spoke, and what they said
+// (possibly capped — see TranscriptRenderer.RenderTranscript).
+type Turn struct {
+	Role string
+	Text string
+}
+
+// TranscriptRenderer is an OPTIONAL interface a Source may also
+// implement: rendering a captured transcript copy's turns for `show
+// --transcript` (SURFACE V18) — the one sanctioned transcript read (M9).
+// It is deliberately never a fourth duty on Source itself: capture's
+// Brief seals Discover/Correlate/Capture as the three-duty interface pi
+// and devin must slot into unchanged, and a source with no renderer yet
+// is still fully capturable — only V18's display path cares whether one
+// exists. Resolution keys on session.json's own transcript.format (M10),
+// never on harness name, since format (not harness) is what determines
+// how to parse a copy — see internal/source/registry.LookupTranscriptRenderer.
+type TranscriptRenderer interface {
+	// TranscriptFormats lists the transcript.format values (M10) this
+	// source knows how to render — ordinarily exactly the one format its
+	// own Capture stamps, declared as a list so a source whose storage
+	// model changes format over its history can still render older
+	// captures under their original format string.
+	TranscriptFormats() []string
+	// RenderTranscript parses r (the raw transcript copy's bytes,
+	// streamed) into a sequence of Turns. maxChars, when > 0, caps each
+	// turn's Text at that many runes (V7's prompt-budget truncation,
+	// `--max-turn-chars`) — never bytes, so a capped turn never ends
+	// mid-codepoint.
+	RenderTranscript(r io.Reader, maxChars int) ([]Turn, error)
+}
