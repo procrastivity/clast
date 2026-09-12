@@ -33,6 +33,17 @@ func SessionJSONPath(root, shard string, key SessionKey) string {
 	return filepath.Join(SessionDir(root, shard, key), "session.json")
 }
 
+// SessionJSONPathByDir is SessionJSONPath for a raw, not-yet-trusted
+// on-disk directory name rather than a SessionKey — Walk's own situation
+// (walk.go): it has dirName before it has read session.json, and reading
+// session.json is what it needs the path for in the first place, so it
+// can't build a SessionKey first. Keeping this join here too, rather than
+// hand-joining "sessions"/shard/dirName/"session.json" in walk.go, keeps
+// the tree's layout named in exactly one place.
+func SessionJSONPathByDir(root, shard, dirName string) string {
+	return filepath.Join(root, "sessions", shard, dirName, "session.json")
+}
+
 // CurationJSONPath is the curation-owned curation.json inside a session's
 // directory; its absence means the session is still `captured` (MODEL §2,
 // §4).

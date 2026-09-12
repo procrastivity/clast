@@ -174,15 +174,16 @@ func (f *journalFixture) Clones(slug string, c ClonesFile) *journalFixture {
 }
 
 // Breadcrumb appends one breadcrumb as machine, at the given instant —
-// swapping the hostname/now package seams for the one call, so a fixture
-// can author crumbs from more than one machine without its caller
-// juggling those seams directly.
+// swapping the hostname package seam for the one call, so a fixture can
+// author crumbs from more than one machine without its caller juggling
+// that seam directly. AppendBreadcrumb files the crumb under at's own
+// local calendar date (it derives the file date from the crumb's At, not
+// the clock), so no now() seam is needed here.
 func (f *journalFixture) Breadcrumb(machine string, at time.Time, slug *string, text string) *journalFixture {
 	f.t.Helper()
-	origHostname, origNow := hostname, now
+	origHostname := hostname
 	hostname = func() (string, error) { return machine, nil }
-	now = func() time.Time { return at }
-	defer func() { hostname, now = origHostname, origNow }()
+	defer func() { hostname = origHostname }()
 
 	if err := AppendBreadcrumb(f.root, Breadcrumb{At: at, Slug: slug, Text: text}); err != nil {
 		f.t.Fatalf("fixture: AppendBreadcrumb(%s): %v", machine, err)

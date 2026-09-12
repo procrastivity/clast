@@ -21,9 +21,14 @@ const dayShardLayout = "2006-01-02"
 var hostname = os.Hostname
 
 // AppendBreadcrumb appends one breadcrumb line to this machine's file,
-// breadcrumbs/YYYY-MM-DD.<machine>.jsonl. The date is the local calendar
-// date at write time (MODEL §4) — a sharding decision made once per
-// append, independent of b.At; it is never recomputed later, the same
+// breadcrumbs/YYYY-MM-DD.<machine>.jsonl. The file date is b.At's own
+// local calendar date, not an independent clock read: for the only real
+// writer At IS write time, so MODEL §4's "local calendar date at write
+// time" still holds, and deriving the file date from At — rather than
+// reading the clock again — is what makes ReadBreadcrumbsForDay's
+// day/day+1 file window unbreakable: the file a crumb lands in and the
+// At it filters on can never disagree by construction. It is a sharding
+// decision made once per append and never recomputed later, the same
 // posture M8 fixes for the sessions/ shard. <machine> comes from
 // os.Hostname behind the seam above. The file is opened O_APPEND so this
 // machine's appends never collide with another machine's file (M5: one
@@ -38,7 +43,7 @@ func AppendBreadcrumb(root string, b Breadcrumb) error {
 		return err
 	}
 
-	fileDate := now().Local().Format(dayShardLayout)
+	fileDate := b.At.Local().Format(dayShardLayout)
 	path := BreadcrumbsPath(root, fileDate, machine)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("journal: creating %s: %w", filepath.Dir(path), err)

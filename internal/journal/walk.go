@@ -146,7 +146,7 @@ func Walk(root string) (items []WalkItem, diags []Diagnostic, err error) {
 // identity doesn't reproduce dirName, in which case diag names the
 // problem and the caller counts it rather than returning the item.
 func loadWalkItem(root, shard, dirName string) (item WalkItem, diag Diagnostic, ok bool) {
-	sessionPath := filepath.Join(root, "sessions", shard, dirName, "session.json")
+	sessionPath := SessionJSONPathByDir(root, shard, dirName)
 	session, present, err := readDocument[Session](sessionPath)
 	if err != nil {
 		return WalkItem{}, Diagnostic{Path: sessionPath, Err: err}, false

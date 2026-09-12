@@ -206,6 +206,38 @@ func TestAppendBreadcrumb_GlobalCrumbRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAppendBreadcrumb_FileDateComesFromAt pins the reviewer follow-up:
+// the target file is dated from b.At, not an independent clock read — no
+// now() seam is faked here at all, only At is set, and a deliberately
+// backdated one at that. If AppendBreadcrumb ever went back to reading
+// the clock for the file date, this would file the crumb under today's
+// date instead of At's, and both assertions below would fail.
+func TestAppendBreadcrumb_FileDateComesFromAt(t *testing.T) {
+	root := t.TempDir()
+	fakeHostname(t, "framework")
+
+	backdated := time.Date(2020, 1, 15, 9, 0, 0, 0, time.Local)
+	if err := AppendBreadcrumb(root, Breadcrumb{At: backdated, Text: "backdated"}); err != nil {
+		t.Fatalf("AppendBreadcrumb: %v", err)
+	}
+
+	wantPath := filepath.Join(root, "breadcrumbs", "2020-01-15.framework.jsonl")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected file dated from At at %s: %v", wantPath, err)
+	}
+
+	entries, diags, err := ReadBreadcrumbsForDay(root, Day("2020-01-15"), mustCutoff(t, "04:00"))
+	if err != nil {
+		t.Fatalf("ReadBreadcrumbsForDay: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diags = %+v, want none", diags)
+	}
+	if len(entries) != 1 || entries[0].Text != "backdated" {
+		t.Errorf("entries = %+v, want the single backdated crumb", entries)
+	}
+}
+
 func TestReadBreadcrumbs_RejectsMalformedFileDate(t *testing.T) {
 	root := t.TempDir()
 	for _, arg := range []string{
