@@ -1,13 +1,11 @@
 package claude
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
-
-	"github.com/procrastivity/clast/internal/source"
 )
 
 // maxLineSize bounds the JSONL scanner's line buffer, ported from duo's
@@ -57,7 +55,27 @@ type facts struct {
 }
 
 // scanTranscript extracts facts from one session transcript in a single
-// tolerant pass. Rules, ported-and-diverged from duo's parseLine:
+// tolerant pass — captureScan over the file, without a copy destination.
+// Kept as the direct seam for fact-rule tests; Capture runs the same
+// scan inline with the copy.
+func scanTranscript(path string) (facts, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return facts{}, fmt.Errorf("claude: opening %s: %w", path, err)
+	}
+	// Deliberate discard: read-only file.
+	defer func() { _ = f.Close() }()
+
+	cs := newCaptureScan()
+	if _, err := io.Copy(cs, f); err != nil {
+		return facts{}, fmt.Errorf("claude: reading %s: %w", path, err)
+	}
+	cs.finish()
+	return cs.facts, nil
+}
+
+// scanLine folds one complete JSONL line into out. Rules,
+// ported-and-diverged from duo's parseLine:
 //
 //   - Sidechain entries never occur in a main transcript (subagents are
 //     separate files), but are dropped if met — defense in depth.
@@ -78,32 +96,7 @@ type facts struct {
 //     by construction, not by allowlist.
 //
 // A line that is not JSON at all increments BadLines and nothing else —
-// a live transcript can have a half-written trailing line. Only opening
-// the file is a hard error; a scanner failure mid-file (a line past
-// maxLineSize) surfaces as a diagnostic with the facts gathered so far.
-func scanTranscript(path string) (facts, []source.Diagnostic, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return facts{}, nil, fmt.Errorf("claude: opening %s: %w", path, err)
-	}
-	// Deliberate discard: read-only file.
-	defer func() { _ = f.Close() }()
-
-	var out facts
-	seen := map[string]struct{}{}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-	for scanner.Scan() {
-		scanLine(scanner.Bytes(), &out, seen)
-	}
-
-	var diags []source.Diagnostic
-	if err := scanner.Err(); err != nil {
-		diags = append(diags, source.Diagnostic{Path: path, Err: err})
-	}
-	return out, diags, nil
-}
-
+// a live transcript can have a half-written trailing line.
 func scanLine(raw []byte, out *facts, seen map[string]struct{}) {
 	var e entry
 	if json.Unmarshal(raw, &e) != nil {

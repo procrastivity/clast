@@ -15,6 +15,7 @@ package claude
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,31 +28,40 @@ const Name = "claude"
 
 // Source implements source.Source over one Claude Code config directory.
 type Source struct {
-	// configDir is ${CLAUDE_CONFIG_DIR:-~/.claude}, resolved once at
-	// construction. Tests construct with a fixture directory instead;
-	// there is no env seam of clast's own here because CLAUDE_CONFIG_DIR
-	// is the harness's convention, read the same way the harness reads
-	// it.
+	// configDir is the explicit root (the fixture seam); "" means
+	// resolve ${CLAUDE_CONFIG_DIR:-~/.claude} at call time, so the
+	// registry table's static New() can never fail — only a duty call
+	// can, and it reports the failure as a duty error. There is no env
+	// seam of clast's own here: CLAUDE_CONFIG_DIR is the harness's
+	// convention, read the same way the harness reads it.
 	configDir string
 }
 
 // New returns the claude source rooted at the real config directory:
-// $CLAUDE_CONFIG_DIR when set, ~/.claude otherwise.
-func New() (*Source, error) {
-	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return &Source{configDir: dir}, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	return &Source{configDir: filepath.Join(home, ".claude")}, nil
+// $CLAUDE_CONFIG_DIR when set, ~/.claude otherwise, resolved lazily.
+func New() *Source {
+	return &Source{}
 }
 
 // NewAt returns the claude source rooted at an explicit config
 // directory — the fixture seam.
 func NewAt(configDir string) *Source {
 	return &Source{configDir: configDir}
+}
+
+// root resolves the config directory per Source.configDir's contract.
+func (s *Source) root() (string, error) {
+	if s.configDir != "" {
+		return s.configDir, nil
+	}
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("claude: resolving home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude"), nil
 }
 
 // Name implements source.Source.
@@ -70,7 +80,11 @@ func (s *Source) Model() source.StorageModel { return source.FileTail }
 // <uuid>/ directory, not as loose .jsonl files, so they never enumerate
 // as sessions.
 func (s *Source) Discover(_ context.Context) ([]source.Discovered, []source.Diagnostic, error) {
-	projectsDir := filepath.Join(s.configDir, "projects")
+	root, err := s.root()
+	if err != nil {
+		return nil, nil, err
+	}
+	projectsDir := filepath.Join(root, "projects")
 	slugEntries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		if os.IsNotExist(err) {

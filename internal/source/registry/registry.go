@@ -13,12 +13,15 @@ import (
 	"fmt"
 
 	"github.com/procrastivity/clast/internal/source"
+	"github.com/procrastivity/clast/internal/source/claude"
 )
 
 // All lists every implemented source, in the order help text and the
 // capture walk use. claude lands first (MODEL §7); pi and devin join as
 // rows when they land (MODEL §9), behind the same interface.
-var All = []source.Source{}
+var All = []source.Source{
+	claude.New(),
+}
 
 // Names lists every source name in All's order — validation errors and
 // long help read this rather than walking All themselves.

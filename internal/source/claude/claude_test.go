@@ -100,9 +100,9 @@ func TestScanTranscriptFacts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
 			d := discoveredByID(t, tc.id)
-			f, diags, err := scanTranscript(d.Path)
-			if err != nil || len(diags) != 0 {
-				t.Fatalf("scanTranscript: err=%v diags=%v", err, diags)
+			f, err := scanTranscript(d.Path)
+			if err != nil {
+				t.Fatal(err)
 			}
 			if f.UserCount != tc.user || f.AssistantCount != tc.assistant {
 				t.Errorf("counts = %d/%d, want %d/%d", f.UserCount, f.AssistantCount, tc.user, tc.assistant)
