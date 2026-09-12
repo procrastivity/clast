@@ -22,10 +22,15 @@ import (
 // `sessions --json`'s own shape (V17): the full session.json fact set
 // plus state/stale/title — V8 says to follow that embedding posture
 // rather than invent a second one, so the schema below is sessions' own,
-// carried here verbatim.
+// carried here verbatim. `auto_min_chars` is the V8 amendment
+// (2026-09-12): the merged `wake.auto_min_chars` config value, so the
+// wake flow's auto section has a plumbing route to it (skill form has
+// no other one — `plumbing asset config.default.yaml` only ever serves
+// the shipped default, never a config.yaml override).
 const outputSchema = `{
 	"type": "object",
 	"properties": {
+		"auto_min_chars": {"type": "integer"},
 		"sessions": {
 			"type": "array",
 			"items": {
@@ -83,8 +88,57 @@ const outputSchema = `{
 			}
 		}
 	},
-	"required": ["sessions"]
+	"required": ["auto_min_chars", "sessions"]
 }`
+
+// defaultAutoMinChars mirrors config.default.yaml's shipped
+// wake.auto_min_chars (60) — the fallback used only when the merged
+// config carries no wake section or no auto_min_chars key at all, which
+// never happens via a normal config.Load() (the shipped default always
+// carries the key); defensive, the same posture as
+// query.ConfiguredSince and capture.autoDismissNoop's own defaults.
+const defaultAutoMinChars = 60
+
+// autoMinCharsConfigKey is the tool-config section wake.auto_min_chars
+// lives under (SURFACE V8's 2026-09-12 amendment).
+const autoMinCharsConfigKey = "wake"
+
+// configuredAutoMinChars reads cfg's merged wake.auto_min_chars (V8
+// amendment): config.yaml's value wins over config.default.yaml's
+// wherever config.Load already merged them, this function only reads
+// the result. A present-but-mistyped section or key is a plain error
+// naming the key, never a silent fallback on a config typo — mirrors
+// capture.autoDismissNoop (internal/verbs/capture/command.go) and
+// internal/llm's llmConfigValues for a nested tool-config section.
+func configuredAutoMinChars(cfg config.Config) (int, error) {
+	raw, present := cfg[autoMinCharsConfigKey]
+	if !present || raw == nil {
+		return defaultAutoMinChars, nil
+	}
+
+	// yaml.v3 decodes a nested mapping into its parent map's own type, so
+	// the section arrives as config.Config (not map[string]any) from
+	// config.Load — accept both spellings of the same underlying map.
+	var section map[string]any
+	switch m := raw.(type) {
+	case map[string]any:
+		section = m
+	case config.Config:
+		section = m
+	default:
+		return 0, fmt.Errorf("wake: config key %q must be a mapping, got %T", autoMinCharsConfigKey, raw)
+	}
+
+	v, present := section["auto_min_chars"]
+	if !present || v == nil {
+		return defaultAutoMinChars, nil
+	}
+	n, ok := v.(int)
+	if !ok {
+		return 0, fmt.Errorf("wake: config key %q must be an integer, got %T", autoMinCharsConfigKey+".auto_min_chars", v)
+	}
+	return n, nil
+}
 
 // Command constructs the `clast plumbing wake` verb (SURFACE V8/V20).
 func Command(streams *iostreams.Streams) *cobra.Command {
@@ -139,7 +193,11 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			}
 
 			if flags.JSON {
-				return writeJSON(streams, rows)
+				autoMinChars, err := configuredAutoMinChars(cfg)
+				if err != nil {
+					return err
+				}
+				return writeJSON(streams, rows, autoMinChars)
 			}
 			return writeHuman(streams, rows)
 		},
@@ -162,7 +220,7 @@ type rowJSON struct {
 	Title string `json:"title"`
 }
 
-func writeJSON(streams *iostreams.Streams, rows []Row) error {
+func writeJSON(streams *iostreams.Streams, rows []Row, autoMinChars int) error {
 	out := make([]rowJSON, len(rows))
 	for i, r := range rows {
 		out[i] = rowJSON{
@@ -173,8 +231,9 @@ func writeJSON(streams *iostreams.Streams, rows []Row) error {
 		}
 	}
 	payload := struct {
-		Sessions []rowJSON `json:"sessions"`
-	}{Sessions: out}
+		AutoMinChars int       `json:"auto_min_chars"`
+		Sessions     []rowJSON `json:"sessions"`
+	}{AutoMinChars: autoMinChars, Sessions: out}
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err

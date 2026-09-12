@@ -96,10 +96,11 @@ Auto mode processes the entire working set from §1 without pausing for
   promoted in auto mode.
 - For each drafted entry (§3), before writing: take the draft body
   without its suggested-tags trailer, trim surrounding whitespace, and
-  compare its length against the `wake.auto_min_chars` config key
-  (shipped default 60). Below that threshold, **skip** the draft —
-  do not write it and do not dismiss it, so it stays in the working set
-  for a later interactive pass.
+  compare its length against `auto_min_chars` from §1's
+  `plumbing wake --json` payload (the merged `wake.auto_min_chars`
+  config value; shipped default 60). Below that threshold, **skip** the
+  draft — do not write it and do not dismiss it, so it stays in the
+  working set for a later interactive pass.
 - At or above the threshold, accept the draft automatically through
   `clast plumbing curate <session>` (§4's Accept path), with no retry
   loop — a draft that fails to generate is skipped, not retried, since

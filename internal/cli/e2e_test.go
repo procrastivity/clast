@@ -3182,6 +3182,62 @@ func TestPlumbingWake_Human_GroupsUnderProjectHeadings(t *testing.T) {
 	}
 }
 
+// TestPlumbingWake_JSON_AutoMinChars_ShippedDefault covers the SURFACE V8
+// amendment (2026-09-12, llm-verbs step-03): `plumbing wake --json` carries
+// the merged wake.auto_min_chars value. With no config.yaml override
+// present, the payload carries the shipped default (60, assets/
+// config.default.yaml).
+func TestPlumbingWake_JSON_AutoMinChars_ShippedDefault(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + t.TempDir()}
+
+	r := run(t, env, "plumbing", "wake", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing wake --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		AutoMinChars int `json:"auto_min_chars"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.AutoMinChars != 60 {
+		t.Errorf("auto_min_chars = %d, want 60 (assets/config.default.yaml's shipped default)", payload.AutoMinChars)
+	}
+}
+
+// TestPlumbingWake_JSON_AutoMinChars_OverrideWinsOverShippedDefault plants
+// a config.yaml overriding wake.auto_min_chars and asserts the merged
+// value (override over shipped default) is what `--json` carries — the
+// same merge `plumbing wake` runs its resolution through as any other
+// config-reading verb (internal/config.Load).
+func TestPlumbingWake_JSON_AutoMinChars_OverrideWinsOverShippedDefault(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	overridePath := filepath.Join(xdg, "clast", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(overridePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(overridePath, []byte("wake:\n  auto_min_chars: 120\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg}
+
+	r := run(t, env, "plumbing", "wake", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing wake --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		AutoMinChars int `json:"auto_min_chars"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.AutoMinChars != 120 {
+		t.Errorf("auto_min_chars = %d, want 120 (config.yaml override over the shipped 60)", payload.AutoMinChars)
+	}
+}
+
 // --- plumbing: `clast plumbing brief [<project>]` (SURFACE V8/V20, shape-documents) ---
 
 // writeBriefEntry seeds one curated, projected session directly through
