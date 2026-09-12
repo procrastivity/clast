@@ -1698,13 +1698,13 @@ func TestPlumbingStats_Human_EmptyJournal(t *testing.T) {
 
 // TestSeal_ManifestCarriesEveryNewVerb confirms `clast manifest --json`
 // carries kind/usage/outputSchema (C3.2/C3.7/C3.8) for every verb
-// query-verbs added, plus shape-documents' plumbing asset, wake, and brief
-// (joining the same table rather than a forked one): plumbing kind on
-// every case, the Use line's positional recorded verbatim on
-// show/breadcrumb/asset/brief (C3.8), and OutputSchema filled exactly
-// where V35 says a consumer exists (sessions, show, asset, wake, brief)
-// and left unfilled everywhere else (breadcrumbs, stats, breadcrumb —
-// C3.7: never speculatively).
+// query-verbs added, plus shape-documents' plumbing asset, wake, brief,
+// and retro (joining the same table rather than a forked one): plumbing
+// kind on every case, the Use line's positional recorded verbatim on
+// show/breadcrumb/asset/brief/retro (C3.8), and OutputSchema filled
+// exactly where V35 says a consumer exists (sessions, show, asset, wake,
+// brief, retro) and left unfilled everywhere else (breadcrumbs, stats,
+// breadcrumb — C3.7: never speculatively).
 func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 	r := run(t, nil, "manifest", "--json")
 	if r.exitCode != 0 {
@@ -1735,6 +1735,7 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 		{"plumbing asset", "<path>", true},
 		{"plumbing wake", "", true},
 		{"plumbing brief", "[<project>]", true},
+		{"plumbing retro", "[<day>]", true},
 	}
 	byName := map[string]struct {
 		Name         string
@@ -3165,5 +3166,303 @@ func TestPlumbingBrief_Human_EmptyReportsReadably(t *testing.T) {
 	}
 	if !payload.Empty {
 		t.Error("empty = false, want true")
+	}
+}
+
+// --- plumbing: `clast plumbing retro [<day>]` (SURFACE V8/V20, shape-documents) ---
+
+// TestPlumbingRetro_DefaultDay_IsYesterday confirms the positional's
+// default (V8: "default day: yesterday") without passing one: a session
+// seeded at noon, local time, on the calendar date journal.Cutoff.DayOf
+// resolves as "yesterday" relative to the real clock (the built binary
+// has no now() seam, the same constraint every other --since e2e case
+// documents) is picked up; a session on the day before that is not.
+func TestPlumbingRetro_DefaultDay_IsYesterday(t *testing.T) {
+	fx := journaltest.New(t)
+	if err := journal.WriteProject(fx.Root(), "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	cutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	yesterday, err := cutoff.DayOf(time.Now()).AddDays(-1)
+	if err != nil {
+		t.Fatalf("AddDays: %v", err)
+	}
+	dayBefore, err := yesterday.AddDays(-1)
+	if err != nil {
+		t.Fatalf("AddDays: %v", err)
+	}
+
+	yesterdayAt := noonOn(t, yesterday)
+	dayBeforeAt := noonOn(t, dayBefore)
+
+	inWindow := journal.SessionKey{Harness: "claude", NativeID: "yesterday-01"}
+	writeBriefEntry(t, fx.Root(), string(yesterday), inWindow, yesterdayAt,
+		journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}, "yesterday's entry")
+	excluded := journal.SessionKey{Harness: "claude", NativeID: "day-before-01"}
+	writeBriefEntry(t, fx.Root(), string(dayBefore), excluded, dayBeforeAt,
+		journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}, "day before's entry")
+
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+	r := run(t, env, "plumbing", "retro", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing retro --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+
+	var payload struct {
+		Day      string `json:"day"`
+		Projects []struct {
+			Project  string `json:"project"`
+			Sessions []struct {
+				SessionID string `json:"session_id"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Day != string(yesterday) {
+		t.Errorf("day = %q, want %q (yesterday)", payload.Day, yesterday)
+	}
+	if len(payload.Projects) != 1 || len(payload.Projects[0].Sessions) != 1 || payload.Projects[0].Sessions[0].SessionID != inWindow.NativeID {
+		t.Fatalf("projects = %+v, want only %s", payload.Projects, inWindow.NativeID)
+	}
+}
+
+// noonOn returns local noon on day — safely inside any default cutoff
+// (04:00), so it always resolves back to exactly day regardless of the
+// host's own timezone (mirrors TestPlumbingRetro_DefaultDay_IsYesterday's
+// own reasoning for why noon, not midnight, is the safe instant to seed).
+func noonOn(t *testing.T, day journal.Day) time.Time {
+	t.Helper()
+	d, err := time.Parse("2006-01-02", string(day))
+	if err != nil {
+		t.Fatalf("parsing day %q: %v", day, err)
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, time.Local)
+}
+
+// TestPlumbingRetro_ExplicitDay_ScopesToThatDayOnly confirms an explicit
+// <day> positional (V5's day grammar, YYYY-MM-DD) scopes strictly to that
+// day, excluding a session on an adjacent day.
+func TestPlumbingRetro_ExplicitDay_ScopesToThatDayOnly(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	dev := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+
+	onDay := journal.SessionKey{Harness: "claude", NativeID: "on-day"}
+	writeBriefEntry(t, journalDir, "2026-03-10", onDay, time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC), dev, "on day")
+	otherDay := journal.SessionKey{Harness: "claude", NativeID: "other-day"}
+	writeBriefEntry(t, journalDir, "2026-03-11", otherDay, time.Date(2026, 3, 11, 9, 0, 0, 0, time.UTC), dev, "other day")
+
+	r := run(t, env, "plumbing", "retro", "2026-03-10", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing retro 2026-03-10 --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Day      string `json:"day"`
+		Projects []struct {
+			Sessions []struct {
+				SessionID string `json:"session_id"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Day != "2026-03-10" {
+		t.Errorf("day = %q, want %q", payload.Day, "2026-03-10")
+	}
+	if len(payload.Projects) != 1 || len(payload.Projects[0].Sessions) != 1 || payload.Projects[0].Sessions[0].SessionID != onDay.NativeID {
+		t.Fatalf("projects = %+v, want only %s", payload.Projects, onDay.NativeID)
+	}
+}
+
+// TestPlumbingRetro_SinceWidensWindow confirms --since widens the day
+// into a window ending at <day>: a session 2 days earlier is included
+// under --since -3d, and window_start reports the resolved lower bound.
+func TestPlumbingRetro_SinceWidensWindow(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	dev := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+
+	earlier := journal.SessionKey{Harness: "claude", NativeID: "earlier"}
+	writeBriefEntry(t, journalDir, "2026-03-08", earlier, time.Date(2026, 3, 8, 9, 0, 0, 0, time.UTC), dev, "earlier")
+	onDay := journal.SessionKey{Harness: "claude", NativeID: "on-day"}
+	writeBriefEntry(t, journalDir, "2026-03-10", onDay, time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC), dev, "on day")
+	tooEarly := journal.SessionKey{Harness: "claude", NativeID: "too-early"}
+	writeBriefEntry(t, journalDir, "2026-03-06", tooEarly, time.Date(2026, 3, 6, 9, 0, 0, 0, time.UTC), dev, "too early")
+
+	r := run(t, env, "plumbing", "retro", "2026-03-10", "--since", "-3d", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing retro --since -3d --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Day         string `json:"day"`
+		WindowStart string `json:"window_start"`
+		Projects    []struct {
+			Sessions []struct {
+				SessionID string `json:"session_id"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.WindowStart != "2026-03-07" {
+		t.Errorf("window_start = %q, want %q (2026-03-10 minus 3 days)", payload.WindowStart, "2026-03-07")
+	}
+	if len(payload.Projects) != 1 {
+		t.Fatalf("projects = %+v, want 1", payload.Projects)
+	}
+	var ids []string
+	for _, s := range payload.Projects[0].Sessions {
+		ids = append(ids, s.SessionID)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("sessions = %v, want exactly [%s, %s]", ids, earlier.NativeID, onDay.NativeID)
+	}
+	byID := map[string]bool{}
+	for _, id := range ids {
+		byID[id] = true
+	}
+	if !byID[earlier.NativeID] || !byID[onDay.NativeID] {
+		t.Errorf("sessions = %v, want %s and %s", ids, earlier.NativeID, onDay.NativeID)
+	}
+	if byID[tooEarly.NativeID] {
+		t.Errorf("sessions = %v, want %s excluded (before the window)", ids, tooEarly.NativeID)
+	}
+}
+
+// TestPlumbingRetro_PerProjectGrouping_SessionsEntriesBreadcrumbs seeds
+// two projects, each with a curated session (state+title+entry body) and
+// a project-scoped breadcrumb, confirming the full per-project shape V8
+// specifies lands correctly end to end, and that the human document
+// names both projects.
+func TestPlumbingRetro_PerProjectGrouping_SessionsEntriesBreadcrumbs(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+	if err := journal.WriteProject(journalDir, "acme", journal.Project{ID: "p-acme", Slug: "acme"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	day := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+	widgetProj := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+	acmeProj := journal.SessionProject{ID: "p-acme", Slug: "acme", Clone: "c2", Label: "dev", Path: "/acme"}
+	widgetKey := journal.SessionKey{Harness: "claude", NativeID: "widget-01"}
+	writeBriefEntry(t, journalDir, day, widgetKey, time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC), widgetProj, "widget's entry")
+	acmeKey := journal.SessionKey{Harness: "claude", NativeID: "acme-01"}
+	writeBriefEntry(t, journalDir, day, acmeKey, time.Date(2026, 3, 10, 10, 0, 0, 0, time.UTC), acmeProj, "acme's entry")
+
+	widgetSlug, acmeSlug := "widget", "acme"
+	if err := journal.AppendBreadcrumbAs(journalDir, "framework", journal.Breadcrumb{
+		At: time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC), Slug: &widgetSlug, Text: "widget crumb",
+	}); err != nil {
+		t.Fatalf("AppendBreadcrumbAs: %v", err)
+	}
+	if err := journal.AppendBreadcrumbAs(journalDir, "framework", journal.Breadcrumb{
+		At: time.Date(2026, 3, 10, 8, 30, 0, 0, time.UTC), Slug: &acmeSlug, Text: "acme crumb",
+	}); err != nil {
+		t.Fatalf("AppendBreadcrumbAs: %v", err)
+	}
+	if err := journal.AppendBreadcrumbAs(journalDir, "framework", journal.Breadcrumb{
+		At: time.Date(2026, 3, 10, 8, 45, 0, 0, time.UTC), Slug: nil, Text: "a global note",
+	}); err != nil {
+		t.Fatalf("AppendBreadcrumbAs: %v", err)
+	}
+
+	r := run(t, env, "plumbing", "retro", "2026-03-10", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing retro --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Projects []struct {
+			Project  string `json:"project"`
+			Sessions []struct {
+				Title string `json:"title"`
+			} `json:"sessions"`
+			Entries []struct {
+				Title string `json:"title"`
+				Body  string `json:"body"`
+			} `json:"entries"`
+			Breadcrumbs []struct {
+				Text string `json:"text"`
+			} `json:"breadcrumbs"`
+		} `json:"projects"`
+		GlobalBreadcrumbs []struct {
+			Text string `json:"text"`
+		} `json:"global_breadcrumbs"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Projects) != 2 || payload.Projects[0].Project != "acme" || payload.Projects[1].Project != "widget" {
+		t.Fatalf("projects = %+v, want [acme, widget] (alphabetical)", payload.Projects)
+	}
+	acme := payload.Projects[0]
+	if len(acme.Sessions) != 1 || acme.Sessions[0].Title != "acme's entry" {
+		t.Errorf("acme sessions = %+v, want one titled %q", acme.Sessions, "acme's entry")
+	}
+	if len(acme.Entries) != 1 || acme.Entries[0].Title != "acme's entry" {
+		t.Errorf("acme entries = %+v, want one titled %q", acme.Entries, "acme's entry")
+	}
+	if len(acme.Breadcrumbs) != 1 || acme.Breadcrumbs[0].Text != "acme crumb" {
+		t.Errorf("acme breadcrumbs = %+v, want one %q", acme.Breadcrumbs, "acme crumb")
+	}
+	if len(payload.GlobalBreadcrumbs) != 1 || payload.GlobalBreadcrumbs[0].Text != "a global note" {
+		t.Errorf("global_breadcrumbs = %+v, want one %q", payload.GlobalBreadcrumbs, "a global note")
+	}
+
+	human := run(t, env, "plumbing", "retro", "2026-03-10")
+	if human.exitCode != 0 {
+		t.Fatalf("plumbing retro: exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if !strings.Contains(human.stdout, "## acme") || !strings.Contains(human.stdout, "## widget") {
+		t.Errorf("stdout = %q, want project headings for both acme and widget", human.stdout)
+	}
+	if !strings.Contains(human.stdout, "Global breadcrumbs") {
+		t.Errorf("stdout = %q, want a Global breadcrumbs section", human.stdout)
+	}
+}
+
+// TestPlumbingRetro_EmptyDay_ReportsReadably confirms an empty window
+// reads as a document, not a bare empty structure with nothing else.
+func TestPlumbingRetro_EmptyDay_ReportsReadably(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "retro", "2026-03-10")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing retro: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "Nothing happened") {
+		t.Errorf("stdout = %q, want it to report the empty window readably", r.stdout)
+	}
+
+	jsonResult := run(t, env, "plumbing", "retro", "2026-03-10", "--json")
+	var payload struct {
+		Projects          []json.RawMessage `json:"projects"`
+		GlobalBreadcrumbs []json.RawMessage `json:"global_breadcrumbs"`
+	}
+	if err := json.Unmarshal([]byte(jsonResult.stdout), &payload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, jsonResult.stdout)
+	}
+	if len(payload.Projects) != 0 {
+		t.Errorf("projects = %v, want none", payload.Projects)
+	}
+	if len(payload.GlobalBreadcrumbs) != 0 {
+		t.Errorf("global_breadcrumbs = %v, want none", payload.GlobalBreadcrumbs)
 	}
 }

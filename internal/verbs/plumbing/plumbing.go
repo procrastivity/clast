@@ -23,6 +23,7 @@ import (
 	curateverb "github.com/procrastivity/clast/internal/verbs/curate"
 	dismissverb "github.com/procrastivity/clast/internal/verbs/dismiss"
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
+	retroverb "github.com/procrastivity/clast/internal/verbs/retro"
 	sessionsverb "github.com/procrastivity/clast/internal/verbs/sessions"
 	showverb "github.com/procrastivity/clast/internal/verbs/show"
 	statsverb "github.com/procrastivity/clast/internal/verbs/stats"
@@ -32,12 +33,12 @@ import (
 )
 
 // Command constructs the `clast plumbing` namespace command and registers
-// every plumbing verb under it (V22/V23/V25; wake and brief landed here per
-// V8/V20 — retro, and V24's tier-2 names, join here as they land). The group command
-// itself is never surface.Annotate'd — it has no Runnable RunE of its own, so the
-// manifest walk (internal/manifest/verbs.go's collect) recurses through it
-// without requiring a kind, the same way it already treats any other
-// command with children.
+// every plumbing verb under it (V22/V23/V25; wake, brief, and retro landed
+// here per V8/V20 — V24's tier-2 names join here as they land). The group
+// command itself is never surface.Annotate'd — it has no Runnable RunE of
+// its own, so the manifest walk (internal/manifest/verbs.go's collect)
+// recurses through it without requiring a kind, the same way it already
+// treats any other command with children.
 func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "plumbing",
@@ -61,5 +62,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(assetverb.Command(streams))
 	cmd.AddCommand(wakeverb.Command(streams))
 	cmd.AddCommand(briefverb.Command(streams))
+	cmd.AddCommand(retroverb.Command(streams))
 	return cmd
 }
