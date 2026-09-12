@@ -15,6 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/journal/journaltest"
 )
 
 var binPath string
@@ -83,6 +87,30 @@ func runIn(t *testing.T, dir string, env []string, args ...string) result {
 	cmd := exec.Command(binPath, args...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnv(t, env)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("running %v: %v", args, err)
+		}
+		exitCode = exitErr.ExitCode()
+	}
+	return result{stdout: stdout.String(), stderr: stderr.String(), exitCode: exitCode}
+}
+
+// runWithStdin is run, with stdin fed from the given string — the state-verbs
+// curate verb is the first to read stdin (SURFACE V14), so no prior e2e
+// helper threads one through.
+func runWithStdin(t *testing.T, env []string, stdin string, args ...string) result {
+	t.Helper()
+	cmd := exec.Command(binPath, args...)
+	cmd.Env = hermeticEnv(t, env)
+	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1243,5 +1271,468 @@ func TestRootHelp_DoesNotListPlumbingVerbs(t *testing.T) {
 		if strings.Contains(r.stdout, verb) {
 			t.Errorf("stdout = %q, want it NOT to list plumbing verb %q among the porcelain", r.stdout, verb)
 		}
+	}
+}
+
+// --- plumbing: `clast plumbing curate`/`dismiss`/`undismiss` (SURFACE V14/V15) ---
+
+// stateVerbsEnv seeds a fixture journal via journaltest (H4: authored
+// fresh, never from the bash implementation or live data) and returns the
+// CLAST_JOURNAL_DIR env line pointing the real binary at it, alongside the
+// fixture itself for further authoring.
+func stateVerbsFixture(t *testing.T) (*journaltest.Fixture, []string) {
+	t.Helper()
+	fx := journaltest.New(t)
+	return fx, []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+}
+
+// wellFormedEntryDoc is a minimal, valid entry.md document (V14: frontmatter
+// parses, title present).
+func wellFormedEntryDoc(title string) string {
+	return "---\ntitle: " + title + "\ntags: [a, b]\n---\n\nsome body text\n"
+}
+
+func writeEntryFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "entry.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+type curateResultPayload struct {
+	Harness           string `json:"harness"`
+	SessionID         string `json:"session_id"`
+	Shard             string `json:"shard"`
+	PriorState        string `json:"prior_state"`
+	ReplacedDismissal bool   `json:"replaced_dismissal"`
+}
+
+// TestPlumbingCurate_JSON_FromFile_HappyPath drives curate over a plain
+// captured session via --file: exit 0, the --json payload names the
+// session and its prior state, entry.md lands on disk, and curation.json
+// reads curated with the transcript fingerprint stamped.
+func TestPlumbingCurate_JSON_FromFile_HappyPath(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "abc"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	path := writeEntryFile(t, wellFormedEntryDoc("fixing the flaky test"))
+	r := run(t, env, "plumbing", "curate", "claude-8f3a", "--file", path, "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("curate --file --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload curateResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("curate --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Harness != "claude" || payload.SessionID != "8f3a" {
+		t.Errorf("payload = %+v, want harness=claude session_id=8f3a", payload)
+	}
+	if payload.PriorState != "captured" {
+		t.Errorf("prior_state = %q, want %q", payload.PriorState, "captured")
+	}
+	if payload.ReplacedDismissal {
+		t.Error("replaced_dismissal = true, want false")
+	}
+
+	root := fx.Root()
+	got, err := os.ReadFile(journal.EntryPath(root, "2026-09-11", key))
+	if err != nil {
+		t.Fatalf("reading entry.md: %v", err)
+	}
+	if string(got) != wellFormedEntryDoc("fixing the flaky test") {
+		t.Errorf("entry.md = %q, want the submitted document verbatim", got)
+	}
+	curation, ok, err := journal.ReadCuration(root, "2026-09-11", key)
+	if err != nil || !ok {
+		t.Fatalf("ReadCuration: ok=%v err=%v", ok, err)
+	}
+	if curation.State != journal.StateCurated {
+		t.Errorf("curation.State = %q, want %q", curation.State, journal.StateCurated)
+	}
+	if curation.TranscriptAtCuration == nil || curation.TranscriptAtCuration.Lines != 10 {
+		t.Errorf("curation.TranscriptAtCuration = %+v, want Lines=10", curation.TranscriptAtCuration)
+	}
+}
+
+// TestPlumbingCurate_FromStdin_HappyPath drives curate with no --file: the
+// document comes from stdin.
+func TestPlumbingCurate_FromStdin_HappyPath(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := runWithStdin(t, env, wellFormedEntryDoc("from stdin"), "plumbing", "curate", "claude-8f3a", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("curate (stdin) --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	got, err := os.ReadFile(journal.EntryPath(fx.Root(), "2026-09-11", key))
+	if err != nil {
+		t.Fatalf("reading entry.md: %v", err)
+	}
+	if string(got) != wellFormedEntryDoc("from stdin") {
+		t.Errorf("entry.md = %q, want the stdin document verbatim", got)
+	}
+}
+
+// TestPlumbingCurate_FromDismissed_ReplacesDismissal_NoUndismissCeremony
+// drives curate over a dismissed session: the dismissal is replaced
+// outright by a curated curation.json in one call (V14; the matter's own
+// seal condition names this edge explicitly).
+func TestPlumbingCurate_FromDismissed_ReplacesDismissal_NoUndismissCeremony(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Dismissed("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"laptop", "not useful")
+
+	path := writeEntryFile(t, wellFormedEntryDoc("revived"))
+	r := run(t, env, "plumbing", "curate", "claude-8f3a", "--file", path, "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("curate --file --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload curateResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("curate --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.PriorState != "dismissed" || !payload.ReplacedDismissal {
+		t.Errorf("payload = %+v, want prior_state=dismissed replaced_dismissal=true", payload)
+	}
+
+	curation, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key)
+	if err != nil || !ok || curation.State != journal.StateCurated {
+		t.Fatalf("curation after curate-from-dismissed: state=%q ok=%v err=%v, want curated", curation.State, ok, err)
+	}
+	if curation.Reason != nil {
+		t.Errorf("curation.Reason = %v, want nil (the dismissal reason must not survive)", curation.Reason)
+	}
+}
+
+// TestPlumbingCurate_InvalidFrontmatter_JSONEnvelope drives curate with a
+// document whose frontmatter doesn't parse: validation.entry-frontmatter,
+// exit 1, empty stdout.
+func TestPlumbingCurate_InvalidFrontmatter_JSONEnvelope(t *testing.T) {
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", journal.SessionKey{Harness: "claude", NativeID: "8f3a"},
+		journal.TranscriptFingerprint{Lines: 1, SHA256: "x"}, time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := runWithStdin(t, env, "not an entry at all", "plumbing", "curate", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("curate (invalid frontmatter): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.entry-frontmatter" {
+		t.Errorf("error code = %q, want validation.entry-frontmatter", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingCurate_MissingTitle_JSONEnvelope drives curate with a
+// document whose frontmatter parses but carries no title:
+// validation.entry-title, exit 1.
+func TestPlumbingCurate_MissingTitle_JSONEnvelope(t *testing.T) {
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", journal.SessionKey{Harness: "claude", NativeID: "8f3a"},
+		journal.TranscriptFingerprint{Lines: 1, SHA256: "x"}, time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := runWithStdin(t, env, "---\ntags: []\n---\n\nbody\n", "plumbing", "curate", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("curate (missing title): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.entry-title" {
+		t.Errorf("error code = %q, want validation.entry-title", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingCurate_UnreadableFile_NotFoundEntryFile drives curate with a
+// --file naming a path that doesn't exist: not-found.entry-file, exit 1.
+func TestPlumbingCurate_UnreadableFile_NotFoundEntryFile(t *testing.T) {
+	_, env := stateVerbsFixture(t)
+	missing := filepath.Join(t.TempDir(), "never-written.md")
+	r := run(t, env, "plumbing", "curate", "claude-8f3a", "--file", missing, "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("curate --file (missing): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "not-found.entry-file" {
+		t.Errorf("error code = %q, want not-found.entry-file", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingCurate_UnknownLocator_NotFoundSession drives curate against a
+// locator matching no session: not-found.session, exit 1.
+func TestPlumbingCurate_UnknownLocator_NotFoundSession(t *testing.T) {
+	_, env := stateVerbsFixture(t)
+	r := runWithStdin(t, env, wellFormedEntryDoc("x"), "plumbing", "curate", "claude-nope", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("curate (unknown locator): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "not-found.session" {
+		t.Errorf("error code = %q, want not-found.session", envelope.Error.Code)
+	}
+}
+
+type dismissResultPayload struct {
+	Harness   string `json:"harness"`
+	SessionID string `json:"session_id"`
+	Shard     string `json:"shard"`
+	Reason    string `json:"reason"`
+	Redismiss bool   `json:"redismiss"`
+}
+
+// TestPlumbingDismiss_JSON_DefaultReason_HappyPath drives dismiss with no
+// --reason: the default "manual" is recorded.
+func TestPlumbingDismiss_JSON_DefaultReason_HappyPath(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := run(t, env, "plumbing", "dismiss", "claude-8f3a", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("dismiss --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload dismissResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("dismiss --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Reason != "manual" {
+		t.Errorf("reason = %q, want %q", payload.Reason, "manual")
+	}
+	if payload.Redismiss {
+		t.Error("redismiss = true, want false")
+	}
+
+	curation, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key)
+	if err != nil || !ok || curation.State != journal.StateDismissed {
+		t.Fatalf("curation after dismiss: state=%q ok=%v err=%v, want dismissed", curation.State, ok, err)
+	}
+}
+
+// TestPlumbingDismiss_Redismiss_ReplacesReason drives dismiss twice with
+// different reasons: the second call succeeds and replaces the stored
+// reason (settled by planning finding).
+func TestPlumbingDismiss_Redismiss_ReplacesReason(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Dismissed("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"laptop", "first reason")
+
+	r := run(t, env, "plumbing", "dismiss", "claude-8f3a", "--reason", "second reason", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("dismiss --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload dismissResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("dismiss --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if !payload.Redismiss {
+		t.Error("redismiss = false, want true")
+	}
+	curation, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key)
+	if err != nil || !ok || curation.Reason == nil || *curation.Reason != "second reason" {
+		t.Fatalf("curation after re-dismiss = %+v ok=%v err=%v, want reason \"second reason\"", curation, ok, err)
+	}
+}
+
+// TestPlumbingDismiss_RefusesCurated_JSONEnvelope drives dismiss against a
+// curated session: validation.curated, exit 1.
+func TestPlumbingDismiss_RefusesCurated_JSONEnvelope(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Curated("2026-09-11", key, journal.TranscriptFingerprint{Lines: 5, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"laptop", "a title")
+
+	r := run(t, env, "plumbing", "dismiss", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("dismiss (curated): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.curated" {
+		t.Errorf("error code = %q, want validation.curated", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingDismiss_RefusesReservedReason_JSONEnvelope drives dismiss
+// with the capture-reserved auto:no-op reason: validation.reserved-reason,
+// exit 1.
+func TestPlumbingDismiss_RefusesReservedReason_JSONEnvelope(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := run(t, env, "plumbing", "dismiss", "claude-8f3a", "--reason", "auto:no-op", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("dismiss (reserved reason): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.reserved-reason" {
+		t.Errorf("error code = %q, want validation.reserved-reason", envelope.Error.Code)
+	}
+}
+
+type undismissResultPayload struct {
+	Harness   string `json:"harness"`
+	SessionID string `json:"session_id"`
+	Shard     string `json:"shard"`
+}
+
+// TestPlumbingUndismiss_JSON_HappyPath drives undismiss over a dismissed
+// session: curation.json is removed, returning it to captured.
+func TestPlumbingUndismiss_JSON_HappyPath(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Dismissed("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"laptop", "not useful")
+
+	r := run(t, env, "plumbing", "undismiss", "claude-8f3a", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("undismiss --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload undismissResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("undismiss --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.SessionID != "8f3a" {
+		t.Errorf("session_id = %q, want %q", payload.SessionID, "8f3a")
+	}
+	if _, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key); err != nil || ok {
+		t.Errorf("ReadCuration after undismiss: ok=%v err=%v, want ok=false (captured)", ok, err)
+	}
+}
+
+// TestPlumbingUndismiss_AcceptsAutoNoOpDismissal drives undismiss over a
+// session dismissed with capture's reserved auto:no-op reason: V15's only
+// precondition is state dismissed, so this succeeds.
+func TestPlumbingUndismiss_AcceptsAutoNoOpDismissal(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "noop1"}
+	fx, env := stateVerbsFixture(t)
+	fx.Dismissed("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"framework", "auto:no-op")
+
+	r := run(t, env, "plumbing", "undismiss", "claude-noop1", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("undismiss (auto:no-op): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+}
+
+// TestPlumbingUndismiss_RefusesNotDismissed_JSONEnvelope drives undismiss
+// against a captured (never dismissed) session: validation.not-dismissed,
+// exit 1.
+func TestPlumbingUndismiss_RefusesNotDismissed_JSONEnvelope(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC))
+
+	r := run(t, env, "plumbing", "undismiss", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("undismiss (not dismissed): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.not-dismissed" {
+		t.Errorf("error code = %q, want validation.not-dismissed", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingStateVerbs_Manifest_UsageDeclaresSessionArg confirms curate,
+// dismiss, and undismiss each declare the C3.8 "<session>" positional
+// usage in the manifest, carry the plumbing surface kind, and leave
+// OutputSchema unfilled (V35: none of the three is among the filled-schema
+// verbs).
+func TestPlumbingStateVerbs_Manifest_UsageDeclaresSessionArg(t *testing.T) {
+	r := run(t, nil, "manifest", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("manifest --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var m struct {
+		Verbs []struct {
+			Name         string          `json:"name"`
+			Kind         string          `json:"kind"`
+			Usage        string          `json:"usage"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"verbs"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil {
+		t.Fatalf("manifest --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	want := map[string]bool{"plumbing curate": true, "plumbing dismiss": true, "plumbing undismiss": true}
+	found := map[string]bool{}
+	for _, v := range m.Verbs {
+		if !want[v.Name] {
+			continue
+		}
+		found[v.Name] = true
+		if v.Kind != "plumbing" {
+			t.Errorf("%s: kind = %q, want plumbing", v.Name, v.Kind)
+		}
+		if v.Usage != "<session>" {
+			t.Errorf("%s: usage = %q, want %q (C3.8)", v.Name, v.Usage, "<session>")
+		}
+		if len(v.OutputSchema) != 0 {
+			t.Errorf("%s: outputSchema = %s, want unfilled (V35/C3.7)", v.Name, v.OutputSchema)
+		}
+	}
+	for name := range want {
+		if !found[name] {
+			t.Errorf("manifest verbs = %+v, missing %q", m.Verbs, name)
+		}
+	}
+}
+
+// TestPlumbingCurate_BadJournalDirConfig_TranslatedToClasterr drives curate
+// against a config.yaml whose journal_dir is not a string: the command
+// layer wraps journal.Root's plain error as validation.config rather than
+// letting it fall through to the chassis's untranslated-error path (exit
+// 2, no --json envelope) — the gap this matter's finding calls out and
+// explicitly works around at its own three command layers.
+func TestPlumbingCurate_BadJournalDirConfig_TranslatedToClasterr(t *testing.T) {
+	xdg := t.TempDir()
+	configDir := filepath.Join(xdg, "clast")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("journal_dir: 123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An explicit, empty CLAST_JOURNAL_DIR satisfies hermeticEnv's "already
+	// set" check (it would otherwise default the seam to a temp dir, which
+	// — being a non-empty override — wins over config's journal_dir before
+	// journal.Root ever looks at it) while itself being journal.Root's
+	// "no override" value, so config.yaml's malformed journal_dir is what
+	// actually gets read.
+	env := []string{"XDG_CONFIG_HOME=" + xdg, "CLAST_JOURNAL_DIR="}
+
+	r := runWithStdin(t, env, wellFormedEntryDoc("x"), "plumbing", "curate", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("curate (bad journal_dir config): exit=%d, want 1 (validation, not a bare usage error); stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.config" {
+		t.Errorf("error code = %q, want validation.config", envelope.Error.Code)
 	}
 }
