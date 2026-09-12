@@ -25,9 +25,9 @@
           pname = "clast";
           inherit version;
           src = ./.;
-          # TODO(clast): the first `nix build` fails and prints the real
-          # hash — paste it here. Re-do this whenever go.mod changes.
-          vendorHash = pkgs.lib.fakeHash;
+          # Re-derive whenever go.mod changes: set pkgs.lib.fakeHash, run
+          # `nix build`, paste the printed hash.
+          vendorHash = "sha256-komX1AmHt2NoF1x6xsNa2RFkfVzOXfYEMPhT0zwMxjw=";
 
           env.CGO_ENABLED = 0;
 
