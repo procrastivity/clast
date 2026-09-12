@@ -276,6 +276,11 @@ func TestAutoDismissNoopConfig(t *testing.T) {
 	if v, err := autoDismissNoop(config.Config{"capture": map[string]any{"auto_dismiss_noop": false}}); err != nil || v {
 		t.Errorf("explicit false: %v %v", v, err)
 	}
+	// config.Load's actual shape: yaml.v3 types nested mappings as the
+	// parent map's type, config.Config.
+	if v, err := autoDismissNoop(config.Config{"capture": config.Config{"auto_dismiss_noop": false}}); err != nil || v {
+		t.Errorf("nested config.Config false: %v %v", v, err)
+	}
 	if _, err := autoDismissNoop(config.Config{"capture": "yes"}); err == nil {
 		t.Error("mistyped section accepted")
 	}

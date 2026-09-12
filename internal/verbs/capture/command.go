@@ -102,8 +102,16 @@ func autoDismissNoop(cfg config.Config) (bool, error) {
 	if !present || raw == nil {
 		return true, nil
 	}
-	section, ok := raw.(map[string]any)
-	if !ok {
+	// yaml.v3 decodes a nested mapping into its parent map's own type, so
+	// the section arrives as config.Config (not map[string]any) from
+	// config.Load — accept both spellings of the same underlying map.
+	var section map[string]any
+	switch m := raw.(type) {
+	case map[string]any:
+		section = m
+	case config.Config:
+		section = m
+	default:
 		return false, fmt.Errorf("capture: config key \"capture\" must be a mapping, got %T", raw)
 	}
 	v, present := section["auto_dismiss_noop"]
