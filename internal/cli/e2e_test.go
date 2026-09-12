@@ -1232,6 +1232,87 @@ func TestPlumbingBare_PrintsHelp_ExitZero(t *testing.T) {
 	}
 }
 
+// --- porcelain: `clast breadcrumb <text>` (SURFACE V27, write side) ---
+
+// TestBreadcrumb_RegisteredClone_ScopesToProject drives `clast breadcrumb
+// <text>` from a registered clone: the crumb lands scoped to that
+// project's slug, readable back via `plumbing breadcrumbs`.
+func TestBreadcrumb_RegisteredClone_ScopesToProject(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, dir, env)
+
+	r := runIn(t, dir, env, "breadcrumb", "check migration before deploy", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("breadcrumb: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Slug *string `json:"slug"`
+		Text string  `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("breadcrumb --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Slug == nil || *payload.Slug != "widget" {
+		t.Errorf("slug = %v, want %q", payload.Slug, "widget")
+	}
+
+	list := runIn(t, dir, env, "plumbing", "breadcrumbs", "--project", "widget", "--json")
+	if list.exitCode != 0 {
+		t.Fatalf("plumbing breadcrumbs --project widget: exit=%d, want 0; stderr=%q", list.exitCode, list.stderr)
+	}
+	if !strings.Contains(list.stdout, "check migration before deploy") {
+		t.Errorf("plumbing breadcrumbs stdout = %q, want it to contain the crumb just written", list.stdout)
+	}
+}
+
+// TestBreadcrumb_Global_WritesSlugNull drives `clast breadcrumb --global`
+// from an unregistered directory: it succeeds (global bypasses clone
+// resolution entirely) and writes slug: null.
+func TestBreadcrumb_Global_WritesSlugNull(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	outside := t.TempDir()
+
+	r := runIn(t, outside, env, "breadcrumb", "bump the cache version", "--global", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("breadcrumb --global: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Slug *string `json:"slug"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("breadcrumb --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Slug != nil {
+		t.Errorf("slug = %v, want nil (global)", payload.Slug)
+	}
+}
+
+// TestBreadcrumb_UnregisteredCwd_RefusalEnvelope drives `clast
+// breadcrumb` (no --global) from an unregistered git repo: refusal.
+// unknown-clone, exit 3, naming both --global and `clast init`.
+func TestBreadcrumb_UnregisteredCwd_RefusalEnvelope(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	dir := initGitRepo(t, "unregistered")
+
+	r := runIn(t, dir, env, "breadcrumb", "a note", "--json")
+	if r.exitCode != 3 {
+		t.Fatalf("breadcrumb: exit=%d, want 3 (refusal); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "refusal.unknown-clone" {
+		t.Fatalf("error code = %q, want refusal.unknown-clone", envelope.Error.Code)
+	}
+	if !strings.Contains(envelope.Error.Message, "--global") || !strings.Contains(envelope.Error.Message, "clast init") {
+		t.Errorf("message = %q, want it to name both --global and `clast init`", envelope.Error.Message)
+	}
+}
+
 // --- plumbing: `clast plumbing sessions` (SURFACE V17) ---
 
 // TestPlumbingSessions_Human_NoSessions confirms an empty journal prints a
