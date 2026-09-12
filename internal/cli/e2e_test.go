@@ -1602,6 +1602,73 @@ func TestPlumbingBreadcrumbs_Human_NoCrumbs(t *testing.T) {
 	}
 }
 
+// --- plumbing: `clast plumbing stats` (SURFACE V21) ---
+
+// TestPlumbingStats_JSON_CountsFourAxes seeds a small fixture and confirms
+// the four fixed axes come back correctly, defaulting to "all" (not the
+// since config key).
+func TestPlumbingStats_JSON_CountsFourAxes(t *testing.T) {
+	fx := journaltest.New(t)
+	a := journal.SessionKey{Harness: "claude", NativeID: "a"}
+	b := journal.SessionKey{Harness: "codex", NativeID: "b"}
+	fx.Captured("2026-09-10", a,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	)
+	fx.Dismissed("2026-09-11", b,
+		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 1, SHA256: "b"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 0, 5, 0, time.UTC),
+		"framework", "auto:no-op",
+	)
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "stats", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing stats --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Total     int            `json:"total"`
+		ByState   map[string]int `json:"by_state"`
+		ByHarness map[string]int `json:"by_harness"`
+		ByProject map[string]int `json:"by_project"`
+		ByDay     map[string]int `json:"by_day"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing stats --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Total != 2 {
+		t.Errorf("total = %d, want 2 (--since defaults to all)", payload.Total)
+	}
+	if payload.ByState["captured"] != 1 || payload.ByState["dismissed"] != 1 {
+		t.Errorf("by_state = %+v, want captured=1 dismissed=1", payload.ByState)
+	}
+	if payload.ByHarness["claude"] != 1 || payload.ByHarness["codex"] != 1 {
+		t.Errorf("by_harness = %+v, want claude=1 codex=1", payload.ByHarness)
+	}
+	if payload.ByProject["-"] != 2 {
+		t.Errorf("by_project = %+v, want -=2 (neither session has a project)", payload.ByProject)
+	}
+	if payload.ByDay["2026-09-10"] != 1 || payload.ByDay["2026-09-11"] != 1 {
+		t.Errorf("by_day = %+v, want one per day", payload.ByDay)
+	}
+}
+
+// TestPlumbingStats_Human_EmptyJournal confirms the empty-journal case
+// still prints a zero count rather than nothing.
+func TestPlumbingStats_Human_EmptyJournal(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "stats")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing stats: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "sessions: 0" {
+		t.Errorf("stdout = %q, want %q", r.stdout, "sessions: 0")
+	}
+}
+
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
 // under it (V2: plumbing verbs are never porcelain).

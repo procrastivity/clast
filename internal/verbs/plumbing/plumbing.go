@@ -21,6 +21,7 @@ import (
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
 	sessionsverb "github.com/procrastivity/clast/internal/verbs/sessions"
 	showverb "github.com/procrastivity/clast/internal/verbs/show"
+	statsverb "github.com/procrastivity/clast/internal/verbs/stats"
 	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
 )
 
@@ -47,5 +48,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(sessionsverb.Command(streams))
 	cmd.AddCommand(showverb.Command(streams))
 	cmd.AddCommand(breadcrumbsverb.Command(streams))
+	cmd.AddCommand(statsverb.Command(streams))
 	return cmd
 }
