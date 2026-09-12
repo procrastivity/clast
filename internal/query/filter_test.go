@@ -181,6 +181,55 @@ func TestApply_FiltersComposeAcrossAxes(t *testing.T) {
 	}
 }
 
+// TestApply_FiltersComposeAcrossEveryNonDayAxis composes State, StaleOnly,
+// Project, Harness, Machine and Since all at once against a single Filter
+// value, with cutoff and the Since bound both supplied directly (no
+// time.Now() involved) — the hermetic counterpart to the e2e suite's
+// TestSeal_FiltersComposeAcrossEveryAxis, which cannot exercise a real
+// (non-"all") --since bound without coupling to the built binary's wall
+// clock. Day is left out deliberately: Filter.Day (exact match) and
+// Filter.Since (inclusive lower bound) both derive from the same
+// cutoff.DayOf(StartedAt) fact, so once a fixture's day bucket satisfies
+// an exact Day match it always satisfies any Since bound loose enough to
+// admit that same day too — the two can't be independently falsified in
+// one Match call, which is exactly why Since gets its own composition
+// check here instead.
+func TestApply_FiltersComposeAcrossEveryNonDayAxis(t *testing.T) {
+	items, cutoff := buildFilterFixture(t)
+	since := journal.Day("2026-09-11")
+	got := query.Apply(items, query.Filter{
+		States:    []journal.CurationState{journal.StateCurated},
+		StaleOnly: true,
+		Harness:   "codex",
+		Machine:   "laptop",
+		Since:     &since,
+	}, cutoff)
+	if len(got) != 1 {
+		t.Fatalf("Apply(state=curated, stale, harness=codex, machine=laptop, since=2026-09-11) = %d, want 1 (the grown session)", len(got))
+	}
+	if got[0].Key.NativeID != "stale-01" {
+		t.Fatalf("Apply(...) matched %s, want stale-01", got[0].Key.NativeID)
+	}
+
+	// A no-op Since (e.g. a regression that stops passing the bound
+	// through) would let the 2026-09-10 captured session's day-mates
+	// through unaffected by Since specifically, but this fixture set has
+	// nothing else at that state/harness/machine combination to leak in
+	// — so instead assert the bound itself actually excludes an
+	// otherwise-fully-matching-but-too-old session directly.
+	tooOld := journal.Day("2026-09-12")
+	got = query.Apply(items, query.Filter{
+		States:    []journal.CurationState{journal.StateCurated},
+		StaleOnly: true,
+		Harness:   "codex",
+		Machine:   "laptop",
+		Since:     &tooOld,
+	}, cutoff)
+	if len(got) != 0 {
+		t.Fatalf("Apply(..., since=2026-09-12) = %d, want 0 (the grown session's 2026-09-11 bucket is before the bound)", len(got))
+	}
+}
+
 func TestValidateHarness_EmptyIsNoRestriction(t *testing.T) {
 	if err := query.ValidateHarness(""); err != nil {
 		t.Errorf("ValidateHarness(\"\") = %v, want nil", err)

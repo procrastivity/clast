@@ -1770,22 +1770,42 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 	}
 }
 
+// clastSessionProject is the frozen project every well-formed fixture
+// session in this file's composed-filter tests carries, so "matches every
+// axis but one" fixtures only have to spell out the one axis they differ
+// on.
+var clastSessionProject = journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}
+
 // TestSeal_FiltersComposeAcrossEveryAxis seeds a fixture journal with
-// sessions that differ on every axis `sessions` filters (state, harness,
-// project, machine, day, since) and drives one call combining all of
+// sessions that differ on every axis `sessions` filters (state, stale,
+// harness, project, machine, day) and drives one call combining all of
 // them at once — the composition property step-02's shared Filter layer
 // exists for, exercised end to end through the built binary rather than
 // only unit-tested against internal/query directly.
+//
+// --since is deliberately left at "all" here: query.ResolveSince resolves
+// any other value against the real time.Now() inside the built binary,
+// which this suite has no seam to override (every other e2e case that
+// touches --since uses "all" for the same reason). Proving --since itself
+// composes with the rest of Filter without that wall-clock coupling is
+// TestApply_FiltersComposeAcrossEveryNonDayAxis's job, in
+// internal/query/filter_test.go, where cutoff and "now" are both
+// caller-supplied.
 func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 	fx := journaltest.New(t)
 
+	// target matches every axis the composed call below restricts on,
+	// including --stale: V17/M7 says --stale composes with --state
+	// curated rather than replacing it, so the one session meant to
+	// survive every filter must itself be both curated AND stale.
 	target := journal.SessionKey{Harness: "claude", NativeID: "target-01"}
-	fx.Curated("2026-09-11", target,
-		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "target"},
+	fx.CuratedStale("2026-09-11", target,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "target-grown"},
+		journal.TranscriptStamp{Lines: 3, SHA256: "target-at-curation"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
 		"framework", "the one that matches everything",
-	).WithProject("2026-09-11", target, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+	).WithProject("2026-09-11", target, clastSessionProject).
 		WithMachine("2026-09-11", target, "framework")
 
 	// Differs on state (dismissed, not curated).
@@ -1795,8 +1815,21 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 9, 30, 5, 0, time.UTC),
 		"framework", "manual",
-	).WithProject("2026-09-11", wrongState, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+	).WithProject("2026-09-11", wrongState, clastSessionProject).
 		WithMachine("2026-09-11", wrongState, "framework")
+
+	// Differs on staleness alone (curated, but fresh) — the actual seal
+	// gap this test closes: without this fixture, a --stale that silently
+	// replaced --state curated instead of composing with it (V17/M7)
+	// would go undetected, since it would still return exactly {target}.
+	freshCurated := journal.SessionKey{Harness: "claude", NativeID: "fresh-curated-01"}
+	fx.Curated("2026-09-11", freshCurated,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "fresh"},
+		time.Date(2026, 9, 11, 9, 20, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 20, 0, 0, time.UTC),
+		"framework", "curated but not stale",
+	).WithProject("2026-09-11", freshCurated, clastSessionProject).
+		WithMachine("2026-09-11", freshCurated, "framework")
 
 	// Differs on harness (codex, not claude).
 	wrongHarness := journal.SessionKey{Harness: "codex", NativeID: "wrong-harness-01"}
@@ -1805,8 +1838,30 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 		time.Date(2026, 9, 11, 9, 15, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 15, 0, 0, time.UTC),
 		"framework", "wrong harness",
-	).WithProject("2026-09-11", wrongHarness, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+	).WithProject("2026-09-11", wrongHarness, clastSessionProject).
 		WithMachine("2026-09-11", wrongHarness, "framework")
+
+	// Differs on project alone.
+	wrongProject := journal.SessionKey{Harness: "claude", NativeID: "wrong-project-01"}
+	fx.CuratedStale("2026-09-11", wrongProject,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wp-grown"},
+		journal.TranscriptStamp{Lines: 3, SHA256: "wp-at-curation"},
+		time.Date(2026, 9, 11, 9, 25, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 25, 0, 0, time.UTC),
+		"framework", "wrong project",
+	).WithProject("2026-09-11", wrongProject, journal.SessionProject{ID: "02P", Slug: "other", Clone: "02C", Label: "dev", Path: "/y"}).
+		WithMachine("2026-09-11", wrongProject, "framework")
+
+	// Differs on machine alone.
+	wrongMachine := journal.SessionKey{Harness: "claude", NativeID: "wrong-machine-01"}
+	fx.CuratedStale("2026-09-11", wrongMachine,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wm-grown"},
+		journal.TranscriptStamp{Lines: 3, SHA256: "wm-at-curation"},
+		time.Date(2026, 9, 11, 9, 35, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 35, 0, 0, time.UTC),
+		"framework", "wrong machine",
+	).WithProject("2026-09-11", wrongMachine, clastSessionProject).
+		WithMachine("2026-09-11", wrongMachine, "elsewhere")
 
 	// Differs on day (09-10, not 09-11).
 	wrongDay := journal.SessionKey{Harness: "claude", NativeID: "wrong-day-01"}
@@ -1815,12 +1870,13 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC),
 		"framework", "wrong day",
-	).WithProject("2026-09-10", wrongDay, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+	).WithProject("2026-09-10", wrongDay, clastSessionProject).
 		WithMachine("2026-09-10", wrongDay, "framework")
 
 	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
 	r := run(t, env, "plumbing", "sessions",
 		"--state", "curated",
+		"--stale",
 		"--harness", "claude",
 		"--project", "clast",
 		"--machine", "framework",
@@ -1841,6 +1897,55 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 	}
 	if len(payload.Sessions) != 1 || payload.Sessions[0].SessionID != target.NativeID {
 		t.Fatalf("composed filter result = %+v, want exactly %q", payload.Sessions, target.NativeID)
+	}
+}
+
+// TestSeal_StaleAloneFiltersCorrectly drives `--stale` with no other
+// filter set, confirming it restricts to exactly the stale sessions
+// (M7) rather than, say, being ignored absent --state (query.Filter's
+// own TestApply_StaleAloneNeedsNoStateFilter unit-tests this at the
+// query layer; this seals the same property through the built binary).
+func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
+	fx := journaltest.New(t)
+
+	stale := journal.SessionKey{Harness: "claude", NativeID: "stale-only-01"}
+	fx.CuratedStale("2026-09-11", stale,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "grown"},
+		journal.TranscriptStamp{Lines: 3, SHA256: "at-curation"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "stale",
+	)
+
+	fresh := journal.SessionKey{Harness: "claude", NativeID: "fresh-only-01"}
+	fx.Curated("2026-09-11", fresh,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "fresh"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "fresh",
+	)
+
+	captured := journal.SessionKey{Harness: "claude", NativeID: "captured-only-01"}
+	fx.Captured("2026-09-11", captured,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "cap"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+	)
+
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+	r := run(t, env, "plumbing", "sessions", "--stale", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing sessions --stale: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Sessions []struct {
+			SessionID string `json:"session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Sessions) != 1 || payload.Sessions[0].SessionID != stale.NativeID {
+		t.Fatalf("--stale result = %+v, want exactly %q", payload.Sessions, stale.NativeID)
 	}
 }
 
