@@ -1320,6 +1320,123 @@ func TestPlumbingSessions_UnknownHarness_JSONEnvelope(t *testing.T) {
 	}
 }
 
+// --- plumbing: `clast plumbing show <session>` (SURFACE V18) ---
+
+// TestPlumbingShow_JSON_DefaultView seeds a curated fixture session and
+// drives `plumbing show <locator> --json`: the {session, curation, stale,
+// entry} shape, with curation.state and entry.title/body all present.
+func TestPlumbingShow_JSON_DefaultView(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
+	fx.Curated("2026-09-11", key,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "a curated session",
+	)
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "show", key.DirName(), "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing show --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Session struct {
+			SessionID string `json:"session_id"`
+		} `json:"session"`
+		Curation struct {
+			State string `json:"state"`
+		} `json:"curation"`
+		Stale bool `json:"stale"`
+		Entry struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		} `json:"entry"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing show --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Session.SessionID != key.NativeID {
+		t.Errorf("session.session_id = %q, want %q", payload.Session.SessionID, key.NativeID)
+	}
+	if payload.Curation.State != "curated" {
+		t.Errorf("curation.state = %q, want curated", payload.Curation.State)
+	}
+	if payload.Stale {
+		t.Error("stale = true, want false")
+	}
+	if payload.Entry.Title != "a curated session" {
+		t.Errorf("entry.title = %q, want %q", payload.Entry.Title, "a curated session")
+	}
+}
+
+// TestPlumbingShow_Transcript_JSON drives `plumbing show <locator>
+// --transcript --json`: the {turns} shape, rendered through the claude
+// source's renderer over a fixture transcript copy.
+func TestPlumbingShow_Transcript_JSON(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "claude", NativeID: "with-transcript-01"}
+	fx.Captured("2026-09-10", key,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	).WithTranscript("2026-09-10", key, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello from the transcript"}}`+"\n"))
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "show", key.DirName(), "--transcript", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing show --transcript --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Turns []struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing show --transcript --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Turns) != 1 || payload.Turns[0].Text != "hello from the transcript" {
+		t.Fatalf("turns = %+v, want one turn with the rendered text", payload.Turns)
+	}
+}
+
+// TestPlumbingShow_UnknownLocator_JSONEnvelope confirms not-found.session.
+func TestPlumbingShow_UnknownLocator_JSONEnvelope(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "show", "claude-nonexistent", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing show claude-nonexistent: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "not-found.session" {
+		t.Fatalf("error code = %q, want not-found.session", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingShow_UnknownTranscriptFormat_JSONEnvelope confirms
+// validation.unknown-transcript-format when the session's own recorded
+// format has no registered renderer on this build.
+func TestPlumbingShow_UnknownTranscriptFormat_JSONEnvelope(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "codex", NativeID: "unrendered-01"}
+	fx.Captured("2026-09-10", key,
+		journal.TranscriptFingerprint{Format: "nonexistent-format", Lines: 1, SHA256: "a"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	).WithTranscript("2026-09-10", key, []byte("whatever"))
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "show", key.DirName(), "--transcript", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing show --transcript: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.unknown-transcript-format" {
+		t.Fatalf("error code = %q, want validation.unknown-transcript-format", envelope.Error.Code)
+	}
+}
+
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
 // under it (V2: plumbing verbs are never porcelain).
