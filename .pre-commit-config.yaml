@@ -11,8 +11,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # testdata fixtures are byte-exact by design (a captured transcript's
+      # fingerprint is asserted against them; one deliberately ends
+      # mid-line) — the fixers must not touch them.
       - id: trailing-whitespace
+        exclude: '/testdata/'
       - id: end-of-file-fixer
+        exclude: '/testdata/'
       - id: check-yaml
       - id: check-merge-conflict
 

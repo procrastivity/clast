@@ -1,0 +1,3 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-09-02T08:00:00.000Z","sessionId":"bbbbbbbb-2222-4222-8222-222222222222","content":"never mind"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-09-02T08:00:00.100Z","sessionId":"bbbbbbbb-2222-4222-8222-222222222222"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"never mind"},"uuid":"20000000-bbbb-4bbb-8bbb-000000000001","timestamp":"2026-09-02T08:00:00.200Z","permissionMode":"default","userType":"external","cwd":"/home/user/Code/demo","sessionId":"bbbbbbbb-2222-4222-8222-222222222222","version":"2.1.226","gitBranch":"main"}
