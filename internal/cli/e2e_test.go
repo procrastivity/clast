@@ -742,6 +742,24 @@ func addGitRemote(t *testing.T, dir, name, url string) {
 	}
 }
 
+// addWorktree adds a linked worktree of mainDir at worktreeDir, on a new
+// branch, and returns worktreeDir. Mirrors internal/registry's own
+// testutil_test.go addWorktree.
+func addWorktree(t *testing.T, mainDir, worktreeDir, branch string) string {
+	t.Helper()
+	for _, args := range [][]string{
+		{"commit", "--allow-empty", "-q", "-m", "init"},
+		{"worktree", "add", "-q", "-b", branch, worktreeDir},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = mainDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v (in %s): %v\n%s", args, mainDir, err, out)
+		}
+	}
+	return worktreeDir
+}
+
 type initPayload struct {
 	Project struct {
 		ID     string `json:"id"`
@@ -860,5 +878,370 @@ func TestInit_NoIdentityRemote_JSONEnvelope(t *testing.T) {
 	envelope := parseErrorEnvelope(t, r.stderr)
 	if envelope.Error.Code != "validation.no-identity-remote" {
 		t.Fatalf("error code = %q, want validation.no-identity-remote", envelope.Error.Code)
+	}
+}
+
+// --- plumbing: `clast plumbing whereami`/`projects`/`clones` (SURFACE V22/V23) ---
+
+// registerClone runs `clast init` in dir against env's journal, failing the
+// test on anything but a clean exit — the fixture step every plumbing test
+// below starts from (registration itself is init's own Matter, already
+// covered above; these tests take it as a given).
+func registerClone(t *testing.T, dir string, env []string) {
+	t.Helper()
+	if r := runIn(t, dir, env, "init"); r.exitCode != 0 {
+		t.Fatalf("init (fixture): exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+}
+
+type whereamiPayload struct {
+	Project struct {
+		ID     string `json:"id"`
+		Slug   string `json:"slug"`
+		Remote string `json:"remote"`
+	} `json:"project"`
+	Clone struct {
+		ID           string `json:"id"`
+		Label        string `json:"label"`
+		GitCommonDir string `json:"git_common_dir"`
+	} `json:"clone"`
+	Worktree string `json:"worktree"`
+	Branch   string `json:"branch"`
+	Machine  string `json:"machine"`
+}
+
+// TestWhereami_JSON_HappyPath drives `plumbing whereami --json` from a
+// registered clone's main worktree: worktree "" and a real branch name,
+// alongside the project/clone identity init itself just registered.
+func TestWhereami_JSON_HappyPath(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, dir, env)
+
+	r := runIn(t, dir, env, "plumbing", "whereami", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("whereami --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload whereamiPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("whereami --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Project.Slug != "widget" {
+		t.Errorf("project.slug = %q, want %q", payload.Project.Slug, "widget")
+	}
+	if payload.Project.Remote != "github.com/acme/widget" {
+		t.Errorf("project.remote = %q, want the normalized origin", payload.Project.Remote)
+	}
+	if payload.Clone.Label != "widget" {
+		t.Errorf("clone.label = %q, want %q", payload.Clone.Label, "widget")
+	}
+	if payload.Clone.GitCommonDir == "" {
+		t.Error("clone.git_common_dir is empty")
+	}
+	if payload.Worktree != "" {
+		t.Errorf("worktree = %q, want \"\" (main worktree)", payload.Worktree)
+	}
+	if payload.Branch == "" {
+		t.Error("branch is empty, want the repo's default branch name")
+	}
+	if payload.Machine == "" {
+		t.Error("machine is empty")
+	}
+}
+
+// TestWhereami_LinkedWorktree drives `plumbing whereami --json` from a
+// linked worktree of a registered clone: it resolves the same owning
+// clone, with worktree filled by the worktree's own name (M17).
+func TestWhereami_LinkedWorktree(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	main := initGitRepo(t, "widget")
+	addGitRemote(t, main, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, main, env)
+
+	wt := addWorktree(t, main, main+"-feature", "feature")
+
+	r := runIn(t, wt, env, "plumbing", "whereami", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("whereami --json (worktree): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload whereamiPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("whereami --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Worktree != filepath.Base(wt) {
+		t.Errorf("worktree = %q, want %q", payload.Worktree, filepath.Base(wt))
+	}
+	if payload.Branch != "feature" {
+		t.Errorf("branch = %q, want %q", payload.Branch, "feature")
+	}
+	if payload.Clone.Label != "widget" {
+		t.Errorf("clone.label = %q, want the owning clone's label %q", payload.Clone.Label, "widget")
+	}
+}
+
+// TestWhereami_Unregistered_RefusalEnvelope drives `plumbing whereami` from
+// a git repo that was never registered: refusal.unknown-clone, exit 3,
+// empty stdout, message naming `clast init`.
+func TestWhereami_Unregistered_RefusalEnvelope(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+
+	r := runIn(t, dir, env, "plumbing", "whereami", "--json")
+	if r.exitCode != 3 {
+		t.Fatalf("whereami --json: exit=%d, want 3 (refusal); stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Fatalf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "refusal.unknown-clone" {
+		t.Fatalf("error code = %q, want refusal.unknown-clone", envelope.Error.Code)
+	}
+	if !strings.Contains(envelope.Error.Message, "clast init") {
+		t.Errorf("message = %q, want it to name `clast init`", envelope.Error.Message)
+	}
+}
+
+type projectsPayload struct {
+	Projects []struct {
+		Slug       string `json:"slug"`
+		Remote     string `json:"remote"`
+		CloneCount int    `json:"clone_count"`
+	} `json:"projects"`
+}
+
+// TestPlumbingProjects_JSON_ListsAcrossTwoProjects registers two separate
+// projects and confirms `plumbing projects --json` lists both, each with
+// its own remote and a clone count of 1.
+func TestPlumbingProjects_JSON_ListsAcrossTwoProjects(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	widget := initGitRepo(t, "widget")
+	addGitRemote(t, widget, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, widget, env)
+
+	gadget := initGitRepo(t, "gadget")
+	addGitRemote(t, gadget, "origin", "git@github.com:acme/gadget.git")
+	registerClone(t, gadget, env)
+
+	r := runIn(t, widget, env, "plumbing", "projects", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing projects --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload projectsPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing projects --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Projects) != 2 {
+		t.Fatalf("projects = %+v, want exactly 2", payload.Projects)
+	}
+	bySlug := map[string]int{}
+	for _, p := range payload.Projects {
+		bySlug[p.Slug] = p.CloneCount
+		if p.Remote == "" {
+			t.Errorf("project %q has empty remote, want the normalized origin", p.Slug)
+		}
+	}
+	if bySlug["widget"] != 1 || bySlug["gadget"] != 1 {
+		t.Errorf("clone counts by slug = %+v, want widget=1 gadget=1", bySlug)
+	}
+}
+
+// TestPlumbingProjects_Human_NoProjects confirms the empty-registry case
+// prints a plain line rather than an empty table.
+func TestPlumbingProjects_Human_NoProjects(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "projects")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing projects: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "no projects registered" {
+		t.Errorf("stdout = %q, want %q", r.stdout, "no projects registered")
+	}
+}
+
+type clonesPayload struct {
+	Clones []struct {
+		ProjectSlug  string `json:"project_slug"`
+		ID           string `json:"id"`
+		Label        string `json:"label"`
+		GitCommonDir string `json:"git_common_dir"`
+		Machine      string `json:"machine"`
+		Current      bool   `json:"current"`
+	} `json:"clones"`
+}
+
+// TestPlumbingClones_WithArgument_ScopesToNamedProject confirms an
+// explicit project locator (slug) scopes the listing to that project only,
+// even when run from inside a different registered clone.
+func TestPlumbingClones_WithArgument_ScopesToNamedProject(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	widget := initGitRepo(t, "widget")
+	addGitRemote(t, widget, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, widget, env)
+
+	gadget := initGitRepo(t, "gadget")
+	addGitRemote(t, gadget, "origin", "git@github.com:acme/gadget.git")
+	registerClone(t, gadget, env)
+
+	r := runIn(t, gadget, env, "plumbing", "clones", "widget", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing clones widget --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload clonesPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing clones --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Clones) != 1 || payload.Clones[0].ProjectSlug != "widget" {
+		t.Fatalf("clones = %+v, want exactly one, scoped to widget", payload.Clones)
+	}
+	// Run from inside gadget's clone, so widget's own clone must not be
+	// marked current even though it is the only row.
+	if payload.Clones[0].Current {
+		t.Error("clones[0].current = true, want false (cwd is gadget's clone, not widget's)")
+	}
+}
+
+// TestPlumbingClones_WithArgument_UnknownProject confirms an unresolvable
+// project locator maps to validation.unknown-locator, exit 1 (not a
+// refusal — nothing declined on principle, the argument just names
+// nothing).
+func TestPlumbingClones_WithArgument_UnknownProject(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "clones", "no-such-project", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing clones no-such-project --json: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.unknown-locator" {
+		t.Fatalf("error code = %q, want validation.unknown-locator", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingClones_NoArgument_InsideClone_ScopesToCurrentProject drives
+// `plumbing clones` with no argument from inside a registered clone: only
+// that clone's own project's rows come back, and its own row is marked
+// current.
+func TestPlumbingClones_NoArgument_InsideClone_ScopesToCurrentProject(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	widget := initGitRepo(t, "widget")
+	addGitRemote(t, widget, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, widget, env)
+
+	gadget := initGitRepo(t, "gadget")
+	addGitRemote(t, gadget, "origin", "git@github.com:acme/gadget.git")
+	registerClone(t, gadget, env)
+
+	r := runIn(t, widget, env, "plumbing", "clones", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing clones --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload clonesPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing clones --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Clones) != 1 || payload.Clones[0].ProjectSlug != "widget" {
+		t.Fatalf("clones = %+v, want exactly one, scoped to widget", payload.Clones)
+	}
+	if !payload.Clones[0].Current {
+		t.Error("clones[0].current = false, want true (cwd is this exact clone)")
+	}
+}
+
+// TestPlumbingClones_NoArgument_OutsideAnyProject_ListsEverything drives
+// `plumbing clones` with no argument from a directory that is not any
+// registered clone (not even inside a git repository at all): every
+// project's clones come back, none marked current.
+func TestPlumbingClones_NoArgument_OutsideAnyProject_ListsEverything(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	widget := initGitRepo(t, "widget")
+	addGitRemote(t, widget, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, widget, env)
+
+	gadget := initGitRepo(t, "gadget")
+	addGitRemote(t, gadget, "origin", "git@github.com:acme/gadget.git")
+	registerClone(t, gadget, env)
+
+	outside := t.TempDir()
+	r := runIn(t, outside, env, "plumbing", "clones", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing clones --json (outside any project): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload clonesPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing clones --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Clones) != 2 {
+		t.Fatalf("clones = %+v, want exactly 2 (every project)", payload.Clones)
+	}
+	for _, c := range payload.Clones {
+		if c.Current {
+			t.Errorf("clone %+v marked current, want none marked (cwd resolves to no clone at all)", c)
+		}
+	}
+}
+
+// TestPlumbingClones_Human_NoClones confirms the empty-registry case
+// prints a plain line rather than an empty table.
+func TestPlumbingClones_Human_NoClones(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "clones")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing clones: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "no clones registered" {
+		t.Errorf("stdout = %q, want %q", r.stdout, "no clones registered")
+	}
+}
+
+// TestPlumbingBare_PrintsHelp_ExitZero confirms `clast plumbing` (no
+// subcommand) prints the namespace's own help and exits 0 (V2) — the same
+// path `clast plumbing --help` takes, since Cobra gives an unrunnable
+// command no help/no-args distinction.
+func TestPlumbingBare_PrintsHelp_ExitZero(t *testing.T) {
+	r := run(t, nil, "plumbing")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing (bare): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "clast plumbing") {
+		t.Errorf("stdout = %q, want it to contain the namespace's own help", r.stdout)
+	}
+}
+
+// TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
+// the `plumbing` namespace entry itself but none of the verbs registered
+// under it (V2: plumbing verbs are never porcelain).
+func TestRootHelp_DoesNotListPlumbingVerbs(t *testing.T) {
+	r := run(t, nil, "--help")
+	if r.exitCode != 0 {
+		t.Fatalf("--help: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "plumbing") {
+		t.Errorf("stdout = %q, want it to list the plumbing namespace entry", r.stdout)
+	}
+	for _, verb := range []string{"whereami", "projects", "clones"} {
+		if strings.Contains(r.stdout, verb) {
+			t.Errorf("stdout = %q, want it NOT to list plumbing verb %q among the porcelain", r.stdout, verb)
+		}
 	}
 }

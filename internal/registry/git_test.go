@@ -51,6 +51,47 @@ func TestGitDir_DiffersForLinkedWorktree(t *testing.T) {
 	}
 }
 
+// TestBranch_NormalBranch confirms Branch reports the checked-out branch
+// name, including on a brand-new repo with no commits yet (an unborn
+// HEAD, still resolvable to its default branch by --show-current).
+func TestBranch_NormalBranch(t *testing.T) {
+	dir := newRepo(t, "repo")
+	branch, err := Branch(ctx, dir)
+	if err != nil {
+		t.Fatalf("Branch on an unborn HEAD: %v", err)
+	}
+	if branch == "" {
+		t.Error("Branch on a fresh repo's default branch = \"\", want a real name")
+	}
+
+	run(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
+	run(t, dir, "checkout", "-q", "-b", "feature")
+	branch, err = Branch(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "feature" {
+		t.Errorf("Branch = %q, want %q", branch, "feature")
+	}
+}
+
+// TestBranch_DetachedHEAD confirms Branch reports "" for a detached HEAD —
+// this package's deliberate choice (git.go's own comment), distinct from
+// `git rev-parse --abbrev-ref HEAD`'s literal "HEAD".
+func TestBranch_DetachedHEAD(t *testing.T) {
+	dir := newRepo(t, "repo")
+	run(t, dir, "commit", "--allow-empty", "-q", "-m", "init")
+	run(t, dir, "checkout", "-q", "--detach", "HEAD")
+
+	branch, err := Branch(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "" {
+		t.Errorf("Branch on a detached HEAD = %q, want empty", branch)
+	}
+}
+
 // TestRemotes confirms Remotes reports no remotes on a fresh repo, and the
 // configured fetch URL by name once one is added.
 func TestRemotes(t *testing.T) {

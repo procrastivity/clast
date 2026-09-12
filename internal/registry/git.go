@@ -33,6 +33,31 @@ func GitDir(ctx context.Context, dir string) (string, error) {
 	return runGit(ctx, dir, "rev-parse", "--path-format=absolute", "--git-dir")
 }
 
+// Branch runs `git branch --show-current` in dir and returns the current
+// branch name — "" when HEAD is detached, the same "no name to report"
+// sentinel M17 already gives the main worktree (empty, not the literal
+// string a linked worktree would otherwise be confused for).
+//
+// This deliberately does not use `git rev-parse --abbrev-ref HEAD`, which
+// reports the literal string "HEAD" for a detached checkout: a caller
+// would then have to know to treat that one string as a magic sentinel
+// rather than a real branch name (git refuses to let a real branch be
+// named "HEAD", but the special-case string is still ours to invent or
+// avoid). `--show-current` reports "" instead, so the empty string is
+// this package's one sentinel for "no fact to report" across both Branch
+// and CurrentClone.Worktree. It also resolves on a brand-new repo with no
+// commits yet (an "unborn HEAD", still on its default branch) — rev-parse
+// errors there instead, which would make Branch fail on a directory init
+// itself succeeds against.
+//
+// No wip prior art exists for this: wip's model keys only on Repo/Clone/
+// Worktree (git-common-dir/git-dir) and never asked what the current
+// branch is (see internal/registry/resolve.go's top comment for the
+// other wip-vs-clast divergences this package already carries).
+func Branch(ctx context.Context, dir string) (string, error) {
+	return runGit(ctx, dir, "branch", "--show-current")
+}
+
 // Remotes lists dir's configured remotes by name, each mapped to its
 // fetch URL (`git remote get-url <name>`) — the raw input a later
 // adoption/identity step feeds through NormalizeRemote.

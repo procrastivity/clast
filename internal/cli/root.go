@@ -14,6 +14,7 @@ import (
 	initverb "github.com/procrastivity/clast/internal/verbs/initverb"
 	installverb "github.com/procrastivity/clast/internal/verbs/install"
 	manifestverb "github.com/procrastivity/clast/internal/verbs/manifest"
+	plumbingverb "github.com/procrastivity/clast/internal/verbs/plumbing"
 	uninstallverb "github.com/procrastivity/clast/internal/verbs/uninstall"
 	versionverb "github.com/procrastivity/clast/internal/verbs/version"
 )
@@ -62,6 +63,7 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	root.AddCommand(installverb.Command(streams, build, root))
 	root.AddCommand(uninstallverb.Command(streams))
 	root.AddCommand(versionverb.Command(streams, build))
+	root.AddCommand(plumbingverb.Command(streams))
 	// manifest stays last with one-line help (V2).
 	root.AddCommand(manifestverb.Command(streams, build, root))
 
