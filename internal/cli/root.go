@@ -11,6 +11,7 @@ import (
 	"github.com/procrastivity/clast/internal/cliflags"
 	"github.com/procrastivity/clast/internal/iostreams"
 	breadcrumbverb "github.com/procrastivity/clast/internal/verbs/breadcrumb"
+	briefverb "github.com/procrastivity/clast/internal/verbs/briefverb"
 	doctorverb "github.com/procrastivity/clast/internal/verbs/doctor"
 	initverb "github.com/procrastivity/clast/internal/verbs/initverb"
 	installverb "github.com/procrastivity/clast/internal/verbs/install"
@@ -59,6 +60,7 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	// Every Command constructor ends with surface.Annotate — the
 	// manifest walk hard-errors without it (C3.2).
 	cobra.EnableCommandSorting = false
+	root.AddCommand(briefverb.Command(streams))
 	root.AddCommand(initverb.Command(streams))
 	root.AddCommand(breadcrumbverb.Command(streams))
 	root.AddCommand(doctorverb.Command(streams, build, root))

@@ -20,6 +20,7 @@ import (
 
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/journal/journaltest"
+	"github.com/procrastivity/clast/internal/llm/llmtest"
 )
 
 var binPath string
@@ -3868,5 +3869,226 @@ func TestSeal_DocumentTrioComposesAcrossCuration(t *testing.T) {
 	}
 	if !foundInRetro {
 		t.Errorf("retro projects = %+v, want %q listed curated with its title under project %q", retroPayload.Projects, key.NativeID, "clast")
+	}
+}
+
+// --- porcelain: `clast brief [<project>]` (SURFACE V9/V10/V26–V29, llm-verbs/step-04) ---
+
+// writeLLMConfig plants $XDG_CONFIG_HOME/clast/config.yaml with an llm
+// section pointing at baseURL/model — the same config.yaml override link
+// TestPlumbingWake_JSON_AutoMinChars_OverrideWinsOverShippedDefault already
+// plants for a different key, mirrored here for llm.base_url/llm.model
+// (SURFACE V12/V31). llmtest's stub runs in this test process; the child
+// binary reaches it over real loopback HTTP, so no in-process seam is
+// needed on the command side.
+func writeLLMConfig(t *testing.T, xdg, baseURL, model string) {
+	t.Helper()
+	path := filepath.Join(xdg, "clast", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf("llm:\n  base_url: %q\n  model: %q\n", baseURL, model)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBrief_JSON_HappyPath_AgainstStub drives `clast brief widget --json`
+// end to end: a curated entry gathered today, an llm.base_url pointed at
+// an in-process llmtest stub, exit 0, and the --json payload carrying the
+// stub's canned completion as `brief` with `empty: false`. Human mode
+// (no --json) prints the same completion verbatim to stdout (flows/
+// brief.md §4's own "printed to stdout" presentation).
+func TestBrief_JSON_HappyPath_AgainstStub(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	cutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	today := cutoff.DayOf(time.Now())
+	writeBriefEntry(t, journalDir, string(today),
+		journal.SessionKey{Harness: "claude", NativeID: "widget-01"}, noonOn(t, today),
+		journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"},
+		"today's entry")
+
+	stub := llmtest.New(t, "here is your synthesized briefing")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := run(t, env, "brief", "widget", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("brief --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Project string `json:"project"`
+		Empty   bool   `json:"empty"`
+		Brief   string `json:"brief"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("brief --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Project != "widget" {
+		t.Errorf("project = %q, want %q", payload.Project, "widget")
+	}
+	if payload.Empty {
+		t.Error("empty = true, want false (a curated entry is present)")
+	}
+	if payload.Brief != "here is your synthesized briefing" {
+		t.Errorf("brief = %q, want the stub's canned completion", payload.Brief)
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests, want exactly 1", len(reqs))
+	}
+
+	human := run(t, env, "brief", "widget")
+	if human.exitCode != 0 {
+		t.Fatalf("brief (human): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if strings.TrimSpace(human.stdout) != "here is your synthesized briefing" {
+		t.Errorf("brief (human) stdout = %q, want the stub's canned completion verbatim", human.stdout)
+	}
+}
+
+// TestBrief_EmptyState_NoLLMConfigNeeded_NoRequests drives `clast brief` for
+// a registered project with nothing gathered: no curated entries, no
+// breadcrumbs, no sessions. It plants an llm config that points at a stub
+// configured to fail every request, and deliberately carries NO
+// CLAST_LLM_API_KEY — if the command ever constructed an llm.Client or
+// called Complete, it would fail (missing key, or the stub's 500). It
+// doesn't: flows/brief.md §2's stop happens before either, so the run
+// still exits 0, reports the empty case, and the stub sees zero requests.
+func TestBrief_EmptyState_NoLLMConfigNeeded_NoRequests(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, "must never be called for an empty brief")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY="}
+
+	r := run(t, env, "brief", "widget", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("brief --json (empty): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Empty bool   `json:"empty"`
+		Brief string `json:"brief"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("brief --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if !payload.Empty {
+		t.Error("empty = false, want true")
+	}
+	if payload.Brief != "" {
+		t.Errorf("brief = %q, want empty string in the empty case", payload.Brief)
+	}
+	if reqs := stub.Requests(); len(reqs) != 0 {
+		t.Fatalf("stub captured %d requests, want 0 (the empty case must never reach the endpoint)", len(reqs))
+	}
+
+	human := run(t, env, "brief", "widget")
+	if human.exitCode != 0 {
+		t.Fatalf("brief (human, empty): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if !strings.Contains(human.stdout, "Nothing to brief") {
+		t.Errorf("brief (human, empty) stdout = %q, want it to report the empty case readably", human.stdout)
+	}
+}
+
+// TestBrief_MissingAPIKey_ErrorCode drives `clast brief` with a curated
+// entry present (so the run reaches client construction) but no
+// CLAST_LLM_API_KEY set: validation.llm-api-key-missing, exit 1 (V34: an
+// llm/config error surfaces with its own code, not a partial document).
+func TestBrief_MissingAPIKey_ErrorCode(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	cutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	today := cutoff.DayOf(time.Now())
+	writeBriefEntry(t, journalDir, string(today),
+		journal.SessionKey{Harness: "claude", NativeID: "widget-01"}, noonOn(t, today),
+		journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"},
+		"today's entry")
+
+	writeLLMConfig(t, xdg, "http://127.0.0.1:1", "gpt-test") // unreachable; must never be dialed
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY="}
+
+	r := run(t, env, "brief", "widget", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("brief --json: exit=%d, want 1 (validation); stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Fatalf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.llm-api-key-missing" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "validation.llm-api-key-missing")
+	}
+}
+
+// TestBrief_LLMNotConfigured_ErrorCode drives `clast brief` with a curated
+// entry present but no llm config at all: validation.llm-not-configured,
+// exit 1 — the same V34 posture as the missing-key case above, pinned
+// separately since NewClient checks base_url/model before the API key.
+func TestBrief_LLMNotConfigured_ErrorCode(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir() // no config.yaml planted at all
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	cutoff, err := journal.ParseCutoff(journal.DefaultCutoffString)
+	if err != nil {
+		t.Fatalf("ParseCutoff: %v", err)
+	}
+	today := cutoff.DayOf(time.Now())
+	writeBriefEntry(t, journalDir, string(today),
+		journal.SessionKey{Harness: "claude", NativeID: "widget-01"}, noonOn(t, today),
+		journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"},
+		"today's entry")
+
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := run(t, env, "brief", "widget", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("brief --json: exit=%d, want 1 (validation); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.llm-not-configured" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "validation.llm-not-configured")
+	}
+}
+
+// TestBrief_UnregisteredCwd_RefusesUnknownClone confirms the top-level
+// verb's own cwd-default resolution refuses exactly like `plumbing brief`
+// does (both run through the same internal/verbs/brief.Run): an
+// unregistered cwd is refusal.unknown-clone, exit 3, naming `clast init`.
+func TestBrief_UnregisteredCwd_RefusesUnknownClone(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	dir := initGitRepo(t, "unregistered")
+
+	r := runIn(t, dir, env, "brief", "--json")
+	if r.exitCode != 3 {
+		t.Fatalf("brief --json: exit=%d, want 3 (refusal); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "refusal.unknown-clone" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "refusal.unknown-clone")
 	}
 }
