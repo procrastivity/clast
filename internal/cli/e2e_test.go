@@ -1697,11 +1697,13 @@ func TestPlumbingStats_Human_EmptyJournal(t *testing.T) {
 // --- query-verbs seal sweep ---
 
 // TestSeal_ManifestCarriesEveryNewVerb confirms `clast manifest --json`
-// carries kind/usage/outputSchema (C3.2/C3.7/C3.8) for every verb this
-// Matter added: plumbing kind on all five, the Use line's positional
-// recorded verbatim on show/breadcrumb (C3.8), and OutputSchema filled
-// exactly where V35 says a consumer exists (sessions, show) and left
-// unfilled everywhere else (breadcrumbs, stats, breadcrumb — C3.7: never
+// carries kind/usage/outputSchema (C3.2/C3.7/C3.8) for every verb
+// query-verbs added, plus shape-documents' plumbing asset and wake
+// (joining the same table rather than a forked one): plumbing kind on
+// every case, the Use line's positional recorded verbatim on
+// show/breadcrumb/asset (C3.8), and OutputSchema filled exactly where V35
+// says a consumer exists (sessions, show, asset, wake) and left unfilled
+// everywhere else (breadcrumbs, stats, breadcrumb — C3.7: never
 // speculatively).
 func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 	r := run(t, nil, "manifest", "--json")
@@ -1731,6 +1733,7 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 		{"plumbing stats", "", false},
 		{"breadcrumb", "<text>", false},
 		{"plumbing asset", "<path>", true},
+		{"plumbing wake", "", true},
 	}
 	byName := map[string]struct {
 		Name         string
@@ -2788,5 +2791,161 @@ func TestPlumbingAsset_UnknownPath_NotFoundAsset(t *testing.T) {
 	envelope := parseErrorEnvelope(t, r.stderr)
 	if envelope.Error.Code != "not-found.asset" {
 		t.Errorf("error code = %q, want not-found.asset", envelope.Error.Code)
+	}
+}
+
+// --- plumbing: `clast plumbing wake` (SURFACE V8/V20, shape-documents) ---
+
+// TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet seeds a fixture
+// journal spanning two projects plus a projectless session, each carrying
+// one of every MODEL §2 state (captured, curated-and-stale, curated-and-
+// fresh, dismissed), and drives the real binary: the JSON working set
+// includes only the captured and stale-curated rows (V8), ordered
+// project-grouped with the most-recently-active project first and
+// chronological within each group (V7/V8) — a fresh-curated or dismissed
+// row never appears at all.
+func TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet(t *testing.T) {
+	fx := journaltest.New(t)
+
+	alphaOld := journal.SessionKey{Harness: "claude", NativeID: "alpha-old"}
+	alphaStale := journal.SessionKey{Harness: "claude", NativeID: "alpha-stale"}
+	alphaFresh := journal.SessionKey{Harness: "claude", NativeID: "alpha-fresh"}
+	alphaDismissed := journal.SessionKey{Harness: "claude", NativeID: "alpha-dismissed"}
+	betaOnly := journal.SessionKey{Harness: "claude", NativeID: "beta-only"}
+	unprojected := journal.SessionKey{Harness: "claude", NativeID: "unprojected"}
+
+	// Project "alpha": most recent qualifying session (alpha-stale) at
+	// 2026-09-12T09:00, so alpha's group must sort before beta's.
+	fx.Captured("2026-09-10", alphaOld,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a-old"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	).WithProject("2026-09-10", alphaOld, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
+
+	fx.CuratedStale("2026-09-12", alphaStale,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 20, SHA256: "grown"},
+		journal.TranscriptStamp{Lines: 10, SHA256: "original"},
+		time.Date(2026, 9, 12, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC),
+		"framework", "alpha's stale entry",
+	).WithProject("2026-09-12", alphaStale, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
+
+	fx.Curated("2026-09-11", alphaFresh,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "alpha's fresh entry",
+	).WithProject("2026-09-11", alphaFresh, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
+
+	fx.Dismissed("2026-09-11", alphaDismissed,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "c"},
+		time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 8, 30, 0, 0, time.UTC),
+		"framework", "manual",
+	).WithProject("2026-09-11", alphaDismissed, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
+
+	// Project "beta": most recent (only) qualifying session at
+	// 2026-09-11T08:00 — earlier than alpha's, so beta sorts after alpha.
+	fx.Captured("2026-09-11", betaOnly,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "d"},
+		time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC),
+	).WithProject("2026-09-11", betaOnly, journal.SessionProject{ID: "p-beta", Slug: "beta", Clone: "c", Label: "beta", Path: "/beta"})
+
+	// No project at all: its own bucket, ordered by its own recency —
+	// earliest of all here, so it sorts last.
+	fx.Captured("2026-09-09", unprojected,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "e"},
+		time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
+	)
+
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+	r := run(t, env, "plumbing", "wake", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing wake --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+
+	var payload struct {
+		Sessions []struct {
+			SessionID string `json:"session_id"`
+			State     string `json:"state"`
+			Stale     bool   `json:"stale"`
+			Title     string `json:"title"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+
+	wantOrder := []string{alphaOld.NativeID, alphaStale.NativeID, betaOnly.NativeID, unprojected.NativeID}
+	if len(payload.Sessions) != len(wantOrder) {
+		t.Fatalf("sessions = %+v, want exactly %d rows: %v", payload.Sessions, len(wantOrder), wantOrder)
+	}
+	for i, want := range wantOrder {
+		if payload.Sessions[i].SessionID != want {
+			t.Errorf("sessions[%d].session_id = %q, want %q (project-grouped, most-recent project first, chronological within group)",
+				i, payload.Sessions[i].SessionID, want)
+		}
+	}
+
+	byID := map[string]struct {
+		State string
+		Stale bool
+		Title string
+	}{}
+	for _, s := range payload.Sessions {
+		byID[s.SessionID] = struct {
+			State string
+			Stale bool
+			Title string
+		}{s.State, s.Stale, s.Title}
+	}
+	if got := byID[alphaStale.NativeID]; got.State != "curated" || !got.Stale || got.Title != "alpha's stale entry" {
+		t.Errorf("alpha-stale row = %+v, want curated+stale with its title", got)
+	}
+	if got := byID[alphaOld.NativeID]; got.State != "captured" || got.Stale {
+		t.Errorf("alpha-old row = %+v, want captured, not stale", got)
+	}
+	for _, excluded := range []string{alphaFresh.NativeID, alphaDismissed.NativeID} {
+		if _, present := byID[excluded]; present {
+			t.Errorf("session %q must be excluded from the working set (fresh-curated/dismissed)", excluded)
+		}
+	}
+}
+
+// TestPlumbingWake_Human_NoSessions confirms the empty case reads as a
+// document, not a listing's own "no sessions" one-liner.
+func TestPlumbingWake_Human_NoSessions(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "wake", "--since", "all")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing wake: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "Nothing in the working set") {
+		t.Errorf("stdout = %q, want it to report an empty working set", r.stdout)
+	}
+}
+
+// TestPlumbingWake_Human_GroupsUnderProjectHeadings confirms the human
+// document groups by project heading (V8: a readable markdown document,
+// not sessions' one-line-per-row listing).
+func TestPlumbingWake_Human_GroupsUnderProjectHeadings(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
+	fx.Captured("2026-09-10", key,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	).WithProject("2026-09-10", key, journal.SessionProject{ID: "p-clast", Slug: "clast", Clone: "c", Label: "clast", Path: "/clast"})
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "wake", "--since", "all")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing wake: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "## clast/clast") {
+		t.Errorf("stdout = %q, want a project heading naming clast/clast", r.stdout)
+	}
+	if !strings.Contains(r.stdout, key.DirName()) {
+		t.Errorf("stdout = %q, want the session's locator listed", r.stdout)
 	}
 }

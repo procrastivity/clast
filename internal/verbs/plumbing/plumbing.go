@@ -26,12 +26,13 @@ import (
 	showverb "github.com/procrastivity/clast/internal/verbs/show"
 	statsverb "github.com/procrastivity/clast/internal/verbs/stats"
 	undismissverb "github.com/procrastivity/clast/internal/verbs/undismiss"
+	wakeverb "github.com/procrastivity/clast/internal/verbs/wake"
 	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
 )
 
 // Command constructs the `clast plumbing` namespace command and registers
-// every plumbing verb under it (V22/V23/V25; V20's remaining shape-document
-// verbs and V24's tier-2 names join here as they land). The group command
+// every plumbing verb under it (V22/V23/V25; wake landed here per V8/V20 —
+// brief and retro, and V24's tier-2 names, join here as they land). The group command
 // itself is never surface.Annotate'd — it has no Runnable RunE of its own, so the
 // manifest walk (internal/manifest/verbs.go's collect) recurses through it
 // without requiring a kind, the same way it already treats any other
@@ -57,5 +58,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(dismissverb.Command(streams))
 	cmd.AddCommand(undismissverb.Command(streams))
 	cmd.AddCommand(assetverb.Command(streams))
+	cmd.AddCommand(wakeverb.Command(streams))
 	return cmd
 }
