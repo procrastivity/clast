@@ -21,23 +21,33 @@ import (
 func newFixture(t *testing.T) (root *cobra.Command, build buildinfo.Info) {
 	t.Helper()
 	t.Setenv(claudecode.SkillsDirEnv, t.TempDir())
+	t.Setenv(claudecode.SettingsPathEnv, filepath.Join(t.TempDir(), "settings.json"))
 	return &cobra.Command{Use: "clast"}, buildinfo.Info{Version: "v0.0.0-test"}
 }
 
-// installClean renders and stamps a fresh claude-code tree under root's
-// current manifest, returning its install dir — the Current fixture every
-// other state's test starts from and mutates.
+// installClean renders and stamps every one of claude-code's three skills
+// under root's current manifest, returning the wake skill's install dir —
+// the Current fixture every other state's test starts from and mutates.
+// wake stands in for "the" claude-code target the way the chassis's one
+// skill used to: the other two skills install alongside it, untouched by
+// whatever the test does to wake's tree.
 func installClean(t *testing.T, root *cobra.Command, build buildinfo.Info) string {
 	t.Helper()
 	m, err := manifest.Build(root, build)
 	if err != nil {
 		t.Fatalf("manifest.Build: %v", err)
 	}
-	dir, err := claudecode.Install(m)
-	if err != nil {
-		t.Fatalf("claudecode.Install: %v", err)
+	var wakeDir string
+	for _, name := range claudecode.SkillNames {
+		dir, err := claudecode.InstallSkill(name, m)
+		if err != nil {
+			t.Fatalf("claudecode.InstallSkill(%q): %v", name, err)
+		}
+		if name == "wake" {
+			wakeDir = dir
+		}
 	}
-	return dir
+	return wakeDir
 }
 
 // addVerb registers a new verb under root's `plumbing` namespace, after a
@@ -73,14 +83,16 @@ func plumbingGroup(root *cobra.Command) *cobra.Command {
 	return group
 }
 
-func findTarget(t *testing.T, targets []TargetState, name string) TargetState {
+// findTarget returns the TargetState named (harnessName, target), failing
+// the test if no such row exists.
+func findTarget(t *testing.T, targets []TargetState, harnessName, target string) TargetState {
 	t.Helper()
 	for _, tg := range targets {
-		if tg.Harness == name {
+		if tg.Harness == harnessName && tg.Target == target {
 			return tg
 		}
 	}
-	t.Fatalf("no target named %q in %+v", name, targets)
+	t.Fatalf("no target named %q/%q in %+v", harnessName, target, targets)
 	return TargetState{}
 }
 
@@ -92,11 +104,32 @@ func TestHarnessTargets_Current(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Current {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Current {
 		t.Errorf("state = %q, want %q", got, harness.Current)
 	}
 	if len(findings) != 0 {
 		t.Errorf("findings = %+v, want none", findings)
+	}
+}
+
+// TestHarnessTargets_ListsEveryProjectedSkill asserts HarnessTargets emits
+// one row per claude-code skill (SURFACE V32: three, not one), each
+// independently reporting Current once installed.
+func TestHarnessTargets_ListsEveryProjectedSkill(t *testing.T) {
+	root, build := newFixture(t)
+	installClean(t, root, build)
+
+	_, targets, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if len(targets) != len(claudecode.SkillNames) {
+		t.Fatalf("targets = %+v, want exactly %d (one per skill)", targets, len(claudecode.SkillNames))
+	}
+	for _, name := range claudecode.SkillNames {
+		if got := findTarget(t, targets, claudecode.Name, name).State; got != harness.Current {
+			t.Errorf("%s state = %q, want %q", name, got, harness.Current)
+		}
 	}
 }
 
@@ -108,7 +141,7 @@ func TestHarnessTargets_Missing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Missing {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Missing {
 		t.Errorf("state = %q, want %q", got, harness.Missing)
 	}
 	if len(findings) != 0 {
@@ -125,7 +158,7 @@ func TestHarnessTargets_Stale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Stale {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Stale {
 		t.Errorf("state = %q, want %q", got, harness.Stale)
 	}
 	if len(findings) == 0 {
@@ -149,7 +182,7 @@ func TestHarnessTargets_Modified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Modified {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Modified {
 		t.Errorf("state = %q, want %q", got, harness.Modified)
 	}
 	if len(findings) != 1 || findings[0].Code != "advisory.modified-harness-target" {
@@ -174,7 +207,7 @@ func TestHarnessTargets_ModifiedAndStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Modified {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Modified {
 		t.Errorf("state = %q, want %q", got, harness.Modified)
 	}
 
@@ -199,7 +232,7 @@ func TestHarnessTargets_ModifiedAndStale(t *testing.T) {
 
 func TestHarnessTargets_UnownedConflict(t *testing.T) {
 	root, build := newFixture(t)
-	dir, err := claudecode.InstallDir()
+	dir, err := claudecode.SkillDir("wake")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +247,7 @@ func TestHarnessTargets_UnownedConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.UnownedConflict {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.UnownedConflict {
 		t.Errorf("state = %q, want %q", got, harness.UnownedConflict)
 	}
 	if len(findings) != 1 || findings[0].Code != "advisory.unowned-harness-target" {
@@ -240,7 +273,7 @@ func TestHarnessTargets_IncompatibleUnparseable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets returned a hard error for an incompatible stamp: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Incompatible {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Incompatible {
 		t.Errorf("state = %q, want %q", got, harness.Incompatible)
 	}
 	if len(findings) != 1 || findings[0].Code != harness.CodeIncompatible {
@@ -273,7 +306,7 @@ func TestHarnessTargets_IncompatibleSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HarnessTargets returned a hard error for an incompatible stamp: %v", err)
 	}
-	if got := findTarget(t, targets, claudecode.Name).State; got != harness.Incompatible {
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Incompatible {
 		t.Errorf("state = %q, want %q", got, harness.Incompatible)
 	}
 	if len(findings) != 1 || findings[0].Code != harness.CodeIncompatible {

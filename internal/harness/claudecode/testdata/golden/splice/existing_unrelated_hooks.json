@@ -1,0 +1,18 @@
+{
+  "env": {
+    "FOO": "bar"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo pre"
+          }
+        ]
+      }
+    ]
+  ,"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"command -v clast >/dev/null 2>&1 && (clast plumbing capture >/dev/null 2>&1 &); exit 0"}]}]}
+}

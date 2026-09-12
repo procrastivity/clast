@@ -61,7 +61,7 @@ func Command(streams *iostreams.Streams, build buildinfo.Info, root *cobra.Comma
 			}
 
 			for _, t := range targets {
-				if _, err := fmt.Fprintf(streams.Out, "%s: %s at %s\n", t.Harness, t.State, t.Dir); err != nil {
+				if _, err := fmt.Fprintf(streams.Out, "%s %s: %s at %s\n", t.Harness, t.Target, t.State, t.Dir); err != nil {
 					return err
 				}
 			}

@@ -46,22 +46,30 @@ func Run(cs ...Check) ([]Finding, error) {
 // re-running install, so it never fails doctor.
 const StaleHarnessCode = "advisory.stale-harness-artifact"
 
-// TargetState is one registered harness's reported drift state — the
-// per-target fact doctor's --json and text output carry beside findings
-// (C4.5).
+// TargetState is one registered harness target's reported drift state —
+// the per-target fact doctor's --json and text output carry beside
+// findings (C4.5). A harness may carry more than one stamped target
+// (SURFACE V32: claude-code projects three skills, each its own target),
+// so Harness alone does not identify a row; Target does, within that
+// harness.
 type TargetState struct {
 	Harness string        `json:"harness"`
+	Target  string        `json:"target"`
 	Dir     string        `json:"dir"`
 	State   harness.State `json:"state"`
 }
 
-// HarnessTargets derives every registered harness's drift state
-// (harness.Status, C4.6's three comparisons folded into C4.5's six
-// states) in registry.All's order, and returns both doctor's findings and
-// the per-target states doctor reports beside them. root is the
-// *cobra.Command NewRootCommand is assembling, captured by reference — the
-// same pattern install uses — so the manifest this builds reflects every
-// verb actually registered.
+// HarnessTargets derives every registered harness's stamped targets'
+// drift state (harness.Status, C4.6's three comparisons folded into
+// C4.5's six states) in registry.All's order, and returns both doctor's
+// findings and the per-target states doctor reports beside them. root is
+// the *cobra.Command NewRootCommand is assembling, captured by reference —
+// the same pattern install uses — so the manifest this builds reflects
+// every verb actually registered.
+//
+// A harness's splice target (C4.8), if it has one, carries no drift state
+// here yet — wiring its drift into doctor is this Matter's step-04
+// (SURFACE V28).
 //
 // One registry walk gives both, because the state already needs each
 // target's install dir and generated files.
@@ -86,39 +94,46 @@ func HarnessTargets(root *cobra.Command, build buildinfo.Info) ([]Finding, []Tar
 	}
 
 	var findings []Finding
-	targets := make([]TargetState, 0, len(registry.All))
+	var targets []TargetState
 
 	for _, h := range registry.All {
-		dir, err := h.InstallDir()
-		if err != nil {
-			return nil, nil, err
-		}
-		files, err := h.Generate(m)
-		if err != nil {
-			return nil, nil, err
-		}
-		state, err := harness.Status(dir, files)
-		if err != nil {
-			return nil, nil, err
-		}
-		targets = append(targets, TargetState{Harness: h.Name, Dir: dir, State: state})
+		for _, target := range h.Targets {
+			dir, err := target.InstallDir()
+			if err != nil {
+				return nil, nil, err
+			}
+			files, err := target.Generate(m)
+			if err != nil {
+				return nil, nil, err
+			}
+			state, err := harness.Status(dir, files)
+			if err != nil {
+				return nil, nil, err
+			}
+			targets = append(targets, TargetState{Harness: h.Name, Target: target.Label, Dir: dir, State: state})
 
-		switch state {
-		case harness.Stale:
-			fs, err := staleFileFindings(h.Name, dir, files)
-			if err != nil {
-				return nil, nil, err
+			// h.Name, not a per-target label, is what harness.Risk and
+			// harness.ForceRemedy fold into a runnable `clast install
+			// <harness> --force` suggestion below — dir already
+			// disambiguates which of the harness's targets (e.g. which
+			// claude-code skill) a finding is about.
+			switch state {
+			case harness.Stale:
+				fs, err := staleFileFindings(h.Name, dir, files)
+				if err != nil {
+					return nil, nil, err
+				}
+				findings = append(findings, fs...)
+			case harness.Modified:
+				fs, err := staleFileFindings(h.Name, dir, files)
+				if err != nil {
+					return nil, nil, err
+				}
+				findings = append(findings, fs...)
+				findings = append(findings, driftFinding(h.Name, dir, state))
+			case harness.UnownedConflict, harness.Incompatible:
+				findings = append(findings, driftFinding(h.Name, dir, state))
 			}
-			findings = append(findings, fs...)
-		case harness.Modified:
-			fs, err := staleFileFindings(h.Name, dir, files)
-			if err != nil {
-				return nil, nil, err
-			}
-			findings = append(findings, fs...)
-			findings = append(findings, driftFinding(h.Name, dir, state))
-		case harness.UnownedConflict, harness.Incompatible:
-			findings = append(findings, driftFinding(h.Name, dir, state))
 		}
 	}
 

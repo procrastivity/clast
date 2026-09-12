@@ -1,7 +1,19 @@
 // Package uninstall implements the `clast uninstall <harness>` verb: it
-// removes exactly the stamped tree a prior `clast install <harness>`
+// removes exactly the stamped trees a prior `clast install <harness>`
 // wrote, and refuses — rather than silently proceeding — if it finds
-// unstamped content at the target path (C4.7).
+// unstamped content at a target path (C4.7).
+//
+// A harness may project more than one stamped target (SURFACE V32:
+// claude-code's three skills, each independently stamped) — this walks
+// every one of them, stopping at the first refusal, same as install does.
+//
+// It does not touch a harness's splice target (C4.8: claude-code's
+// settings.json SessionStart hook). Reversing that splice cleanly —
+// removing exactly the entry install added, not any hook a human added
+// beside it — is deliberately deferred: see this Matter's step-03
+// ("uninstall claude-code: reverse the projection cleanly"). Today's
+// `uninstall claude-code` removes the three skill directories and leaves
+// the spliced settings.json hook in place.
 package uninstall
 
 import (
@@ -18,6 +30,12 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/surface"
 )
+
+// targetResult is one target's removal outcome.
+type targetResult struct {
+	Target string `json:"target"`
+	Dir    string `json:"dir"`
+}
 
 // Command constructs the `clast uninstall <harness>` verb.
 func Command(streams *iostreams.Streams) *cobra.Command {
@@ -47,16 +65,21 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			// harnessName was already validated against registry.Names
 			// above, so Lookup is guaranteed to find it here.
 			h, _ := registry.Lookup(harnessName)
-			dir, err := h.Uninstall()
-			if err != nil {
-				return err
+
+			results := make([]targetResult, 0, len(h.Targets))
+			for _, target := range h.Targets {
+				dir, err := target.Uninstall()
+				if err != nil {
+					return err
+				}
+				results = append(results, targetResult{Target: target.Label, Dir: dir})
 			}
 
 			if flags.JSON {
 				payload := struct {
-					Harness string `json:"harness"`
-					Dir     string `json:"dir"`
-				}{Harness: harnessName, Dir: dir}
+					Harness string         `json:"harness"`
+					Targets []targetResult `json:"targets"`
+				}{Harness: harnessName, Targets: results}
 				b, err := json.Marshal(payload)
 				if err != nil {
 					return err
@@ -65,8 +88,12 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 				return err
 			}
 
-			_, err = fmt.Fprintf(streams.Out, "uninstalled %s skill from %s\n", harnessName, dir)
-			return err
+			for _, r := range results {
+				if _, err := fmt.Fprintf(streams.Out, "uninstalled %s %s skill from %s\n", harnessName, r.Target, r.Dir); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 	surface.Annotate(cmd, surface.Plumbing)

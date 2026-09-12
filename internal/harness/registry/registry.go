@@ -16,18 +16,43 @@ import (
 	"github.com/procrastivity/clast/internal/manifest"
 )
 
-// Harness is one row of the install/uninstall/doctor table: a harness's
-// name plus the functions that generate, install, uninstall, locate, and
-// probe its projection. Every field is required — Lookup's callers dispatch
-// through them unconditionally, in place of the N-way switches this table
-// replaces.
-type Harness struct {
-	Name       string
+// Target is one independently stamped, installable subtree within a
+// harness's projection (C4.4) — the shape a single-target harness used to
+// expose directly at the Harness level, before SURFACE V32 gave
+// claude-code three of them (one per skill). Label distinguishes a
+// harness's targets from one another for reporting (install, uninstall,
+// doctor); every other field is the same {InstallDir, Generate, Install,
+// Uninstall} tuple the chassis always had.
+type Target struct {
+	Label      string
 	InstallDir func() (string, error)
 	Generate   func(manifest.Manifest) (map[string][]byte, error)
 	Install    func(manifest.Manifest) (string, error)
 	Uninstall  func() (string, error)
-	Available  func() bool
+}
+
+// SpliceOutcome reports what a harness's Splice call did to its splice
+// target (C4.8) — a foreign-file path edit, not a stamped generated tree,
+// so it carries no drift state of its own here; step-04 (SURFACE V28) owns
+// wiring its drift into doctor.
+type SpliceOutcome struct {
+	Path   string
+	Status string
+}
+
+// Harness is one row of the install/uninstall/doctor table: a harness's
+// name, its projected targets, and the functions that probe it and splice
+// its foreign-file targets. Available is required — Lookup's callers
+// dispatch through it unconditionally. Targets may be empty and Splice may
+// be nil for a harness with neither kind of target (none exist yet, but
+// C4.8 rates both as ordinary extensions of the model).
+type Harness struct {
+	Name      string
+	Available func() bool
+	Targets   []Target
+	// Splice installs this harness's splice target, if it has one (C4.8) —
+	// nil for a harness with none. Only claude-code sets it today.
+	Splice func() (SpliceOutcome, error)
 }
 
 // All lists every harness this tool can project itself into. The skeleton
@@ -36,13 +61,47 @@ type Harness struct {
 // walks every call site a new target touches.
 var All = []Harness{
 	{
-		Name:       claudecode.Name,
-		InstallDir: claudecode.InstallDir,
-		Generate:   claudecode.Generate,
-		Install:    claudecode.Install,
-		Uninstall:  claudecode.Uninstall,
-		Available:  claudecode.Available,
+		Name:      claudecode.Name,
+		Available: claudecode.Available,
+		Targets:   claudecodeTargets(),
+		Splice:    claudecodeSplice,
 	},
+}
+
+// claudecodeTargets builds claude-code's three skill targets (SURFACE
+// V32), one per claudecode.SkillNames entry, each closing over its own
+// name so InstallDir/Generate/Install/Uninstall all act on that one
+// skill's tree.
+func claudecodeTargets() []Target {
+	out := make([]Target, 0, len(claudecode.SkillNames))
+	for _, name := range claudecode.SkillNames {
+		out = append(out, Target{
+			Label:      name,
+			InstallDir: func() (string, error) { return claudecode.SkillDir(name) },
+			Generate: func(m manifest.Manifest) (map[string][]byte, error) {
+				return claudecode.GenerateSkill(name, m)
+			},
+			Install: func(m manifest.Manifest) (string, error) {
+				return claudecode.InstallSkill(name, m)
+			},
+			Uninstall: func() (string, error) {
+				return claudecode.UninstallSkill(name)
+			},
+		})
+	}
+	return out
+}
+
+// claudecodeSplice adapts claudecode.Splice's result into the registry's
+// own SpliceOutcome shape, so this package stays the sole shape install,
+// uninstall, and checks read (the same reason Harness itself is defined
+// here rather than in each harness subpackage).
+func claudecodeSplice() (SpliceOutcome, error) {
+	r, err := claudecode.Splice()
+	if err != nil {
+		return SpliceOutcome{}, err
+	}
+	return SpliceOutcome{Path: r.Path, Status: r.Status}, nil
 }
 
 // Names lists every harness in All's order — help text, bare-invocation
