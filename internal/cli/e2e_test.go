@@ -54,7 +54,7 @@ type result struct {
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append(os.Environ(), env...)
-	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR"} {
+	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR"} {
 		set := false
 		for _, e := range env {
 			if strings.HasPrefix(e, name+"=") {
@@ -71,7 +71,17 @@ func hermeticEnv(t *testing.T, env []string) []string {
 
 func run(t *testing.T, env []string, args ...string) result {
 	t.Helper()
+	return runIn(t, "", env, args...)
+}
+
+// runIn is run, with the child process's working directory set to dir (the
+// registry verbs' e2e cases need to run inside a fixture git clone).
+// An empty dir inherits this test process's own working directory, same as
+// run.
+func runIn(t *testing.T, dir string, env []string, args ...string) result {
+	t.Helper()
 	cmd := exec.Command(binPath, args...)
+	cmd.Dir = dir
 	cmd.Env = hermeticEnv(t, env)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -694,5 +704,161 @@ func TestDoctor_TextMode_StateLine(t *testing.T) {
 	}
 	if stateIdx > issuesIdx {
 		t.Fatalf("doctor stdout = %q, want the state line ahead of the findings/no-issues line", r.stdout)
+	}
+}
+
+// --- registry: `clast init` (SURFACE V26) ---
+
+// initGitRepo creates a fresh git repo (no remotes) under t's temp dir, at
+// the given relative name, and returns its absolute path. Mirrors
+// internal/registry's own testutil_test.go newRepo — no mocks for anything
+// git-backed.
+func initGitRepo(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v (in %s): %v\n%s", args, dir, err, out)
+		}
+	}
+	return dir
+}
+
+func addGitRemote(t *testing.T, dir, name, url string) {
+	t.Helper()
+	cmd := exec.Command("git", "remote", "add", name, url)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add (in %s): %v\n%s", dir, err, out)
+	}
+}
+
+type initPayload struct {
+	Project struct {
+		ID     string `json:"id"`
+		Slug   string `json:"slug"`
+		Remote string `json:"remote"`
+	} `json:"project"`
+	Clone struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	} `json:"clone"`
+	Status string `json:"status"`
+}
+
+// TestInit_JSON_HappyPath drives a fresh, remote-bearing clone through
+// `clast init --json`: exit 0, status "created", the project keyed by the
+// normalized remote and slugged from the repo directory's basename, and
+// the clone labeled the same way.
+func TestInit_JSON_HappyPath(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "origin", "git@github.com:acme/widget.git")
+
+	r := runIn(t, dir, env, "init", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("init --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload initPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("init --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Status != "created" {
+		t.Errorf("status = %q, want %q", payload.Status, "created")
+	}
+	if payload.Project.Slug != "widget" {
+		t.Errorf("project.slug = %q, want %q", payload.Project.Slug, "widget")
+	}
+	if payload.Project.Remote != "github.com/acme/widget" {
+		t.Errorf("project.remote = %q, want the normalized origin", payload.Project.Remote)
+	}
+	if payload.Clone.Label != "widget" {
+		t.Errorf("clone.label = %q, want %q", payload.Clone.Label, "widget")
+	}
+	if payload.Project.ID == "" || payload.Clone.ID == "" {
+		t.Errorf("project/clone id empty in payload %+v", payload)
+	}
+
+	if _, err := os.Stat(filepath.Join(journalDir, "projects", "widget", "project.json")); err != nil {
+		t.Errorf("project.json not written: %v", err)
+	}
+}
+
+// TestInit_Rerun_ReportsCurrent drives init twice against the same clone
+// and journal: the second run reports status "current" (V26's seal
+// condition) with exit 0 and the same project/clone identity as the first.
+func TestInit_Rerun_ReportsCurrent(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "origin", "git@github.com:acme/widget.git")
+
+	first := runIn(t, dir, env, "init", "--json")
+	if first.exitCode != 0 {
+		t.Fatalf("first init: exit=%d, want 0; stderr=%q", first.exitCode, first.stderr)
+	}
+	var firstPayload initPayload
+	if err := json.Unmarshal([]byte(first.stdout), &firstPayload); err != nil {
+		t.Fatalf("first init --json stdout: %v; stdout=%q", err, first.stdout)
+	}
+
+	second := runIn(t, dir, env, "init", "--json")
+	if second.exitCode != 0 {
+		t.Fatalf("second init: exit=%d, want 0; stderr=%q", second.exitCode, second.stderr)
+	}
+	var secondPayload initPayload
+	if err := json.Unmarshal([]byte(second.stdout), &secondPayload); err != nil {
+		t.Fatalf("second init --json stdout: %v; stdout=%q", err, second.stdout)
+	}
+	if secondPayload.Status != "current" {
+		t.Errorf("second run status = %q, want %q", secondPayload.Status, "current")
+	}
+	if secondPayload.Clone.ID != firstPayload.Clone.ID || secondPayload.Project.ID != firstPayload.Project.ID {
+		t.Errorf("second run resolved a different project/clone: %+v vs %+v", secondPayload, firstPayload)
+	}
+
+	// Human mode's current case prints exactly that state.
+	third := runIn(t, dir, env, "init")
+	if third.exitCode != 0 {
+		t.Fatalf("third init (human mode): exit=%d, want 0; stderr=%q", third.exitCode, third.stderr)
+	}
+	if strings.TrimSpace(third.stdout) != "current" {
+		t.Errorf("human-mode current stdout = %q, want exactly %q", third.stdout, "current")
+	}
+}
+
+// TestInit_NoIdentityRemote_JSONEnvelope drives a refusal through the CLI:
+// a clone with remotes configured, none named origin and no
+// --identity-remote given, refuses with validation.no-identity-remote,
+// exit 1, empty stdout, and the standard --json error envelope.
+func TestInit_NoIdentityRemote_JSONEnvelope(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "upstream", "git@github.com:acme/widget.git")
+
+	r := runIn(t, dir, env, "init", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("init --json: exit=%d, want 1 (validation); stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Fatalf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.no-identity-remote" {
+		t.Fatalf("error code = %q, want validation.no-identity-remote", envelope.Error.Code)
 	}
 }
