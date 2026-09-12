@@ -1698,13 +1698,13 @@ func TestPlumbingStats_Human_EmptyJournal(t *testing.T) {
 
 // TestSeal_ManifestCarriesEveryNewVerb confirms `clast manifest --json`
 // carries kind/usage/outputSchema (C3.2/C3.7/C3.8) for every verb
-// query-verbs added, plus shape-documents' plumbing asset and wake
+// query-verbs added, plus shape-documents' plumbing asset, wake, and brief
 // (joining the same table rather than a forked one): plumbing kind on
 // every case, the Use line's positional recorded verbatim on
-// show/breadcrumb/asset (C3.8), and OutputSchema filled exactly where V35
-// says a consumer exists (sessions, show, asset, wake) and left unfilled
-// everywhere else (breadcrumbs, stats, breadcrumb — C3.7: never
-// speculatively).
+// show/breadcrumb/asset/brief (C3.8), and OutputSchema filled exactly
+// where V35 says a consumer exists (sessions, show, asset, wake, brief)
+// and left unfilled everywhere else (breadcrumbs, stats, breadcrumb —
+// C3.7: never speculatively).
 func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 	r := run(t, nil, "manifest", "--json")
 	if r.exitCode != 0 {
@@ -1734,6 +1734,7 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 		{"breadcrumb", "<text>", false},
 		{"plumbing asset", "<path>", true},
 		{"plumbing wake", "", true},
+		{"plumbing brief", "[<project>]", true},
 	}
 	byName := map[string]struct {
 		Name         string
@@ -2947,5 +2948,222 @@ func TestPlumbingWake_Human_GroupsUnderProjectHeadings(t *testing.T) {
 	}
 	if !strings.Contains(r.stdout, key.DirName()) {
 		t.Errorf("stdout = %q, want the session's locator listed", r.stdout)
+	}
+}
+
+// --- plumbing: `clast plumbing brief [<project>]` (SURFACE V8/V20, shape-documents) ---
+
+// writeBriefEntry seeds one curated, projected session directly through
+// journal's own write primitives — the same posture journaltest itself
+// uses — at root (rather than a fresh journaltest.New root), so it lands
+// in the SAME journal a real `clast init` registered the clone against.
+func writeBriefEntry(t *testing.T, root, shard string, key journal.SessionKey, startedAt time.Time, proj journal.SessionProject, title string) {
+	t.Helper()
+	if err := journal.WriteSession(root, shard, key, journal.Session{
+		Harness: key.Harness, SessionID: key.NativeID, Machine: "framework",
+		Project: &proj, Branch: "main",
+		StartedAt: startedAt, LastActiveAt: startedAt.Add(20 * time.Minute), CapturedAt: startedAt.Add(25 * time.Minute),
+		Counts: journal.SessionCounts{User: 1, Assistant: 1}, Substantive: true,
+		Transcript: journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "s-" + key.NativeID},
+	}); err != nil {
+		t.Fatalf("writeBriefEntry: WriteSession(%s): %v", key.DirName(), err)
+	}
+	curatedAt := startedAt.Add(30 * time.Minute)
+	if err := journal.WriteCuration(root, shard, key, journal.Curation{
+		State: journal.StateCurated, At: curatedAt, Machine: "framework",
+		TranscriptAtCuration: &journal.TranscriptStamp{Lines: 5, SHA256: "s-" + key.NativeID},
+	}); err != nil {
+		t.Fatalf("writeBriefEntry: WriteCuration(%s): %v", key.DirName(), err)
+	}
+	body := "---\ntitle: " + title + "\ntags: []\n---\n\n" + title + " body.\n"
+	if err := journal.WriteEntry(root, shard, key, []byte(body)); err != nil {
+		t.Fatalf("writeBriefEntry: WriteEntry(%s): %v", key.DirName(), err)
+	}
+}
+
+// TestPlumbingBrief_ProjectPositional_JSON_GroupsAndHoists drives
+// `plumbing brief widget` (an explicit locator, no cwd registration
+// needed) against a fixture journal with two workspaces, confirming the
+// JSON groups by label, caps at 3 per group, and reports project/
+// current_workspace/empty.
+func TestPlumbingBrief_ProjectPositional_JSON_GroupsAndHoists(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	dev := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "dev", Path: "/dev"}
+	for i := 0; i < 4; i++ {
+		key := journal.SessionKey{Harness: "claude", NativeID: fmt.Sprintf("dev-%02d", i)}
+		shard := time.Date(2026, 9, 10+i, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+		writeBriefEntry(t, journalDir, shard, key, time.Date(2026, 9, 10+i, 9, 0, 0, 0, time.UTC), dev, fmt.Sprintf("dev entry %d", i))
+	}
+
+	r := run(t, env, "plumbing", "brief", "widget", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing brief widget --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+
+	var payload struct {
+		Project          string `json:"project"`
+		CurrentWorkspace string `json:"current_workspace"`
+		Groups           []struct {
+			Workspace string `json:"workspace"`
+			Entries   []struct {
+				Title string `json:"title"`
+			} `json:"entries"`
+		} `json:"groups"`
+		Empty bool `json:"empty"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing brief --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Project != "widget" {
+		t.Errorf("project = %q, want %q", payload.Project, "widget")
+	}
+	if payload.Empty {
+		t.Error("empty = true, want false (entries are present)")
+	}
+	if len(payload.Groups) != 1 || payload.Groups[0].Workspace != "dev" {
+		t.Fatalf("groups = %+v, want one group named %q", payload.Groups, "dev")
+	}
+	if len(payload.Groups[0].Entries) != 3 {
+		t.Errorf("dev group entries = %d, want 3 (the per-group cap)", len(payload.Groups[0].Entries))
+	}
+}
+
+// TestPlumbingBrief_CwdDefault_RegisteredClone_ResolvesAndHoists drives
+// `plumbing brief` with no positional from a registered clone's own
+// directory: the project defaults to the cwd's own project (V8/V22's
+// whereami path) and that clone's label hoists first among the groups.
+func TestPlumbingBrief_CwdDefault_RegisteredClone_ResolvesAndHoists(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	dir := initGitRepo(t, "widget")
+	addGitRemote(t, dir, "origin", "git@github.com:acme/widget.git")
+	registerClone(t, dir, env)
+
+	// A second, unrelated clone of the same project (a different label),
+	// whose entry must NOT be hoisted first.
+	other := journal.SessionProject{ID: "p-other", Slug: "widget", Clone: "c2", Label: "other", Path: "/other"}
+	writeBriefEntry(t, journalDir, "2026-09-10",
+		journal.SessionKey{Harness: "claude", NativeID: "other-01"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC), other, "other workspace's entry")
+
+	// dir's own registered clone label is the directory basename
+	// ("widget", per M16's default-label posture, TestWhereami_JSON_
+	// HappyPath's own finding); mint this entry against that same label.
+	mine := journal.SessionProject{ID: "p-widget", Slug: "widget", Clone: "c1", Label: "widget", Path: dir}
+	writeBriefEntry(t, journalDir, "2026-09-11",
+		journal.SessionKey{Harness: "claude", NativeID: "mine-01"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC), mine, "my workspace's entry")
+
+	r := runIn(t, dir, env, "plumbing", "brief", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing brief --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Project          string `json:"project"`
+		CurrentWorkspace string `json:"current_workspace"`
+		Groups           []struct {
+			Workspace string `json:"workspace"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing brief --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Project != "widget" {
+		t.Errorf("project = %q, want %q", payload.Project, "widget")
+	}
+	if payload.CurrentWorkspace != "widget" {
+		t.Errorf("current_workspace = %q, want %q", payload.CurrentWorkspace, "widget")
+	}
+	if len(payload.Groups) != 2 || payload.Groups[0].Workspace != "widget" {
+		t.Fatalf("groups = %+v, want [widget, other] (widget hoisted first)", payload.Groups)
+	}
+}
+
+// TestPlumbingBrief_NoPositional_UnregisteredCwd_RefusesUnknownClone
+// mirrors whereami/breadcrumb's own refusal.unknown-clone posture (V8/V22
+// — "follow whereami's posture").
+func TestPlumbingBrief_NoPositional_UnregisteredCwd_RefusesUnknownClone(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	dir := initGitRepo(t, "unregistered")
+
+	r := runIn(t, dir, env, "plumbing", "brief", "--json")
+	if r.exitCode != 3 {
+		t.Fatalf("plumbing brief --json: exit=%d, want 3 (refusal); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "refusal.unknown-clone" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "refusal.unknown-clone")
+	}
+}
+
+// TestPlumbingBrief_NoPositional_NotAGitRepo_ValidationError mirrors
+// whereami's own pre-flight check: a cwd outside any git repository is
+// validation.not-a-git-repo, not a raw exec error.
+func TestPlumbingBrief_NoPositional_NotAGitRepo_ValidationError(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	outside := t.TempDir()
+
+	r := runIn(t, outside, env, "plumbing", "brief", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing brief --json: exit=%d, want 1 (validation); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.not-a-git-repo" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "validation.not-a-git-repo")
+	}
+}
+
+// TestPlumbingBrief_UnknownProjectPositional_ValidationError confirms an
+// explicit <project> that matches no registered project is
+// validation.unknown-locator (mirroring `clones`' own unknownProject).
+func TestPlumbingBrief_UnknownProjectPositional_ValidationError(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "brief", "no-such-project", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing brief --json: exit=%d, want 1 (validation); stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.unknown-locator" {
+		t.Errorf("error code = %q, want %q", envelope.Error.Code, "validation.unknown-locator")
+	}
+}
+
+// TestPlumbingBrief_Human_EmptyReportsReadably confirms the empty case
+// (V7's short-circuit fact) reads as a document, not a bare "empty: true"
+// with nothing else — no curated entries, no breadcrumbs, no sessions.
+func TestPlumbingBrief_Human_EmptyReportsReadably(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+	if err := journal.WriteProject(journalDir, "widget", journal.Project{ID: "p-widget", Slug: "widget"}); err != nil {
+		t.Fatalf("WriteProject: %v", err)
+	}
+
+	r := run(t, env, "plumbing", "brief", "widget", "--since", "all")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing brief: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "Nothing gathered") {
+		t.Errorf("stdout = %q, want it to report the empty case readably", r.stdout)
+	}
+
+	jsonResult := run(t, env, "plumbing", "brief", "widget", "--since", "all", "--json")
+	var payload struct {
+		Empty bool `json:"empty"`
+	}
+	if err := json.Unmarshal([]byte(jsonResult.stdout), &payload); err != nil {
+		t.Fatalf("plumbing brief --json stdout is not one JSON value: %v; stdout=%q", err, jsonResult.stdout)
+	}
+	if !payload.Empty {
+		t.Error("empty = false, want true")
 	}
 }
