@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/procrastivity/clast/internal/iostreams"
+	captureverb "github.com/procrastivity/clast/internal/verbs/capture"
 	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
 	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
@@ -36,6 +37,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			"(porcelain) verbs. A human crosses into it deliberately; nothing here needs an API key " +
 			"or makes an LLM call.",
 	}
+	cmd.AddCommand(captureverb.Command(streams))
 	cmd.AddCommand(whereamiverb.Command(streams))
 	cmd.AddCommand(projectsverb.Command(streams))
 	cmd.AddCommand(clonesverb.Command(streams))
