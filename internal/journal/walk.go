@@ -67,10 +67,10 @@ func (w WalkItem) Stale() bool {
 // Walk enumerates every session under root/sessions/, in deterministic
 // order (shard, then directory name). MODEL M4: the tree walked here IS
 // the log — there is no manifest, so "what has been captured" is
-// answered by walking, never by a side index. Walk does not open
-// transcript.jsonl or entry.md's contents (the M9 boundary — entry.md's
-// presence is only stat'd) and it does not filter: that is the query
-// verbs' job (SURFACE V17 etc.), not this package's.
+// answered by walking, never by a side index. Walk does not open the
+// transcript copy (TranscriptPath, M13) or entry.md's contents (the M9
+// boundary — entry.md's presence is only stat'd) and it does not filter:
+// that is the query verbs' job (SURFACE V17 etc.), not this package's.
 //
 // A missing journal root or missing sessions/ directory is not an error:
 // it returns no items (the step-01 read posture). A shard directory not
@@ -80,7 +80,7 @@ func (w WalkItem) Stale() bool {
 // rather than failing the walk — MODEL §7's "tolerant of what it doesn't
 // own" posture, extended here to the tree's own shape. Anything else
 // found inside a session directory (stray files, an unreadable
-// transcript.jsonl) is simply ignored: this step only ever reads
+// transcript copy) is simply ignored: this step only ever reads
 // session.json, curation.json, and stats entry.md.
 func Walk(root string) (items []WalkItem, diags []Diagnostic, err error) {
 	sessionsDir := filepath.Join(root, "sessions")

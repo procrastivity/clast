@@ -1,10 +1,28 @@
 // Package journal owns the durable store: layout, record formats, atomic
-// writes, the walk, and day math (MODEL.md §1-§6; the name follows §1
-// vocabulary — the Journal is the durable store, "store" stays a
-// design-doc word). No code outside this package touches journal paths.
+// writes, day-bucket math, the tree walk, and session-locator resolution
+// (MODEL.md §1-§6; the name follows §1 vocabulary — the Journal is the
+// durable store, "store" stays a design-doc word). No code outside this
+// package touches journal paths.
 //
-// This file lands only root resolution. Record types, the walk,
-// breadcrumbs, and day math arrive in later steps.
+// This file resolves the journal root (Root) and, in store.go, its
+// journal.json marker (EnsureRoot/ReadMarker). records.go types every
+// MODEL §4 document (Session, Curation, Project, ClonesFile, Breadcrumb);
+// paths.go names where each one lives on disk. breadcrumbs.go adds the
+// one line-appended exception to whole-document writes
+// (AppendBreadcrumb/ReadBreadcrumbs, M5). day.go parses day_cutoff and
+// the V5 day/duration grammar (Cutoff, ParseDay, ParseDuration). walk.go
+// enumerates the tree (Walk) and derives curation state and staleness
+// from what it finds (WalkItem.State/Stale, M7). locator.go resolves a
+// V4 session locator (Resolve) against a Walk result.
+//
+// One posture holds across every read in the package: a missing document
+// returns empty, never an error; a malformed one is a counted
+// Diagnostic, never fatal (MODEL §7's tolerance, applied to this
+// package's own tree). And one boundary holds across every write and
+// read: this package never opens the transcript copy or parses entry.md's
+// body (M9) — every fact a query needs already lives in the small JSON
+// documents, so no truth-layer fact here ever requires reading a
+// transcript.
 package journal
 
 import (
