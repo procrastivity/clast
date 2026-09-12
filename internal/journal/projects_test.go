@@ -1,14 +1,23 @@
-package journal
+// Package journal_test (external/black-box): these tests exercise
+// ListProjects/ListClones through fixtures built with journaltest, which
+// itself imports internal/journal — an internal (package journal) test
+// file cannot import journaltest without an import cycle, so this file
+// lives in the external test package instead (Go supports both alongside
+// each other in the same directory).
+package journal_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/journal/journaltest"
 )
 
 func TestListProjects_MissingJournalIsEmptyNotError(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "never-created")
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects on a missing journal returned an error: %v", err)
 	}
@@ -19,10 +28,10 @@ func TestListProjects_MissingJournalIsEmptyNotError(t *testing.T) {
 
 func TestListProjects_MissingProjectsDirIsEmptyNotError(t *testing.T) {
 	root := t.TempDir()
-	if err := EnsureRoot(root); err != nil {
+	if err := journal.EnsureRoot(root); err != nil {
 		t.Fatalf("EnsureRoot: %v", err)
 	}
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -32,13 +41,13 @@ func TestListProjects_MissingProjectsDirIsEmptyNotError(t *testing.T) {
 }
 
 func TestListProjects_EnumeratesInSlugOrder(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
 
-	fx.Project("widget", Project{ID: "01J9WIDGET", Slug: "widget", Remote: "github.com/acme/widget"})
-	fx.Project("anvil", Project{ID: "01J9ANVIL", Slug: "anvil"})
+	fx.Project("widget", journal.Project{ID: "01J9WIDGET", Slug: "widget", Remote: "github.com/acme/widget"})
+	fx.Project("anvil", journal.Project{ID: "01J9ANVIL", Slug: "anvil"})
 
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -57,19 +66,19 @@ func TestListProjects_EnumeratesInSlugOrder(t *testing.T) {
 }
 
 func TestListProjects_MalformedProjectJSONCountedAndSkipped(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
-	fx.Project("good", Project{ID: "01J9GOOD", Slug: "good"})
+	fx.Project("good", journal.Project{ID: "01J9GOOD", Slug: "good"})
 
-	badDir := ProjectDir(root, "bad")
+	badDir := journal.ProjectDir(root, "bad")
 	if err := os.MkdirAll(badDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(ProjectJSONPath(root, "bad"), []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(journal.ProjectJSONPath(root, "bad"), []byte("not json"), 0o644); err != nil {
 		t.Fatalf("write garbage project.json: %v", err)
 	}
 
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects returned a hard error for a malformed project.json: %v", err)
 	}
@@ -79,18 +88,18 @@ func TestListProjects_MalformedProjectJSONCountedAndSkipped(t *testing.T) {
 	if len(diags) != 1 {
 		t.Fatalf("diags = %+v, want exactly 1", diags)
 	}
-	if diags[0].Path != ProjectJSONPath(root, "bad") {
-		t.Errorf("diags[0].Path = %q, want %q", diags[0].Path, ProjectJSONPath(root, "bad"))
+	if diags[0].Path != journal.ProjectJSONPath(root, "bad") {
+		t.Errorf("diags[0].Path = %q, want %q", diags[0].Path, journal.ProjectJSONPath(root, "bad"))
 	}
 }
 
 func TestListProjects_MissingProjectJSONCountedAndSkipped(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(ProjectDir(root, "empty"), 0o755); err != nil {
+	if err := os.MkdirAll(journal.ProjectDir(root, "empty"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -103,14 +112,14 @@ func TestListProjects_MissingProjectJSONCountedAndSkipped(t *testing.T) {
 }
 
 func TestListProjects_SlugMismatchCountedAndSkipped(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
 	// project.json's own slug field disagrees with the directory it lives
 	// under — a hand-edited (or corrupted) document, the M11-style identity
 	// mismatch this function refuses to silently trust either side of.
-	fx.Project("dirname-says-this", Project{ID: "01J9X", Slug: "project-json-says-this"})
+	fx.Project("dirname-says-this", journal.Project{ID: "01J9X", Slug: "project-json-says-this"})
 
-	projects, diags, err := ListProjects(root)
+	projects, diags, err := journal.ListProjects(root)
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -124,7 +133,7 @@ func TestListProjects_SlugMismatchCountedAndSkipped(t *testing.T) {
 
 func TestListClones_MissingProjectIsEmptyNotError(t *testing.T) {
 	root := t.TempDir()
-	clones, diags, err := ListClones(root, "never-registered")
+	clones, diags, err := journal.ListClones(root, "never-registered")
 	if err != nil {
 		t.Fatalf("ListClones: %v", err)
 	}
@@ -134,22 +143,22 @@ func TestListClones_MissingProjectIsEmptyNotError(t *testing.T) {
 }
 
 func TestListClones_EnumeratesAcrossMachinesInMachineOrder(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
-	fx.Project("widget", Project{ID: "01J9WIDGET", Slug: "widget"})
-	fx.Clones("widget", ClonesFile{
+	fx.Project("widget", journal.Project{ID: "01J9WIDGET", Slug: "widget"})
+	fx.Clones("widget", journal.ClonesFile{
 		Machine: "laptop",
-		Clones:  []Clone{{ID: "01J9C1", GitCommonDir: "/home/dev/Code/widget/.git", Label: "dev"}},
+		Clones:  []journal.Clone{{ID: "01J9C1", GitCommonDir: "/home/dev/Code/widget/.git", Label: "dev"}},
 	})
-	fx.Clones("widget", ClonesFile{
+	fx.Clones("widget", journal.ClonesFile{
 		Machine: "desktop",
-		Clones: []Clone{
+		Clones: []journal.Clone{
 			{ID: "01J9C2", GitCommonDir: "/home/dev/Code/widget-perf/.git", Label: "perf"},
 			{ID: "01J9C3", GitCommonDir: "/home/dev/Code/widget-review/.git", Label: "review"},
 		},
 	})
 
-	clones, diags, err := ListClones(root, "widget")
+	clones, diags, err := journal.ListClones(root, "widget")
 	if err != nil {
 		t.Fatalf("ListClones: %v", err)
 	}
@@ -172,19 +181,19 @@ func TestListClones_EnumeratesAcrossMachinesInMachineOrder(t *testing.T) {
 }
 
 func TestListClones_MalformedClonesJSONCountedAndSkipped(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
-	fx.Project("widget", Project{ID: "01J9WIDGET", Slug: "widget"})
-	fx.Clones("widget", ClonesFile{
+	fx.Project("widget", journal.Project{ID: "01J9WIDGET", Slug: "widget"})
+	fx.Clones("widget", journal.ClonesFile{
 		Machine: "laptop",
-		Clones:  []Clone{{ID: "01J9C1", GitCommonDir: "/x/.git", Label: "dev"}},
+		Clones:  []journal.Clone{{ID: "01J9C1", GitCommonDir: "/x/.git", Label: "dev"}},
 	})
 
-	if err := os.WriteFile(ClonesJSONPath(root, "widget", "desktop"), []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(journal.ClonesJSONPath(root, "widget", "desktop"), []byte("not json"), 0o644); err != nil {
 		t.Fatalf("write garbage clones file: %v", err)
 	}
 
-	clones, diags, err := ListClones(root, "widget")
+	clones, diags, err := journal.ListClones(root, "widget")
 	if err != nil {
 		t.Fatalf("ListClones returned a hard error for a malformed clones file: %v", err)
 	}
@@ -194,30 +203,30 @@ func TestListClones_MalformedClonesJSONCountedAndSkipped(t *testing.T) {
 	if len(diags) != 1 {
 		t.Fatalf("diags = %+v, want exactly 1", diags)
 	}
-	if diags[0].Path != ClonesJSONPath(root, "widget", "desktop") {
-		t.Errorf("diags[0].Path = %q, want %q", diags[0].Path, ClonesJSONPath(root, "widget", "desktop"))
+	if diags[0].Path != journal.ClonesJSONPath(root, "widget", "desktop") {
+		t.Errorf("diags[0].Path = %q, want %q", diags[0].Path, journal.ClonesJSONPath(root, "widget", "desktop"))
 	}
 }
 
 func TestListClones_MachineMismatchCountedAndSkipped(t *testing.T) {
-	fx := newJournalFixture(t)
+	fx := journaltest.New(t)
 	root := fx.Root()
-	fx.Project("widget", Project{ID: "01J9WIDGET", Slug: "widget"})
+	fx.Project("widget", journal.Project{ID: "01J9WIDGET", Slug: "widget"})
 
 	// Hand-write a clones file whose own Machine field disagrees with the
 	// <machine> its filename names.
-	if err := WriteClones(root, "widget", ClonesFile{
+	if err := journal.WriteClones(root, "widget", journal.ClonesFile{
 		Machine: "laptop",
-		Clones:  []Clone{{ID: "01J9C1", GitCommonDir: "/x/.git", Label: "dev"}},
+		Clones:  []journal.Clone{{ID: "01J9C1", GitCommonDir: "/x/.git", Label: "dev"}},
 	}); err != nil {
 		t.Fatalf("WriteClones: %v", err)
 	}
 	// Rename it to pretend it was written as "desktop"'s file.
-	if err := os.Rename(ClonesJSONPath(root, "widget", "laptop"), ClonesJSONPath(root, "widget", "desktop")); err != nil {
+	if err := os.Rename(journal.ClonesJSONPath(root, "widget", "laptop"), journal.ClonesJSONPath(root, "widget", "desktop")); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 
-	clones, diags, err := ListClones(root, "widget")
+	clones, diags, err := journal.ListClones(root, "widget")
 	if err != nil {
 		t.Fatalf("ListClones: %v", err)
 	}
@@ -226,19 +235,5 @@ func TestListClones_MachineMismatchCountedAndSkipped(t *testing.T) {
 	}
 	if len(diags) != 1 {
 		t.Fatalf("diags = %+v, want exactly 1", diags)
-	}
-}
-
-func TestHostname_ResolvesThroughTheSharedSeam(t *testing.T) {
-	origHostname := hostname
-	hostname = func() (string, error) { return "fixture-machine", nil }
-	defer func() { hostname = origHostname }()
-
-	got, err := Hostname()
-	if err != nil {
-		t.Fatalf("Hostname: %v", err)
-	}
-	if got != "fixture-machine" {
-		t.Errorf("Hostname() = %q, want %q", got, "fixture-machine")
 	}
 }

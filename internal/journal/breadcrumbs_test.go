@@ -65,6 +65,31 @@ func TestAppendBreadcrumb_CreatesFileWithMachineAndDate(t *testing.T) {
 	}
 }
 
+// TestAppendBreadcrumbAs_WritesUnderNamedMachineNotHostSeam confirms the
+// journaltest seam: AppendBreadcrumbAs files under the machine it is
+// given, ignoring whatever the hostname seam would otherwise resolve to —
+// the whole point of exposing it (a fixture builder outside this package
+// cannot swap the unexported hostname var, but does need to author crumbs
+// as more than one machine).
+func TestAppendBreadcrumbAs_WritesUnderNamedMachineNotHostSeam(t *testing.T) {
+	root := t.TempDir()
+	fakeHostname(t, "framework") // deliberately NOT "laptop" below.
+
+	b := Breadcrumb{At: time.Date(2026, 9, 11, 10, 22, 0, 0, time.Local), Text: "from laptop"}
+	if err := AppendBreadcrumbAs(root, "laptop", b); err != nil {
+		t.Fatalf("AppendBreadcrumbAs: %v", err)
+	}
+
+	wantPath := filepath.Join(root, "breadcrumbs", "2026-09-11.laptop.jsonl")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("expected file at %s: %v", wantPath, err)
+	}
+	unwantedPath := filepath.Join(root, "breadcrumbs", "2026-09-11.framework.jsonl")
+	if _, err := os.Stat(unwantedPath); err == nil {
+		t.Errorf("AppendBreadcrumbAs also wrote %s under the hostname seam's machine; want only laptop's file", unwantedPath)
+	}
+}
+
 func TestAppendBreadcrumb_TwoAppendsProduceTwoLines(t *testing.T) {
 	root := t.TempDir()
 	fakeHostname(t, "framework")

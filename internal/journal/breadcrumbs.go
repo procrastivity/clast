@@ -50,6 +50,17 @@ func AppendBreadcrumb(root string, b Breadcrumb) error {
 	if err != nil {
 		return fmt.Errorf("journal: resolving machine name: %w", err)
 	}
+	return AppendBreadcrumbAs(root, machine, b)
+}
+
+// AppendBreadcrumbAs is AppendBreadcrumb for a caller that already knows
+// which machine is writing, rather than resolving it through the hostname
+// seam. Production code always calls AppendBreadcrumb — this exists so a
+// fixture builder outside this package (internal/journal/journaltest, which
+// cannot reach the unexported hostname var to swap it) can author
+// breadcrumbs as more than one machine, the way a real multi-machine
+// journal accumulates them (M5).
+func AppendBreadcrumbAs(root, machine string, b Breadcrumb) error {
 	if err := EnsureRoot(root); err != nil {
 		return err
 	}

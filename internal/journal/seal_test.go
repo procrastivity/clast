@@ -1,17 +1,92 @@
-package journal
+// Package journal_test (external/black-box): the seal sweep builds its
+// fixture through journaltest, which imports internal/journal — an
+// internal (package journal) test file cannot import journaltest without
+// an import cycle, so these tests live in the external test package
+// instead (Go supports both alongside each other in the same directory).
+package journal_test
 
 import (
+	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/journal/journaltest"
 )
 
-// sealFixture bundles a journalFixture with the session keys and shards
-// it authored, so the seal sweep's tests can address specific fixture
-// sessions by name instead of re-deriving them.
+// mustParseTime, keySet, assertKeys, and mustMarshal mirror the internal
+// test package's own helpers of the same names (records_test.go) — small
+// enough, and scoped enough to test scaffolding rather than business
+// logic, that duplicating them here is preferable to widening journal's
+// own exported surface just to share four helper functions across the
+// package boundary.
+func mustParseTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	tm, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parsing %q: %v", s, err)
+	}
+	return tm
+}
+
+func keySet(t *testing.T, data []byte) []string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal into map: %v", err)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func assertKeys(t *testing.T, data []byte, want []string) {
+	t.Helper()
+	sortedWant := append([]string(nil), want...)
+	sort.Strings(sortedWant)
+	got := keySet(t, data)
+	if len(got) != len(sortedWant) {
+		t.Fatalf("keys = %v, want %v", got, sortedWant)
+	}
+	for i := range got {
+		if got[i] != sortedWant[i] {
+			t.Fatalf("keys = %v, want %v", got, sortedWant)
+		}
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", v, err)
+	}
+	return data
+}
+
+func findItem(t *testing.T, items []journal.WalkItem, dirName string) journal.WalkItem {
+	t.Helper()
+	for _, it := range items {
+		if it.Key.DirName() == dirName {
+			return it
+		}
+	}
+	t.Fatalf("no item named %q in %+v", dirName, items)
+	return journal.WalkItem{}
+}
+
+// sealFixture bundles a journaltest.Fixture with the session keys and
+// shards it authored, so the seal sweep's tests can address specific
+// fixture sessions by name instead of re-deriving them.
 type sealFixture struct {
-	*journalFixture
-	Captured, Curated, Stale, DismissedAuto, DismissedNote SessionKey
+	*journaltest.Fixture
+	Captured, Curated, Stale, DismissedAuto, DismissedNote journal.SessionKey
 }
 
 // buildSealFixture authors the fixture journal the seal sweep runs
@@ -22,28 +97,28 @@ type sealFixture struct {
 // assertion's diff stays readable.
 func buildSealFixture(t *testing.T) sealFixture {
 	t.Helper()
-	f := newJournalFixture(t)
+	f := journaltest.New(t)
 
-	captured := SessionKey{Harness: "claude", NativeID: "captured-01"}
-	curated := SessionKey{Harness: "claude", NativeID: "curated-01"}
-	stale := SessionKey{Harness: "claude", NativeID: "stale-01"}
-	dismissedAuto := SessionKey{Harness: "codex", NativeID: "dismissed-auto-01"}
-	dismissedNote := SessionKey{Harness: "codex", NativeID: "dismissed-note-01"}
+	captured := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
+	curated := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
+	stale := journal.SessionKey{Harness: "claude", NativeID: "stale-01"}
+	dismissedAuto := journal.SessionKey{Harness: "codex", NativeID: "dismissed-auto-01"}
+	dismissedNote := journal.SessionKey{Harness: "codex", NativeID: "dismissed-note-01"}
 
 	f.Captured("2026-09-10", captured,
-		TranscriptFingerprint{Format: "claude-jsonl", Lines: 8, SHA256: "captured-hash"},
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 8, SHA256: "captured-hash"},
 		mustParseTime(t, "2026-09-10T09:00:00-05:00"),
 	).WithTranscript("2026-09-10", captured, []byte(`{"role":"user","text":"hello"}`+"\n"))
 
 	f.Curated("2026-09-11", curated,
-		TranscriptFingerprint{Format: "claude-jsonl", Lines: 40, SHA256: "curated-hash"},
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 40, SHA256: "curated-hash"},
 		mustParseTime(t, "2026-09-11T09:00:00-05:00"),
 		mustParseTime(t, "2026-09-11T18:00:00-05:00"),
 		"framework", "curated session title",
 	).WithTranscript("2026-09-11", curated, []byte(`{"role":"user","text":"hello"}`+"\n")).
 		// One session with a project: later Matters reuse this fixture, and
 		// project-scoped filtering (--project clast) is their common case.
-		WithProject("2026-09-11", curated, SessionProject{
+		WithProject("2026-09-11", curated, journal.SessionProject{
 			ID:    "01J9WXYZ",
 			Slug:  "clast",
 			Clone: "01J9WABC",
@@ -52,40 +127,40 @@ func buildSealFixture(t *testing.T) sealFixture {
 		})
 
 	f.CuratedStale("2026-09-11", stale,
-		TranscriptFingerprint{Format: "claude-jsonl", Lines: 90, SHA256: "grown-hash"},
-		TranscriptStamp{Lines: 40, SHA256: "original-hash"},
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 90, SHA256: "grown-hash"},
+		journal.TranscriptStamp{Lines: 40, SHA256: "original-hash"},
 		mustParseTime(t, "2026-09-11T10:00:00-05:00"),
 		mustParseTime(t, "2026-09-11T12:00:00-05:00"),
 		"laptop", "stale session title",
 	).WithTranscript("2026-09-11", stale, []byte(`{"role":"user","text":"hello"}`+"\n"))
 
 	f.Dismissed("2026-09-12", dismissedAuto,
-		TranscriptFingerprint{Format: "codex-jsonl", Lines: 1, SHA256: "noop-hash"},
+		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 1, SHA256: "noop-hash"},
 		mustParseTime(t, "2026-09-12T09:00:00-05:00"),
 		mustParseTime(t, "2026-09-12T09:00:05-05:00"),
 		"framework", "auto:no-op",
 	).WithTranscript("2026-09-12", dismissedAuto, []byte(`{"role":"user","text":"one-liner"}`+"\n"))
 
 	f.Dismissed("2026-09-12", dismissedNote,
-		TranscriptFingerprint{Format: "codex-jsonl", Lines: 12, SHA256: "note-hash"},
+		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 12, SHA256: "note-hash"},
 		mustParseTime(t, "2026-09-12T10:00:00-05:00"),
 		mustParseTime(t, "2026-09-12T14:00:00-05:00"),
 		"laptop", "not useful, exploratory only",
 	).WithTranscript("2026-09-12", dismissedNote, []byte(`{"role":"user","text":"nope"}`+"\n"))
 
-	f.Project("clast", Project{
+	f.Project("clast", journal.Project{
 		ID:             "01J9WXYZ",
 		Slug:           "clast",
 		Remote:         "github.com/procrastivity/clast",
 		IdentityRemote: "origin",
 	})
-	f.Clones("clast", ClonesFile{
+	f.Clones("clast", journal.ClonesFile{
 		Machine: "framework",
-		Clones:  []Clone{{ID: "01J9WABC", GitCommonDir: "/home/dev/Code/clast/.git", Label: "dev"}},
+		Clones:  []journal.Clone{{ID: "01J9WABC", GitCommonDir: "/home/dev/Code/clast/.git", Label: "dev"}},
 	})
-	f.Clones("clast", ClonesFile{
+	f.Clones("clast", journal.ClonesFile{
 		Machine: "laptop",
-		Clones:  []Clone{{ID: "01J9WLAP", GitCommonDir: "/home/dev/laptop/clast/.git", Label: "laptop-dev"}},
+		Clones:  []journal.Clone{{ID: "01J9WLAP", GitCommonDir: "/home/dev/laptop/clast/.git", Label: "laptop-dev"}},
 	})
 
 	slug := "clast"
@@ -93,12 +168,12 @@ func buildSealFixture(t *testing.T) sealFixture {
 	f.Breadcrumb("laptop", mustParseTime(t, "2026-09-11T14:02:00-05:00"), nil, "bump the cache version")
 
 	return sealFixture{
-		journalFixture: f,
-		Captured:       captured,
-		Curated:        curated,
-		Stale:          stale,
-		DismissedAuto:  dismissedAuto,
-		DismissedNote:  dismissedNote,
+		Fixture:       f,
+		Captured:      captured,
+		Curated:       curated,
+		Stale:         stale,
+		DismissedAuto: dismissedAuto,
+		DismissedNote: dismissedNote,
 	}
 }
 
@@ -112,7 +187,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 
 	cases := []struct {
 		shard       string
-		key         SessionKey
+		key         journal.SessionKey
 		hasCuration bool
 		hasEntry    bool
 		hasProject  bool
@@ -124,7 +199,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		{"2026-09-12", sf.DismissedNote, true, false, false},
 	}
 	for _, c := range cases {
-		sess, ok, err := ReadSession(root, c.shard, c.key)
+		sess, ok, err := journal.ReadSession(root, c.shard, c.key)
 		if err != nil || !ok {
 			t.Fatalf("ReadSession(%s): ok=%v err=%v", c.key.DirName(), ok, err)
 		}
@@ -154,7 +229,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		assertKeys(t, mustMarshal(t, sess.Counts), []string{"user", "assistant"})
 		assertKeys(t, mustMarshal(t, sess.Transcript), []string{"format", "lines", "sha256"})
 
-		curation, curationOK, err := ReadCuration(root, c.shard, c.key)
+		curation, curationOK, err := journal.ReadCuration(root, c.shard, c.key)
 		if err != nil {
 			t.Fatalf("ReadCuration(%s): %v", c.key.DirName(), err)
 		}
@@ -163,27 +238,27 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		}
 		if curationOK {
 			wantKeys := []string{"schema_version", "state", "at", "machine", "reason"}
-			if curation.State == StateCurated {
+			if curation.State == journal.StateCurated {
 				wantKeys = append(wantKeys, "transcript_at_curation")
 				assertKeys(t, mustMarshal(t, curation.TranscriptAtCuration), []string{"lines", "sha256"})
 			}
 			assertKeys(t, mustMarshal(t, curation), wantKeys)
 		}
 
-		_, statErr := os.Stat(EntryPath(root, c.shard, c.key))
+		_, statErr := os.Stat(journal.EntryPath(root, c.shard, c.key))
 		if hasEntry := statErr == nil; hasEntry != c.hasEntry {
 			t.Errorf("%s: entry.md present = %v, want %v", c.key.DirName(), hasEntry, c.hasEntry)
 		}
 	}
 
-	proj, ok, err := ReadProject(root, "clast")
+	proj, ok, err := journal.ReadProject(root, "clast")
 	if err != nil || !ok {
 		t.Fatalf("ReadProject: ok=%v err=%v", ok, err)
 	}
 	assertKeys(t, mustMarshal(t, proj), []string{"schema_version", "id", "slug", "remote", "identity_remote"})
 
 	for _, machine := range []string{"framework", "laptop"} {
-		cf, ok, err := ReadClones(root, "clast", machine)
+		cf, ok, err := journal.ReadClones(root, "clast", machine)
 		if err != nil || !ok {
 			t.Fatalf("ReadClones(%s): ok=%v err=%v", machine, ok, err)
 		}
@@ -193,7 +268,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		assertKeys(t, mustMarshal(t, cf), []string{"schema_version", "machine", "clones"})
 	}
 
-	entries, diags, err := ReadBreadcrumbs(root, "2026-09-11")
+	entries, diags, err := journal.ReadBreadcrumbs(root, "2026-09-11")
 	if err != nil {
 		t.Fatalf("ReadBreadcrumbs: %v", err)
 	}
@@ -224,7 +299,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 func TestSeal_WalkMatchesExpectedStates(t *testing.T) {
 	sf := buildSealFixture(t)
 
-	items, diags, err := Walk(sf.Root())
+	items, diags, err := journal.Walk(sf.Root())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -236,15 +311,15 @@ func TestSeal_WalkMatchesExpectedStates(t *testing.T) {
 	}
 
 	want := map[string]struct {
-		state CurationState
+		state journal.CurationState
 		stale bool
 		entry bool
 	}{
-		sf.Captured.DirName():      {StateCaptured, false, false},
-		sf.Curated.DirName():       {StateCurated, false, true},
-		sf.Stale.DirName():         {StateCurated, true, true},
-		sf.DismissedAuto.DirName(): {StateDismissed, false, false},
-		sf.DismissedNote.DirName(): {StateDismissed, false, false},
+		sf.Captured.DirName():      {journal.StateCaptured, false, false},
+		sf.Curated.DirName():       {journal.StateCurated, false, true},
+		sf.Stale.DirName():         {journal.StateCurated, true, true},
+		sf.DismissedAuto.DirName(): {journal.StateDismissed, false, false},
+		sf.DismissedNote.DirName(): {journal.StateDismissed, false, false},
 	}
 	for _, it := range items {
 		w, ok := want[it.Key.DirName()]
@@ -290,14 +365,14 @@ func TestSeal_WalkSkipsMalformedCurationJSON(t *testing.T) {
 	sf := buildSealFixture(t)
 	root := sf.Root()
 
-	broken := SessionKey{Harness: "claude", NativeID: "broken-curation"}
+	broken := journal.SessionKey{Harness: "claude", NativeID: "broken-curation"}
 	shard := "2026-09-11"
-	sf.journalFixture.Captured(shard, broken, TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "broken-hash"}, mustParseTime(t, "2026-09-11T08:00:00-05:00"))
-	if err := os.WriteFile(CurationJSONPath(root, shard, broken), []byte("not json"), 0o644); err != nil {
+	sf.Fixture.Captured(shard, broken, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "broken-hash"}, mustParseTime(t, "2026-09-11T08:00:00-05:00"))
+	if err := os.WriteFile(journal.CurationJSONPath(root, shard, broken), []byte("not json"), 0o644); err != nil {
 		t.Fatalf("write garbage curation.json: %v", err)
 	}
 
-	items, diags, err := Walk(root)
+	items, diags, err := journal.Walk(root)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -310,7 +385,7 @@ func TestSeal_WalkSkipsMalformedCurationJSON(t *testing.T) {
 
 	var found bool
 	for _, d := range diags {
-		if d.Path == CurationJSONPath(root, shard, broken) {
+		if d.Path == journal.CurationJSONPath(root, shard, broken) {
 			found = true
 			if d.Err == nil {
 				t.Errorf("diag for %s has a nil Err", d.Path)
@@ -318,7 +393,7 @@ func TestSeal_WalkSkipsMalformedCurationJSON(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("diags = %+v, want one naming %s", diags, CurationJSONPath(root, shard, broken))
+		t.Errorf("diags = %+v, want one naming %s", diags, journal.CurationJSONPath(root, shard, broken))
 	}
 }
 
@@ -336,7 +411,7 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 
 	sessions := []struct {
 		shard string
-		key   SessionKey
+		key   journal.SessionKey
 	}{
 		{"2026-09-10", sf.Captured},
 		{"2026-09-11", sf.Curated},
@@ -347,14 +422,14 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 
 	snapshot := func() (walkJSON, crumbsJSON string) {
 		t.Helper()
-		items, diags, err := Walk(root)
+		items, diags, err := journal.Walk(root)
 		if err != nil {
 			t.Fatalf("Walk: %v", err)
 		}
 		if len(diags) != 0 {
 			t.Fatalf("Walk diags = %+v, want none", diags)
 		}
-		entries, cdiags, err := ReadBreadcrumbs(root, "2026-09-11")
+		entries, cdiags, err := journal.ReadBreadcrumbs(root, "2026-09-11")
 		if err != nil {
 			t.Fatalf("ReadBreadcrumbs: %v", err)
 		}
@@ -379,19 +454,19 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 		t.Errorf("ReadBreadcrumbs' result changed after the transcript copy was overwritten with garbage bytes")
 	}
 
-	items, _, err := Walk(root)
+	items, _, err := journal.Walk(root)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	resolved, err := Resolve(items, sf.Stale.DirName())
+	resolved, err := journal.Resolve(items, sf.Stale.DirName())
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if resolved.State() != StateCurated || !resolved.Stale() {
+	if resolved.State() != journal.StateCurated || !resolved.Stale() {
 		t.Errorf("stale session's derived facts changed: State()=%q Stale()=%v", resolved.State(), resolved.Stale())
 	}
 
-	sess, ok, err := ReadSession(root, "2026-09-11", sf.Stale)
+	sess, ok, err := journal.ReadSession(root, "2026-09-11", sf.Stale)
 	if err != nil || !ok {
 		t.Fatalf("ReadSession: ok=%v err=%v", ok, err)
 	}
@@ -399,7 +474,7 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 		t.Errorf("ReadSession's fingerprint changed after garbage transcript bytes: %+v", sess.Transcript)
 	}
 
-	curation, ok, err := ReadCuration(root, "2026-09-11", sf.Stale)
+	curation, ok, err := journal.ReadCuration(root, "2026-09-11", sf.Stale)
 	if err != nil || !ok {
 		t.Fatalf("ReadCuration: ok=%v err=%v", ok, err)
 	}
@@ -409,7 +484,7 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 }
 
 // TestM9_OnlyPathsGoNamesTheTranscriptFile is the seal sweep's source-level
-// M9 guard: it greps every non-test .go file in this package for the
+// M9 guard: it greps every non-test .go file in internal/journal for the
 // literal transcript filename AND for a TranscriptPath( call, and asserts
 // only paths.go (TranscriptPath's own definition and path construction)
 // ever mentions either. This is deliberately mechanical — a grep, not a
