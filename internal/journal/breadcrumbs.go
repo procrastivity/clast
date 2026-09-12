@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // dayShardLayout is the local-calendar-date layout used for both the
@@ -37,8 +38,8 @@ func AppendBreadcrumb(root string, b Breadcrumb) error {
 		return err
 	}
 
-	shard := now().Local().Format(dayShardLayout)
-	path := BreadcrumbsPath(root, shard, machine)
+	fileDate := now().Local().Format(dayShardLayout)
+	path := BreadcrumbsPath(root, fileDate, machine)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("journal: creating %s: %w", filepath.Dir(path), err)
 	}
@@ -83,16 +84,30 @@ type Diagnostic struct {
 	Err  error
 }
 
-// ReadBreadcrumbs returns every breadcrumb filed under shard, merged
-// across every machine that has written one: readers glob
-// YYYY-MM-DD.*.jsonl rather than picking one machine's file (M5). Entries
-// come back in file-then-line order (files sorted by name, i.e. by
-// machine); day-bucket attribution from each entry's At plus the current
-// day_cutoff is a later step's job (M8), not this read's. No file for
-// shard is not an error: it returns no entries. An unparseable line is
-// skipped and reported in diags rather than failing the read.
-func ReadBreadcrumbs(root, shard string) (entries []BreadcrumbEntry, diags []Diagnostic, err error) {
-	pattern := filepath.Join(root, "breadcrumbs", shard+".*.jsonl")
+// ReadBreadcrumbs returns every breadcrumb filed under fileDate's on-disk
+// breadcrumb files, merged across every machine that has written one:
+// readers glob YYYY-MM-DD.*.jsonl rather than picking one machine's file
+// (M5). fileDate names a FILE, not a work day — the parameter is named
+// that way on purpose (rather than "shard" or "day") to keep the trap
+// visible: a crumb filed under fileDate can still belong to a different
+// day's bucket once day_cutoff is applied (a 02:30 write is still
+// "yesterday" under a 04:00 cutoff, M8), so this function alone is never
+// the right way to answer "what happened on day X" — that is
+// ReadBreadcrumbsForDay below. fileDate is validated as a bare
+// YYYY-MM-DD before it ever reaches filepath.Glob, so a caller can't
+// smuggle glob metacharacters (*, ?, [...]) into the pattern through an
+// unvalidated day string.
+//
+// Entries come back in file-then-line order (files sorted by name, i.e.
+// by machine). No file for fileDate is not an error: it returns no
+// entries. An unparseable line is skipped and reported in diags rather
+// than failing the read.
+func ReadBreadcrumbs(root, fileDate string) (entries []BreadcrumbEntry, diags []Diagnostic, err error) {
+	if _, err := time.Parse(dayShardLayout, fileDate); err != nil {
+		return nil, nil, fmt.Errorf("journal: %q is not a valid YYYY-MM-DD file date: %w", fileDate, err)
+	}
+
+	pattern := filepath.Join(root, "breadcrumbs", fileDate+".*.jsonl")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, nil, fmt.Errorf("journal: globbing %s: %w", pattern, err)
@@ -100,7 +115,7 @@ func ReadBreadcrumbs(root, shard string) (entries []BreadcrumbEntry, diags []Dia
 	sort.Strings(matches) // deterministic order across machines.
 
 	for _, path := range matches {
-		machine := machineFromBreadcrumbFilename(shard, path)
+		machine := machineFromBreadcrumbFilename(fileDate, path)
 		fileEntries, fileDiags, err := readBreadcrumbFile(path, machine)
 		if err != nil {
 			return nil, nil, err
@@ -111,12 +126,47 @@ func ReadBreadcrumbs(root, shard string) (entries []BreadcrumbEntry, diags []Dia
 	return entries, diags, nil
 }
 
+// ReadBreadcrumbsForDay returns every breadcrumb whose work-day bucket —
+// c.DayOf(entry.At), M8 — is day. This is the day-bucketed read most
+// callers actually want, as opposed to ReadBreadcrumbs' raw,
+// filename-only read.
+//
+// It reads day's own file date AND the next calendar day's (day+1):
+// AppendBreadcrumb shards a crumb's file by the calendar date at write
+// time, so a crumb written at (say) 02:30 lands in day+1's file — but
+// under a cutoff later than 02:30 (the default 04:00), that crumb still
+// belongs to day's work-day bucket. Reading only day's own file would
+// silently miss it. Every candidate entry from both files is then
+// filtered on c.DayOf(entry.At) == day, which also correctly drops the
+// day+1 entries that genuinely belong to day+1 (e.g. one written at
+// 09:00 stays on day+1 under a 04:00 cutoff).
+func ReadBreadcrumbsForDay(root string, day Day, c Cutoff) (entries []BreadcrumbEntry, diags []Diagnostic, err error) {
+	next, err := day.addDays(1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, fileDate := range [2]Day{day, next} {
+		fileEntries, fileDiags, err := ReadBreadcrumbs(root, string(fileDate))
+		if err != nil {
+			return nil, nil, err
+		}
+		diags = append(diags, fileDiags...)
+		for _, e := range fileEntries {
+			if c.DayOf(e.At) == day {
+				entries = append(entries, e)
+			}
+		}
+	}
+	return entries, diags, nil
+}
+
 // machineFromBreadcrumbFilename recovers <machine> from
-// YYYY-MM-DD.<machine>.jsonl given the shard date it was globbed under.
-func machineFromBreadcrumbFilename(shard, path string) string {
+// YYYY-MM-DD.<machine>.jsonl given the file date it was globbed under.
+func machineFromBreadcrumbFilename(fileDate, path string) string {
 	base := filepath.Base(path)
 	trimmed := strings.TrimSuffix(base, ".jsonl")
-	return strings.TrimPrefix(trimmed, shard+".")
+	return strings.TrimPrefix(trimmed, fileDate+".")
 }
 
 // readBreadcrumbFile parses one machine's breadcrumb file line by line,

@@ -2,6 +2,7 @@ package journal
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,70 @@ func TestRoot_EnvSeamWinsOverConfig(t *testing.T) {
 	}
 	if got != "/seam/journal" {
 		t.Errorf("Root = %q, want %q (seam must win)", got, "/seam/journal")
+	}
+}
+
+func TestRoot_NonStringConfigValueIsError(t *testing.T) {
+	clearEnvSeams(t)
+	fakeHome(t, "/fake/home")
+
+	cfg := config.Config{"journal_dir": 42}
+	_, err := Root(cfg)
+	if err == nil {
+		t.Fatal("Root: want error for a non-string journal_dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "journal_dir") || !strings.Contains(err.Error(), "int") {
+		t.Errorf("error %q does not name the key and the got-type", err)
+	}
+}
+
+func TestRoot_NilConfigValueFallsBackToDefault(t *testing.T) {
+	// A key present with a nil value (e.g. "journal_dir:" with nothing
+	// after the colon in YAML) is treated the same as absent — a
+	// judgment call: nil reads as "not really set", distinct from a
+	// present value of the wrong type, which is an error.
+	clearEnvSeams(t)
+	fakeHome(t, "/fake/home")
+
+	cfg := config.Config{"journal_dir": nil}
+	got, err := Root(cfg)
+	if err != nil {
+		t.Fatalf("Root: %v", err)
+	}
+	want := filepath.Join("/fake/home", ".local", "share", "clast", "journal")
+	if got != want {
+		t.Errorf("Root = %q, want default %q", got, want)
+	}
+}
+
+func TestRoot_TildeExpansion(t *testing.T) {
+	clearEnvSeams(t)
+	fakeHome(t, "/fake/home")
+
+	cases := map[string]string{
+		"~":                    "/fake/home",
+		"~/Sync/clast/journal": filepath.Join("/fake/home", "Sync", "clast", "journal"),
+	}
+	for in, want := range cases {
+		got, err := Root(config.Config{"journal_dir": in})
+		if err != nil {
+			t.Fatalf("Root(%q): %v", in, err)
+		}
+		if got != want {
+			t.Errorf("Root(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRoot_RelativeJournalDirIsRejected(t *testing.T) {
+	clearEnvSeams(t)
+	fakeHome(t, "/fake/home")
+
+	for _, in := range []string{"relative/journal", "./journal", "../journal"} {
+		_, err := Root(config.Config{"journal_dir": in})
+		if err == nil {
+			t.Errorf("Root(%q): want error for a relative journal_dir, got nil", in)
+		}
 	}
 }
 

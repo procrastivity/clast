@@ -39,11 +39,20 @@ func ParseCutoff(s string) (Cutoff, error) {
 }
 
 // ConfiguredCutoff resolves cfg's day_cutoff key — DefaultCutoffString
-// when the key is empty or absent — and parses it once.
+// when the key is empty or absent — and parses it once. day_cutoff must
+// be a string; a present-and-non-nil value of any other YAML type (a
+// number, a bool — someone's config typo) is an error naming the key and
+// the value's Go type, never a silent fallback to the default.
 func ConfiguredCutoff(cfg config.Config) (Cutoff, error) {
-	s, _ := cfg[dayCutoffConfigKey].(string)
-	if s == "" {
-		s = DefaultCutoffString
+	s := DefaultCutoffString
+	if raw, present := cfg[dayCutoffConfigKey]; present && raw != nil {
+		str, isString := raw.(string)
+		if !isString {
+			return Cutoff{}, fmt.Errorf("journal: config key %q must be a string, got %T", dayCutoffConfigKey, raw)
+		}
+		if str != "" {
+			s = str
+		}
 	}
 	return ParseCutoff(s)
 }

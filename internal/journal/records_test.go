@@ -250,6 +250,57 @@ func TestCuration_MissingMeansCaptured(t *testing.T) {
 	}
 }
 
+func TestWriteCuration_RejectsStateCaptured(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "guard-captured"}
+	shard := "2026-09-11"
+
+	err := WriteCuration(root, shard, key, Curation{State: StateCaptured})
+	if err == nil {
+		t.Fatal("WriteCuration(StateCaptured): want error, got nil")
+	}
+	if _, ok, readErr := ReadCuration(root, shard, key); ok || readErr != nil {
+		t.Errorf("WriteCuration must not have written a file: ok=%v err=%v", ok, readErr)
+	}
+}
+
+func TestWriteCuration_RejectsEmptyState(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "guard-empty"}
+	shard := "2026-09-11"
+
+	err := WriteCuration(root, shard, key, Curation{})
+	if err == nil {
+		t.Fatal("WriteCuration(empty state): want error, got nil")
+	}
+}
+
+func TestRemoveCuration_PresentAndAbsent(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "undismiss-me"}
+	shard := "2026-09-11"
+
+	reason := "not useful"
+	if err := WriteCuration(root, shard, key, Curation{State: StateDismissed, Reason: &reason, Machine: "framework"}); err != nil {
+		t.Fatalf("WriteCuration: %v", err)
+	}
+	if _, ok, err := ReadCuration(root, shard, key); err != nil || !ok {
+		t.Fatalf("precondition: ReadCuration ok=%v err=%v, want ok=true", ok, err)
+	}
+
+	if err := RemoveCuration(root, shard, key); err != nil {
+		t.Fatalf("RemoveCuration (present): %v", err)
+	}
+	if _, ok, err := ReadCuration(root, shard, key); err != nil || ok {
+		t.Fatalf("after RemoveCuration: ok=%v err=%v, want ok=false err=nil (back to captured)", ok, err)
+	}
+
+	// Removing an already-absent curation.json is a no-op, not an error.
+	if err := RemoveCuration(root, shard, key); err != nil {
+		t.Fatalf("RemoveCuration (already absent): %v", err)
+	}
+}
+
 func TestProject_RoundTrip(t *testing.T) {
 	root := t.TempDir()
 	want := Project{

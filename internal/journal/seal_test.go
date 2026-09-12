@@ -40,7 +40,16 @@ func buildSealFixture(t *testing.T) sealFixture {
 		mustParseTime(t, "2026-09-11T09:00:00-05:00"),
 		mustParseTime(t, "2026-09-11T18:00:00-05:00"),
 		"framework", "curated session title",
-	).WithTranscript("2026-09-11", curated, []byte(`{"role":"user","text":"hello"}`+"\n"))
+	).WithTranscript("2026-09-11", curated, []byte(`{"role":"user","text":"hello"}`+"\n")).
+		// One session with a project: later Matters reuse this fixture, and
+		// project-scoped filtering (--project clast) is their common case.
+		WithProject("2026-09-11", curated, SessionProject{
+			ID:    "01J9WXYZ",
+			Slug:  "clast",
+			Clone: "01J9WABC",
+			Label: "dev",
+			Path:  "/home/dev/Code/clast",
+		})
 
 	f.CuratedStale("2026-09-11", stale,
 		TranscriptFingerprint{Format: "claude-jsonl", Lines: 90, SHA256: "grown-hash"},
@@ -106,12 +115,13 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		key         SessionKey
 		hasCuration bool
 		hasEntry    bool
+		hasProject  bool
 	}{
-		{"2026-09-10", sf.Captured, false, false},
-		{"2026-09-11", sf.Curated, true, true},
-		{"2026-09-11", sf.Stale, true, true},
-		{"2026-09-12", sf.DismissedAuto, true, false},
-		{"2026-09-12", sf.DismissedNote, true, false},
+		{"2026-09-10", sf.Captured, false, false, false},
+		{"2026-09-11", sf.Curated, true, true, true},
+		{"2026-09-11", sf.Stale, true, true, false},
+		{"2026-09-12", sf.DismissedAuto, true, false, false},
+		{"2026-09-12", sf.DismissedNote, true, false, false},
 	}
 	for _, c := range cases {
 		sess, ok, err := ReadSession(root, c.shard, c.key)
@@ -121,11 +131,28 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 		if sess.Harness != c.key.Harness || sess.SessionID != c.key.NativeID {
 			t.Errorf("session identity mismatch for %s: %+v", c.key.DirName(), sess)
 		}
-		assertKeys(t, mustMarshal(t, sess), []string{
+
+		wantSessionKeys := []string{
 			"schema_version", "harness", "session_id", "machine", "worktree",
 			"branch", "started_at", "last_active_at", "captured_at",
 			"source_path", "counts", "substantive", "transcript",
-		}) // no "project" key: none of the fixture's sessions set one.
+		}
+		if c.hasProject {
+			wantSessionKeys = append(wantSessionKeys, "project")
+		}
+		assertKeys(t, mustMarshal(t, sess), wantSessionKeys)
+		if (sess.Project != nil) != c.hasProject {
+			t.Errorf("%s: Project = %+v, want present=%v", c.key.DirName(), sess.Project, c.hasProject)
+		}
+		if c.hasProject {
+			assertKeys(t, mustMarshal(t, sess.Project), []string{"id", "slug", "clone", "label", "path"})
+		}
+		// Nested objects get their own key-set check too — a tag typo on
+		// SessionCounts or TranscriptFingerprint would otherwise pass every
+		// test here silently, since assertKeys on the parent only sees
+		// "counts"/"transcript" as opaque single keys.
+		assertKeys(t, mustMarshal(t, sess.Counts), []string{"user", "assistant"})
+		assertKeys(t, mustMarshal(t, sess.Transcript), []string{"format", "lines", "sha256"})
 
 		curation, curationOK, err := ReadCuration(root, c.shard, c.key)
 		if err != nil {
@@ -138,6 +165,7 @@ func TestSeal_DocumentsRoundTrip(t *testing.T) {
 			wantKeys := []string{"schema_version", "state", "at", "machine", "reason"}
 			if curation.State == StateCurated {
 				wantKeys = append(wantKeys, "transcript_at_curation")
+				assertKeys(t, mustMarshal(t, curation.TranscriptAtCuration), []string{"lines", "sha256"})
 			}
 			assertKeys(t, mustMarshal(t, curation), wantKeys)
 		}
@@ -243,6 +271,55 @@ func TestSeal_WalkMatchesExpectedStates(t *testing.T) {
 	if note.Curation.Reason == nil || *note.Curation.Reason != "not useful, exploratory only" {
 		t.Errorf("dismissedNote reason = %v, want free text", note.Curation.Reason)
 	}
+
+	// Walk surfaces the one project-bearing session's project too — the
+	// common case (project-scoped filtering) later Matters build on.
+	cur := findItem(t, items, sf.Curated.DirName())
+	if cur.Session.Project == nil || cur.Session.Project.Slug != "clast" {
+		t.Errorf("curated item's Session.Project = %+v, want slug %q", cur.Session.Project, "clast")
+	}
+}
+
+// TestSeal_WalkSkipsMalformedCurationJSON documents a deliberate walk
+// posture (walk.go's loadWalkItem): a session directory with a malformed
+// curation.json is skipped and counted, exactly like a malformed
+// session.json — the whole item is dropped rather than returned with a
+// best-guess captured/curated state, since a broken curation.json can't
+// be trusted to tell Walk which state it meant.
+func TestSeal_WalkSkipsMalformedCurationJSON(t *testing.T) {
+	sf := buildSealFixture(t)
+	root := sf.Root()
+
+	broken := SessionKey{Harness: "claude", NativeID: "broken-curation"}
+	shard := "2026-09-11"
+	sf.journalFixture.Captured(shard, broken, TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "broken-hash"}, mustParseTime(t, "2026-09-11T08:00:00-05:00"))
+	if err := os.WriteFile(CurationJSONPath(root, shard, broken), []byte("not json"), 0o644); err != nil {
+		t.Fatalf("write garbage curation.json: %v", err)
+	}
+
+	items, diags, err := Walk(root)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	for _, it := range items {
+		if it.Key.DirName() == broken.DirName() {
+			t.Errorf("Walk returned an item for %q despite its malformed curation.json; want it skipped and counted", broken.DirName())
+		}
+	}
+
+	var found bool
+	for _, d := range diags {
+		if d.Path == CurationJSONPath(root, shard, broken) {
+			found = true
+			if d.Err == nil {
+				t.Errorf("diag for %s has a nil Err", d.Path)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("diags = %+v, want one naming %s", diags, CurationJSONPath(root, shard, broken))
+	}
 }
 
 // TestM9_GarbageTranscriptBytesNeverAffectReads is the seal sweep's M9
@@ -333,10 +410,13 @@ func TestM9_GarbageTranscriptBytesNeverAffectReads(t *testing.T) {
 
 // TestM9_OnlyPathsGoNamesTheTranscriptFile is the seal sweep's source-level
 // M9 guard: it greps every non-test .go file in this package for the
-// literal transcript filename and asserts only paths.go (TranscriptPath's
-// path construction) ever mentions it. This is deliberately mechanical —
-// a grep, not a read of the prose — so it keeps catching a regression
-// even if a future change's comments claim otherwise.
+// literal transcript filename AND for a TranscriptPath( call, and asserts
+// only paths.go (TranscriptPath's own definition and path construction)
+// ever mentions either. This is deliberately mechanical — a grep, not a
+// read of the prose — so it keeps catching a regression even if a future
+// change's comments claim otherwise: nothing outside paths.go may even
+// know the transcript's filename, let alone call the function that names
+// it, since either would be a step toward reading its bytes.
 func TestM9_OnlyPathsGoNamesTheTranscriptFile(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -354,8 +434,12 @@ func TestM9_OnlyPathsGoNamesTheTranscriptFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadFile(%s): %v", name, err)
 		}
-		if strings.Contains(string(data), "transcript.jsonl") {
+		content := string(data)
+		if strings.Contains(content, "transcript.jsonl") {
 			t.Errorf("%s names the literal transcript filename; only paths.go's TranscriptPath may construct that path — M9 means every other read in this package stays on session.json, curation.json, and entry.md's presence", name)
+		}
+		if strings.Contains(content, "TranscriptPath(") {
+			t.Errorf("%s calls TranscriptPath; only paths.go may define/construct it — nothing else in this package should have a reason to name the transcript's path at all (M9)", name)
 		}
 	}
 }

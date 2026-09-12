@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,28 @@ func TestConfiguredCutoff(t *testing.T) {
 
 	if _, err := ConfiguredCutoff(config.Config{"day_cutoff": "garbage"}); err == nil {
 		t.Errorf("ConfiguredCutoff(garbage): want error, got nil")
+	}
+}
+
+func TestConfiguredCutoff_NonStringConfigValueIsError(t *testing.T) {
+	_, err := ConfiguredCutoff(config.Config{"day_cutoff": true})
+	if err == nil {
+		t.Fatal("ConfiguredCutoff: want error for a non-string day_cutoff, got nil")
+	}
+	if !strings.Contains(err.Error(), "day_cutoff") || !strings.Contains(err.Error(), "bool") {
+		t.Errorf("error %q does not name the key and the got-type", err)
+	}
+}
+
+func TestConfiguredCutoff_NilConfigValueFallsBackToDefault(t *testing.T) {
+	// Same judgment call as journal.Root: a key present with a nil value
+	// reads as "not really set", not as a type error.
+	c, err := ConfiguredCutoff(config.Config{"day_cutoff": nil})
+	if err != nil {
+		t.Fatalf("ConfiguredCutoff: %v", err)
+	}
+	if c != mustCutoff(t, DefaultCutoffString) {
+		t.Errorf("ConfiguredCutoff(nil) = %+v, want default %+v", c, mustCutoff(t, DefaultCutoffString))
 	}
 }
 

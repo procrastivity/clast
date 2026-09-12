@@ -137,6 +137,24 @@ func (f *journalFixture) WithTranscript(shard string, key SessionKey, data []byt
 	return f
 }
 
+// WithProject re-reads shard/key's already-authored session.json, sets
+// its Project field, and writes it back. A separate fluent step rather
+// than a parameter on Captured/Curated/etc.: most fixture sessions don't
+// need a project (a captured session need not belong to one, MODEL §4),
+// so this layers one onto only the ones that do.
+func (f *journalFixture) WithProject(shard string, key SessionKey, project SessionProject) *journalFixture {
+	f.t.Helper()
+	sess, ok, err := ReadSession(f.root, shard, key)
+	if err != nil || !ok {
+		f.t.Fatalf("fixture: WithProject: ReadSession(%s/%s): ok=%v err=%v", shard, key.DirName(), ok, err)
+	}
+	sess.Project = &project
+	if err := WriteSession(f.root, shard, key, sess); err != nil {
+		f.t.Fatalf("fixture: WithProject: WriteSession(%s/%s): %v", shard, key.DirName(), err)
+	}
+	return f
+}
+
 // Project authors projects/<slug>/project.json.
 func (f *journalFixture) Project(slug string, p Project) *journalFixture {
 	f.t.Helper()

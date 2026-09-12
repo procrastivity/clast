@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -304,5 +305,78 @@ func TestWalk_EntryPresenceFlag(t *testing.T) {
 	}
 	if got := findItem(t, items, withoutEntry.DirName()); got.EntryExists {
 		t.Errorf("EntryExists = true for %q, want false", withoutEntry.DirName())
+	}
+}
+
+// TestWalk_DashedHarnessNameUsesSessionJSONIdentity is the M11 identity
+// fix's regression test: a naive first-dash split of the directory name
+// "claude-code-abc123" would wrongly read Harness="claude",
+// NativeID="code-abc123". session.json is the only authority for
+// identity (loadWalkItem), so Walk must recover Harness="claude-code",
+// NativeID="abc123" instead — a dashed harness name is real (claude-code
+// in this repo, cursor-agent in the design record), not hypothetical.
+func TestWalk_DashedHarnessNameUsesSessionJSONIdentity(t *testing.T) {
+	root := t.TempDir()
+	shard := "2026-09-11"
+	key := SessionKey{Harness: "claude-code", NativeID: "abc123"}
+
+	writeTestSession(t, root, shard, key, TranscriptFingerprint{Format: "claude-code-jsonl", Lines: 5, SHA256: "a"})
+
+	items, diags, err := Walk(root)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diags = %+v, want none", diags)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want 1", items)
+	}
+	if items[0].Key != key {
+		t.Errorf("Key = %+v, want %+v (a naive first-dash split would wrongly give %+v)",
+			items[0].Key, key, SessionKey{Harness: "claude", NativeID: "code-abc123"})
+	}
+}
+
+// TestWalk_SessionJSONIdentityMismatchCountedAndSkipped covers the other
+// side of the M11 fix: when session.json's own identity genuinely
+// disagrees with the directory it was found in (a hand-edited or
+// corrupted document — not just a dashed harness name confusing a
+// splitter), Walk must not trust either side blindly; it skips the
+// session and counts a diagnostic rather than returning a mismatched or
+// guessed-at item.
+func TestWalk_SessionJSONIdentityMismatchCountedAndSkipped(t *testing.T) {
+	root := t.TempDir()
+	shard := "2026-09-11"
+	key := SessionKey{Harness: "claude", NativeID: "dirname-says-this"}
+	writeTestSession(t, root, shard, key, TranscriptFingerprint{Lines: 1, SHA256: "a"})
+
+	// Hand-edit session.json's identity to disagree with its directory,
+	// bypassing WriteSession's own stamping (which would just re-align it).
+	sess, ok, err := ReadSession(root, shard, key)
+	if err != nil || !ok {
+		t.Fatalf("ReadSession: ok=%v err=%v", ok, err)
+	}
+	sess.SessionID = "session-json-says-this"
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(SessionJSONPath(root, shard, key), data, 0o644); err != nil {
+		t.Fatalf("write mismatched session.json: %v", err)
+	}
+
+	items, diags, err := Walk(root)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("items = %+v, want none (identity mismatch)", items)
+	}
+	if len(diags) != 1 {
+		t.Fatalf("diags = %+v, want exactly 1", diags)
+	}
+	if diags[0].Path != SessionJSONPath(root, shard, key) {
+		t.Errorf("diags[0].Path = %q, want %q", diags[0].Path, SessionJSONPath(root, shard, key))
 	}
 }

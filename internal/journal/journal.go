@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/procrastivity/clast/internal/config"
 )
@@ -59,14 +60,57 @@ var userHomeDir = os.UserHomeDir
 // non-empty, otherwise $XDG_DATA_HOME/clast/journal, defaulting to
 // ~/.local/share/clast/journal when XDG_DATA_HOME is unset (MODEL M6).
 // CLAST_JOURNAL_DIR, when set, wins over both — the C2.6 test seam.
+//
+// journal_dir must be a string; a present-and-non-nil value of any other
+// YAML type (a number, a bool, a mapping — someone's config typo) is an
+// error naming the key and the value's Go type, never a silent fallback
+// to the default. It may be absolute, or start with "~/" (or be the bare
+// "~"), expanded against $HOME the same way a shell would — MODEL M6's
+// own example config value is "~/Sync/clast/journal". After expansion the
+// path must be absolute: a relative journal_dir would make the journal's
+// location depend on whatever directory the caller happened to be
+// running in, which a fixed store root must never do (refuse over
+// guess).
 func Root(cfg config.Config) (string, error) {
 	if dir := journalDirEnv(); dir != "" {
 		return dir, nil
 	}
-	if dir, _ := cfg[journalDirConfigKey].(string); dir != "" {
-		return dir, nil
+
+	if raw, present := cfg[journalDirConfigKey]; present && raw != nil {
+		dir, isString := raw.(string)
+		if !isString {
+			return "", fmt.Errorf("journal: config key %q must be a string, got %T", journalDirConfigKey, raw)
+		}
+		if dir != "" {
+			return expandJournalDir(dir)
+		}
 	}
 	return defaultRoot()
+}
+
+// expandJournalDir expands a leading "~/" (or a bare "~") in dir against
+// $HOME, via the userHomeDir seam, then requires the result to be
+// absolute.
+func expandJournalDir(dir string) (string, error) {
+	switch {
+	case dir == "~":
+		home, err := userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("journal: expanding %q: resolving home directory: %w", dir, err)
+		}
+		dir = home
+	case strings.HasPrefix(dir, "~/"):
+		home, err := userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("journal: expanding %q: resolving home directory: %w", dir, err)
+		}
+		dir = filepath.Join(home, strings.TrimPrefix(dir, "~/"))
+	}
+
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("journal: config key %q must be an absolute path (or start with \"~/\"), got %q", journalDirConfigKey, dir)
+	}
+	return dir, nil
 }
 
 // defaultRoot computes $XDG_DATA_HOME/clast/journal, falling back to

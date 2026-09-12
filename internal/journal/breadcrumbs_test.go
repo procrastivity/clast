@@ -205,3 +205,88 @@ func TestAppendBreadcrumb_GlobalCrumbRoundTrip(t *testing.T) {
 		t.Errorf("Slug = %v, want nil (global crumb)", entries[0].Slug)
 	}
 }
+
+func TestReadBreadcrumbs_RejectsMalformedFileDate(t *testing.T) {
+	root := t.TempDir()
+	for _, arg := range []string{
+		"*",          // a bare glob metacharacter
+		"2026-09-*",  // metacharacter smuggled into an otherwise-plausible date
+		"2026-13-40", // not a real calendar date
+		"not-a-date",
+		"",
+	} {
+		if _, _, err := ReadBreadcrumbs(root, arg); err == nil {
+			t.Errorf("ReadBreadcrumbs(%q): want error, got nil", arg)
+		}
+	}
+}
+
+// TestReadBreadcrumbsForDay_BoundaryCrumbs is the day-bucketed read's
+// boundary check (M8): a crumb written at 02:30 is filed under the NEXT
+// calendar date's file (AppendBreadcrumb shards by write-time date), but
+// under a 04:00 cutoff it still belongs to the PREVIOUS day's bucket —
+// the exact case ReadBreadcrumbsForDay's day+1 file read exists for.
+// 03:59 vs. 04:00 on the day's own file pins the cutoff boundary itself.
+func TestReadBreadcrumbsForDay_BoundaryCrumbs(t *testing.T) {
+	root := t.TempDir()
+	cutoff := mustCutoff(t, "04:00")
+	loc := time.FixedZone("test", -5*3600)
+	fakeHostname(t, "framework")
+	day := Day("2026-09-11")
+
+	// 02:30 on 09-12 (day+1): filed under 2026-09-12's file, but belongs
+	// to day 2026-09-11's bucket under the 04:00 cutoff.
+	fakeNow(t, time.Date(2026, 9, 12, 2, 30, 0, 0, loc))
+	if err := AppendBreadcrumb(root, Breadcrumb{At: now(), Text: "day+1 file, before cutoff"}); err != nil {
+		t.Fatalf("AppendBreadcrumb: %v", err)
+	}
+
+	// 03:59 on day itself: still belongs to the PREVIOUS bucket
+	// (2026-09-10), even though it's filed under day's own file.
+	fakeNow(t, time.Date(2026, 9, 11, 3, 59, 0, 0, loc))
+	if err := AppendBreadcrumb(root, Breadcrumb{At: now(), Text: "day file, before cutoff"}); err != nil {
+		t.Fatalf("AppendBreadcrumb: %v", err)
+	}
+
+	// 04:00 on day itself: at the cutoff, belongs to day's own bucket.
+	fakeNow(t, time.Date(2026, 9, 11, 4, 0, 0, 0, loc))
+	if err := AppendBreadcrumb(root, Breadcrumb{At: now(), Text: "day file, at cutoff"}); err != nil {
+		t.Fatalf("AppendBreadcrumb: %v", err)
+	}
+
+	entries, diags, err := ReadBreadcrumbsForDay(root, day, cutoff)
+	if err != nil {
+		t.Fatalf("ReadBreadcrumbsForDay: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("diags = %+v, want none", diags)
+	}
+
+	texts := map[string]bool{}
+	for _, e := range entries {
+		texts[e.Text] = true
+	}
+	if !texts["day+1 file, before cutoff"] {
+		t.Errorf("entries = %+v, want the day+1-file/before-cutoff crumb included", entries)
+	}
+	if !texts["day file, at cutoff"] {
+		t.Errorf("entries = %+v, want the at-cutoff crumb included", entries)
+	}
+	if texts["day file, before cutoff"] {
+		t.Errorf("entries = %+v, want the before-cutoff same-file crumb excluded (belongs to the previous day)", entries)
+	}
+	if len(entries) != 2 {
+		t.Errorf("entries = %+v, want exactly 2", entries)
+	}
+}
+
+func TestReadBreadcrumbsForDay_NoFilesIsEmptyNotError(t *testing.T) {
+	root := t.TempDir()
+	entries, diags, err := ReadBreadcrumbsForDay(root, Day("2026-01-01"), mustCutoff(t, "04:00"))
+	if err != nil {
+		t.Fatalf("ReadBreadcrumbsForDay on an empty journal returned an error: %v", err)
+	}
+	if len(entries) != 0 || len(diags) != 0 {
+		t.Errorf("entries = %+v, diags = %+v, want both empty", entries, diags)
+	}
+}

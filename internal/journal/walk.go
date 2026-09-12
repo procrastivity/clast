@@ -14,7 +14,10 @@ import (
 // facts — raw enough for a query verb to filter and derive from, without
 // re-reading the directory itself.
 type WalkItem struct {
-	// Key is this session's identity (M11).
+	// Key is this session's identity (M11) — read from session.json's own
+	// Harness/SessionID fields, never derived from the directory name.
+	// loadWalkItem diagnoses (and drops) any session whose directory name
+	// disagrees with what session.json records.
 	Key SessionKey
 	// Shard is the YYYY-MM-DD directory this session was found under.
 	// Provenance only — never semantics (M8): callers that need a day
@@ -74,12 +77,17 @@ func (w WalkItem) Stale() bool {
 //
 // A missing journal root or missing sessions/ directory is not an error:
 // it returns no items (the step-01 read posture). A shard directory not
-// shaped YYYY-MM-DD, a session directory not shaped
-// <harness>-<native-id>, or a session directory whose session.json (or
-// curation.json) is missing or malformed is skipped and counted in diags
-// rather than failing the walk — MODEL §7's "tolerant of what it doesn't
-// own" posture, extended here to the tree's own shape. Anything else
-// found inside a session directory (stray files, an unreadable
+// shaped YYYY-MM-DD, a session directory that doesn't even look like
+// <harness>-<native-id> (no interior dash), a session directory whose
+// session.json (or curation.json) is missing or malformed, or one whose
+// session.json identity doesn't reproduce the directory name is skipped
+// and counted in diags rather than failing the walk — MODEL §7's
+// "tolerant of what it doesn't own" posture, extended here to the tree's
+// own shape. The directory name's dash split is only ever a pre-read
+// shape gate (M11): session.json's own Harness/SessionID fields are
+// identity's only authority, because a naive first-dash split gets it
+// wrong for a dashed harness name (claude-code, cursor-agent). Anything
+// else found inside a session directory (stray files, an unreadable
 // transcript copy) is simply ignored: this step only ever reads
 // session.json, curation.json, and stats entry.md.
 func Walk(root string) (items []WalkItem, diags []Diagnostic, err error) {
@@ -112,13 +120,12 @@ func Walk(root string) (items []WalkItem, diags []Diagnostic, err error) {
 		sort.Strings(names)
 		for _, dirName := range names {
 			sessionDir := filepath.Join(shardPath, dirName)
-			key, ok := parseSessionDirName(dirName)
-			if !ok {
+			if !looksLikeSessionDirName(dirName) {
 				diags = append(diags, Diagnostic{Path: sessionDir, Err: fmt.Errorf("journal: %q is not a <harness>-<native-id> session directory", dirName)})
 				continue
 			}
 
-			item, diag, ok := loadWalkItem(root, shard, key)
+			item, diag, ok := loadWalkItem(root, shard, dirName)
 			if !ok {
 				diags = append(diags, diag)
 				continue
@@ -130,16 +137,27 @@ func Walk(root string) (items []WalkItem, diags []Diagnostic, err error) {
 }
 
 // loadWalkItem reads one session directory's documents into a WalkItem.
-// ok is false when session.json or curation.json is missing-but-should-
-// exist-differently than expected or malformed, in which case diag names
-// the problem and the caller counts it rather than returning the item.
-func loadWalkItem(root, shard string, key SessionKey) (item WalkItem, diag Diagnostic, ok bool) {
-	session, present, err := ReadSession(root, shard, key)
+// dirName is the raw, on-disk directory name — session.json is read from
+// it directly, and identity (Key) is built only from session.json's own
+// Harness/SessionID fields afterward (M11's only authority), never from
+// splitting dirName: a dashed harness name (claude-code, cursor-agent)
+// would make a naive split wrong. ok is false when session.json or
+// curation.json is missing or malformed, or when session.json's own
+// identity doesn't reproduce dirName, in which case diag names the
+// problem and the caller counts it rather than returning the item.
+func loadWalkItem(root, shard, dirName string) (item WalkItem, diag Diagnostic, ok bool) {
+	sessionPath := filepath.Join(root, "sessions", shard, dirName, "session.json")
+	session, present, err := readDocument[Session](sessionPath)
 	if err != nil {
-		return WalkItem{}, Diagnostic{Path: SessionJSONPath(root, shard, key), Err: err}, false
+		return WalkItem{}, Diagnostic{Path: sessionPath, Err: err}, false
 	}
 	if !present {
-		return WalkItem{}, Diagnostic{Path: SessionJSONPath(root, shard, key), Err: fmt.Errorf("journal: missing session.json")}, false
+		return WalkItem{}, Diagnostic{Path: sessionPath, Err: fmt.Errorf("journal: missing session.json")}, false
+	}
+
+	key := SessionKey{Harness: session.Harness, NativeID: session.SessionID}
+	if key.DirName() != dirName {
+		return WalkItem{}, Diagnostic{Path: sessionPath, Err: fmt.Errorf("journal: session.json identity %q does not match its directory name %q", key.DirName(), dirName)}, false
 	}
 
 	curation, curationPresent, err := ReadCuration(root, shard, key)
@@ -173,16 +191,17 @@ func loadWalkItem(root, shard string, key SessionKey) (item WalkItem, diag Diagn
 	}
 }
 
-// parseSessionDirName recovers a SessionKey from a session directory name,
-// <harness>-<native-id> (M11). Splitting on the first '-' is correct
-// because a native id (a uuid, for claude) may itself contain dashes,
-// while a harness name never does.
-func parseSessionDirName(dirName string) (SessionKey, bool) {
+// looksLikeSessionDirName is the pre-read shape gate only: does dirName
+// look at all like <harness>-<native-id> (an interior dash with both
+// sides non-empty)? It deliberately does NOT build a SessionKey from the
+// split — a dashed harness name (claude-code, cursor-agent) makes a naive
+// first-dash split wrong, so identity is only ever read from session.json
+// itself (loadWalkItem). This gate exists purely to keep a directory that
+// plainly isn't shaped like a session at all (no dash whatsoever) out of
+// loadWalkItem's error path.
+func looksLikeSessionDirName(dirName string) bool {
 	harness, nativeID, found := strings.Cut(dirName, "-")
-	if !found || harness == "" || nativeID == "" {
-		return SessionKey{}, false
-	}
-	return SessionKey{Harness: harness, NativeID: nativeID}, true
+	return found && harness != "" && nativeID != ""
 }
 
 // dirNames returns the names of entries that are directories, silently

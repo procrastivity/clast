@@ -1,6 +1,10 @@
 package journal
 
-import "time"
+import (
+	"fmt"
+	"os"
+	"time"
+)
 
 // Every type below is one MODEL §4 document (or, for Breadcrumb, one
 // JSONL line within breadcrumbs/…). Field names and nullability match the
@@ -60,9 +64,16 @@ type Session struct {
 }
 
 // WriteSession writes session.json for key under shard, creating the
-// journal root and the session directory as needed.
+// journal root and the session directory as needed. It stamps
+// s.Harness/s.SessionID from key, the same way it stamps SchemaVersion —
+// session.json's own identity fields can never disagree with the key
+// (and so the directory name, SessionKey.DirName) it was written under,
+// which is what lets Walk treat session.json as identity's only
+// authority (M11) instead of re-deriving it from the directory name.
 func WriteSession(root, shard string, key SessionKey, s Session) error {
 	s.SchemaVersion = recordSchemaVersion
+	s.Harness = key.Harness
+	s.SessionID = key.NativeID
 	return writeDocument(root, SessionJSONPath(root, shard, key), s)
 }
 
@@ -113,8 +124,17 @@ type Curation struct {
 	TranscriptAtCuration *TranscriptStamp `json:"transcript_at_curation,omitempty"`
 }
 
-// WriteCuration writes curation.json for key under shard.
+// WriteCuration writes curation.json for key under shard. c.State must be
+// StateCurated or StateDismissed: MODEL §2 makes `captured` the state a
+// MISSING curation.json means, by construction, so a curation.json whose
+// own state field says "captured" (or is empty) would be a second,
+// contradictory way to say the same thing — WriteCuration refuses it
+// rather than writing a document the rest of this package would never
+// produce itself. Use RemoveCuration to put a session back to captured.
 func WriteCuration(root, shard string, key SessionKey, c Curation) error {
+	if c.State != StateCurated && c.State != StateDismissed {
+		return fmt.Errorf("journal: WriteCuration: state must be %q or %q, not %q", StateCurated, StateDismissed, c.State)
+	}
 	c.SchemaVersion = recordSchemaVersion
 	return writeDocument(root, CurationJSONPath(root, shard, key), c)
 }
@@ -124,6 +144,22 @@ func WriteCuration(root, shard string, key SessionKey, c Curation) error {
 // `captured` (MODEL §2), the derivation itself belongs to a later step.
 func ReadCuration(root, shard string, key SessionKey) (Curation, bool, error) {
 	return readDocument[Curation](CurationJSONPath(root, shard, key))
+}
+
+// RemoveCuration deletes curation.json for key under shard, returning the
+// session to `captured` (MODEL §2) — the primitive undismiss (SURFACE
+// V15) builds on. A missing curation.json is not an error: removing
+// something already gone is a no-op, the write-side mirror of
+// ReadCuration's missing-file posture.
+func RemoveCuration(root, shard string, key SessionKey) error {
+	path := CurationJSONPath(root, shard, key)
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("journal: removing %s: %w", path, err)
+	}
+	return nil
 }
 
 // Project is project.json, shared across every machine with a clone of
