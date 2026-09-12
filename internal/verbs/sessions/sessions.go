@@ -26,7 +26,10 @@ type Row struct {
 // newest-first by started_at. Walk's own diagnostics (a malformed
 // session directory) are tolerated here exactly as Walk tolerates them
 // itself — `doctor` (V28) is the verb that reports journal health, not
-// this listing.
+// this listing. A curated session whose entry.md fails to read (a torn
+// document — present but malformed) gets the same tolerant treatment:
+// the row still lists, just without a title, rather than an entry.Read
+// error killing the whole listing.
 func Run(root string, filter query.Filter, cutoff journal.Cutoff) ([]Row, error) {
 	items, _, err := journal.Walk(root)
 	if err != nil {
@@ -42,11 +45,9 @@ func Run(root string, filter query.Filter, cutoff journal.Cutoff) ([]Row, error)
 	for i, it := range matched {
 		row := Row{Item: it, Day: cutoff.DayOf(it.Session.StartedAt)}
 		if it.State() == journal.StateCurated {
-			e, ok, err := entry.Read(journal.EntryPath(root, it.Shard, it.Key))
-			if err != nil {
-				return nil, err
-			}
-			if ok {
+			// A read error (a torn entry.md) is tolerated, not
+			// propagated: drop the title, keep the row.
+			if e, ok, err := entry.Read(journal.EntryPath(root, it.Shard, it.Key)); err == nil && ok {
 				row.Title = e.Title
 			}
 		}

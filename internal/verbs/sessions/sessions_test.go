@@ -1,6 +1,7 @@
 package sessions_test
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -136,6 +137,70 @@ func TestRun_FilterAppliesBeforeSort(t *testing.T) {
 		t.Errorf("Run(day=2026-09-10) = %+v, want only %s", rows, older.DirName())
 	}
 	_ = newer
+}
+
+// TestRun_TornEntryMD_ListsRowWithoutTitle covers MODEL §7's tolerant-read
+// posture (`doctor` reports journal health, not listings): a curated
+// session whose entry.md fails to parse must not kill the whole listing —
+// it still lists, just without a title, alongside otherwise-healthy
+// sessions.
+func TestRun_TornEntryMD_ListsRowWithoutTitle(t *testing.T) {
+	root, _, _, curated := buildFixture(t)
+	cutoff := mustCutoff(t, "04:00")
+
+	torn := journal.SessionKey{Harness: "claude", NativeID: "torn-01"}
+
+	// Author a curated session directly against the shared root, then
+	// clobber its entry.md with bytes that fail to parse (no frontmatter
+	// delimiter at all) — a torn document.
+	if err := journal.WriteSession(root, "2026-09-12", torn, journal.Session{
+		Harness:      torn.Harness,
+		SessionID:    torn.NativeID,
+		Machine:      "framework",
+		StartedAt:    mustParseTime(t, "2026-09-12T11:00:00-05:00"),
+		LastActiveAt: mustParseTime(t, "2026-09-12T11:20:00-05:00"),
+		CapturedAt:   mustParseTime(t, "2026-09-12T11:25:00-05:00"),
+		Transcript:   journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "torn"},
+	}); err != nil {
+		t.Fatalf("WriteSession: %v", err)
+	}
+	if err := journal.WriteCuration(root, "2026-09-12", torn, journal.Curation{
+		State:   journal.StateCurated,
+		At:      mustParseTime(t, "2026-09-12T11:30:00-05:00"),
+		Machine: "framework",
+	}); err != nil {
+		t.Fatalf("WriteCuration: %v", err)
+	}
+	if err := os.WriteFile(journal.EntryPath(root, "2026-09-12", torn), []byte("not an entry document at all"), 0o644); err != nil {
+		t.Fatalf("write torn entry.md: %v", err)
+	}
+
+	rows, err := sessions.Run(root, query.Filter{}, cutoff)
+	if err != nil {
+		t.Fatalf("Run: %v, want the torn entry.md tolerated rather than propagated", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("Run = %d rows, want 4 (the 3 healthy sessions plus the torn one)", len(rows))
+	}
+
+	var gotTorn, gotHealthyCurated *sessions.Row
+	for i := range rows {
+		switch rows[i].Item.Key {
+		case torn:
+			gotTorn = &rows[i]
+		case curated:
+			gotHealthyCurated = &rows[i]
+		}
+	}
+	if gotTorn == nil {
+		t.Fatal("torn session missing from the listing entirely, want it present without a title")
+	}
+	if gotTorn.Title != "" {
+		t.Errorf("torn session's Title = %q, want empty", gotTorn.Title)
+	}
+	if gotHealthyCurated == nil || gotHealthyCurated.Title != "a curated session" {
+		t.Errorf("healthy curated row title = %+v, want %q unaffected by the torn sibling", gotHealthyCurated, "a curated session")
+	}
 }
 
 func TestRun_EmptyJournalIsEmptyNotError(t *testing.T) {
