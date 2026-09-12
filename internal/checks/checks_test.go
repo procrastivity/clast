@@ -40,14 +40,37 @@ func installClean(t *testing.T, root *cobra.Command, build buildinfo.Info) strin
 	return dir
 }
 
-// addVerb registers a new plumbing verb on root, after a clean install —
-// the manifest, and so claudecode.Generate's output, now differs from what
-// got stamped (a verb added since install), Status's binary-vs-stamp
-// question (C4.6), independent of whatever the disk says.
+// addVerb registers a new verb under root's `plumbing` namespace, after a
+// clean install — the manifest, and so claudecode.Generate's output, now
+// differs from what got stamped (a verb added since install), Status's
+// binary-vs-stamp question (C4.6), independent of whatever the disk says.
+//
+// It nests the new verb under a `plumbing` group command (creating one if
+// this fixture's root does not already carry one) rather than adding it
+// directly to root: harness.Projectable's filter is structural (SURFACE
+// V32 — exactly the `plumbing` namespace, keyed off verb name position),
+// not kind-based, so a bare top-level command would never be projected
+// regardless of its kind annotation, and this fixture's staleness would
+// stop proving anything about a real namespace verb being added.
 func addVerb(root *cobra.Command) {
+	group := plumbingGroup(root)
 	extra := &cobra.Command{Use: "extra", Run: func(*cobra.Command, []string) {}}
 	surface.Annotate(extra, surface.Plumbing)
-	root.AddCommand(extra)
+	group.AddCommand(extra)
+}
+
+// plumbingGroup returns root's `plumbing` child command, creating a bare
+// one (no RunE, matching the real internal/verbs/plumbing group's shape)
+// if root does not already carry one.
+func plumbingGroup(root *cobra.Command) *cobra.Command {
+	for _, c := range root.Commands() {
+		if c.Name() == "plumbing" {
+			return c
+		}
+	}
+	group := &cobra.Command{Use: "plumbing"}
+	root.AddCommand(group)
+	return group
 }
 
 func findTarget(t *testing.T, targets []TargetState, name string) TargetState {
