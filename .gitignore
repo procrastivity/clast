@@ -10,4 +10,8 @@
 /result-*
 .direnv/
 
+# wip's per-clone directory (H6, C6.8): a decided posture, not an
+# accident of .git/info/exclude. On main nothing changes.
+.wip/
+
 .DS_Store
