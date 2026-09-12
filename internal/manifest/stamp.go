@@ -1,0 +1,77 @@
+package manifest
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// ErrStampUnparseable marks a stamp file whose JSON does not parse.
+// harness.Status maps it to the incompatible state: a stamp this binary
+// cannot read is the same fact as a stamp from another schemaVersion —
+// either way the binary cannot tell what it owns (C4.5, C4.6, T6). It is a
+// sentinel, not a value, so callers use errors.Is rather than matching the
+// wrapped message.
+var ErrStampUnparseable = errors.New("manifest: stamp file is not valid JSON")
+
+// StampFileName is the bookkeeping file a harness install writes alongside
+// its generated tree (C4.4) — one file covering the whole tree rather than
+// one sidecar per generated file, since the two are equivalent (every
+// generated file's checksum is a key in Files) and one file is what Drift
+// and the uninstall verification both need to read anyway. This file is
+// the "stamp"; the word "manifest" in its name refers to what it was
+// stamped FROM — never call the install state itself a manifest (C3.5).
+const StampFileName = ".clast-manifest-stamp.json"
+
+// Stamp records what a harness install last generated: the tool version and
+// manifest schema version at install time, and a checksum per generated
+// file (relative path -> sha256), so a later run can tell whether the
+// current binary would generate something different (Drift) or whether the
+// tree on disk still matches what was installed (uninstall's refusal
+// check).
+type Stamp struct {
+	ToolVersion   string            `json:"toolVersion"`
+	SchemaVersion int               `json:"schemaVersion"`
+	Files         map[string]string `json:"files"`
+}
+
+// ChecksumFiles computes a Stamp's Files map from a generated tree's
+// content (relative path -> bytes), the shape both install (to write a
+// stamp) and Drift's caller (to compare against one) need.
+func ChecksumFiles(files map[string][]byte) map[string]string {
+	sums := make(map[string]string, len(files))
+	for path, data := range files {
+		sums[path] = Checksum(data)
+	}
+	return sums
+}
+
+// WriteStamp writes stamp as StampFileName under dir.
+func WriteStamp(dir string, stamp Stamp) error {
+	b, err := json.MarshalIndent(stamp, "", "  ")
+	if err != nil {
+		return fmt.Errorf("manifest: encoding stamp: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, StampFileName), b, 0o644); err != nil {
+		return fmt.Errorf("manifest: writing stamp: %w", err)
+	}
+	return nil
+}
+
+// ReadStamp reads the stamp under dir, reporting whether one was present.
+func ReadStamp(dir string) (Stamp, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, StampFileName))
+	if os.IsNotExist(err) {
+		return Stamp{}, false, nil
+	}
+	if err != nil {
+		return Stamp{}, false, fmt.Errorf("manifest: reading stamp: %w", err)
+	}
+	var stamp Stamp
+	if err := json.Unmarshal(data, &stamp); err != nil {
+		return Stamp{}, false, fmt.Errorf("manifest: parsing stamp: %w: %w", ErrStampUnparseable, err)
+	}
+	return stamp, true, nil
+}

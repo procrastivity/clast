@@ -1,0 +1,4 @@
+# Shipped default tool config. The user override lives at
+# $XDG_CONFIG_HOME/clast/config.yaml and merges over this key-by-key.
+# No keys yet — verbs add their own as they earn tool-config scope.
+{}
