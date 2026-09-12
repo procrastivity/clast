@@ -19,3 +19,12 @@ package claudecode
 // value, pinned the moment the splice golden tests first asserted it
 // (testdata/golden/splice/), and never touched after.
 const ShimCommand = `command -v clast >/dev/null 2>&1 && (clast plumbing capture >/dev/null 2>&1 &); exit 0`
+
+// shimMarker is a substring unique to ShimCommand that doctor's read-only
+// splice-drift probe (SpliceStatus, SURFACE V28) uses to recognize a
+// hooks.SessionStart command as "meant to be" the clast shim even when its
+// bytes have since been edited away from the pinned string — the splice
+// target carries no stamp of its own to diff against (C4.8), so this
+// substring match is the best available signal of intent versus a hook
+// some other tool wrote.
+const shimMarker = "clast plumbing capture"

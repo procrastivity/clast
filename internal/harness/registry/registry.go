@@ -12,6 +12,7 @@ package registry
 import (
 	"fmt"
 
+	"github.com/procrastivity/clast/internal/harness"
 	"github.com/procrastivity/clast/internal/harness/claudecode"
 	"github.com/procrastivity/clast/internal/manifest"
 )
@@ -33,8 +34,8 @@ type Target struct {
 
 // SpliceOutcome reports what a harness's Splice call did to its splice
 // target (C4.8) — a foreign-file path edit, not a stamped generated tree,
-// so it carries no drift state of its own here; step-04 (SURFACE V28) owns
-// wiring its drift into doctor.
+// so it carries no drift state of its own; see SpliceStatus and
+// harness.SpliceProbe for that (SURFACE V28, step-04).
 type SpliceOutcome struct {
 	Path   string
 	Status string
@@ -60,6 +61,17 @@ type Harness struct {
 	// or an already-absent entry is a no-op, not a diagnostic (see
 	// claudecode.Unsplice's doc comment for the full reasoning).
 	Unsplice func() (SpliceOutcome, error)
+	// SpliceStatus probes this harness's splice target's drift state,
+	// read-only (SURFACE V28, step-04) — nil for a harness with no splice
+	// target. Unlike Splice/Unsplice, it never writes: doctor is its only
+	// caller, and a bare `clast doctor` run must never install or repair
+	// anything as a side effect of reporting on it. Returns the shared
+	// harness.SpliceProbe shape directly (no adapter, unlike
+	// Splice/Unsplice's SpliceOutcome): that type already lives in the
+	// harness-agnostic internal/harness package, the same place State
+	// lives for stamped targets, so there is no harness-specific shape to
+	// translate out of the way here.
+	SpliceStatus func() (harness.SpliceProbe, error)
 }
 
 // All lists every harness this tool can project itself into. The skeleton
@@ -68,11 +80,12 @@ type Harness struct {
 // walks every call site a new target touches.
 var All = []Harness{
 	{
-		Name:      claudecode.Name,
-		Available: claudecode.Available,
-		Targets:   claudecodeTargets(),
-		Splice:    claudecodeSplice,
-		Unsplice:  claudecodeUnsplice,
+		Name:         claudecode.Name,
+		Available:    claudecode.Available,
+		Targets:      claudecodeTargets(),
+		Splice:       claudecodeSplice,
+		Unsplice:     claudecodeUnsplice,
+		SpliceStatus: claudecode.SpliceStatus,
 	},
 }
 

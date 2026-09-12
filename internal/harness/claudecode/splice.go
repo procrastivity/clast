@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/procrastivity/clast/internal/clasterr"
+	"github.com/procrastivity/clast/internal/harness"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -95,7 +96,7 @@ func Splice() (SpliceResult, error) {
 	}
 
 	if !missing && !gjson.ValidBytes(data) {
-		return SpliceResult{}, clasterr.New("validation.malformed-settings",
+		return SpliceResult{}, clasterr.New(harness.CodeMalformedSplice,
 			fmt.Sprintf("%s is not valid JSON; fix it by hand before re-running `clast install %s`", path, Name))
 	}
 
@@ -136,6 +137,70 @@ func hasShimEntry(data []byte) bool {
 	gjson.GetBytes(data, sessionStartPath).ForEach(func(_, group gjson.Result) bool {
 		group.Get("hooks").ForEach(func(_, hook gjson.Result) bool {
 			if hook.Get("command").String() == ShimCommand {
+				found = true
+				return false
+			}
+			return true
+		})
+		return !found
+	})
+	return found
+}
+
+// SpliceStatus probes settings.json for the shim entry's drift state,
+// read-only (SURFACE V28, step-04): unlike Splice, it never writes, so a
+// bare `clast doctor` run can never install or repair the hook as a side
+// effect of reporting on it. States, in order:
+//
+//   - No settings.json at all, or one that exists but carries no
+//     recognizable shim entry: harness.SpliceAbsent. A missing file reads
+//     the same as an empty one Splice would treat as `{}` — neither is
+//     drift on its own; checks.go decides that by weighing it against
+//     whether any skill is actually installed.
+//   - A settings.json that exists but is not valid JSON:
+//     harness.SpliceMalformed.
+//   - A hooks.SessionStart hook whose command is exactly ShimCommand:
+//     harness.SpliceCurrent.
+//   - A hooks.SessionStart hook whose command contains shimMarker but is
+//     not exactly ShimCommand — someone edited the pinned string in
+//     place: harness.SpliceTampered.
+func SpliceStatus() (harness.SpliceProbe, error) {
+	path, err := SettingsPath()
+	if err != nil {
+		return harness.SpliceProbe{}, err
+	}
+
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return harness.SpliceProbe{Path: path, State: harness.SpliceAbsent}, nil
+	case err != nil:
+		return harness.SpliceProbe{}, fmt.Errorf("claudecode: reading %q: %w", path, err)
+	}
+
+	if !gjson.ValidBytes(data) {
+		return harness.SpliceProbe{Path: path, State: harness.SpliceMalformed}, nil
+	}
+	if hasShimEntry(data) {
+		return harness.SpliceProbe{Path: path, State: harness.SpliceCurrent}, nil
+	}
+	if hasTamperedShimEntry(data) {
+		return harness.SpliceProbe{Path: path, State: harness.SpliceTampered}, nil
+	}
+	return harness.SpliceProbe{Path: path, State: harness.SpliceAbsent}, nil
+}
+
+// hasTamperedShimEntry reports whether data's hooks.SessionStart array
+// carries a hook whose command contains shimMarker — it looks like it was
+// meant to be the clast shim — but is not exactly ShimCommand. Used only by
+// SpliceStatus: hasShimEntry already ruled out an exact match by the time
+// this runs.
+func hasTamperedShimEntry(data []byte) bool {
+	found := false
+	gjson.GetBytes(data, sessionStartPath).ForEach(func(_, group gjson.Result) bool {
+		group.Get("hooks").ForEach(func(_, hook gjson.Result) bool {
+			cmd := hook.Get("command").String()
+			if cmd != ShimCommand && strings.Contains(cmd, shimMarker) {
 				found = true
 				return false
 			}
@@ -243,7 +308,7 @@ func Unsplice() (UnspliceResult, error) {
 	}
 
 	if !gjson.ValidBytes(data) {
-		return UnspliceResult{}, clasterr.New("validation.malformed-settings",
+		return UnspliceResult{}, clasterr.New(harness.CodeMalformedSplice,
 			fmt.Sprintf("%s is not valid JSON; fix it by hand before re-running `clast uninstall %s`", path, Name))
 	}
 

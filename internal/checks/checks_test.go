@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -26,11 +27,13 @@ func newFixture(t *testing.T) (root *cobra.Command, build buildinfo.Info) {
 }
 
 // installClean renders and stamps every one of claude-code's three skills
-// under root's current manifest, returning the wake skill's install dir —
-// the Current fixture every other state's test starts from and mutates.
-// wake stands in for "the" claude-code target the way the chassis's one
-// skill used to: the other two skills install alongside it, untouched by
-// whatever the test does to wake's tree.
+// under root's current manifest, plus the settings.json splice (SURFACE
+// V28's splice-drift checks would otherwise flag a fresh install missing
+// its shim), returning the wake skill's install dir — the Current fixture
+// every other state's test starts from and mutates. wake stands in for
+// "the" claude-code target the way the chassis's one skill used to: the
+// other two skills install alongside it, untouched by whatever the test
+// does to wake's tree.
 func installClean(t *testing.T, root *cobra.Command, build buildinfo.Info) string {
 	t.Helper()
 	m, err := manifest.Build(root, build)
@@ -46,6 +49,9 @@ func installClean(t *testing.T, root *cobra.Command, build buildinfo.Info) strin
 		if name == "wake" {
 			wakeDir = dir
 		}
+	}
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("claudecode.Splice: %v", err)
 	}
 	return wakeDir
 }
@@ -311,5 +317,171 @@ func TestHarnessTargets_IncompatibleSchemaVersion(t *testing.T) {
 	}
 	if len(findings) != 1 || findings[0].Code != harness.CodeIncompatible {
 		t.Errorf("findings = %+v, want exactly one %s", findings, harness.CodeIncompatible)
+	}
+}
+
+// hasCode reports whether findings carries at least one finding with code.
+func hasCode(findings []Finding, code string) bool {
+	for _, f := range findings {
+		if f.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// TestHarnessTargets_MissingSkillTree_PartialInstall asserts SURFACE V28's
+// partial-install reading: deleting one of three cleanly installed skill
+// trees reports that one tree, and only that one, as
+// MissingHarnessTargetCode — a per-tree finding, not one blanket row,
+// naming `clast install claude-code` as the fix.
+func TestHarnessTargets_MissingSkillTree_PartialInstall(t *testing.T) {
+	root, build := newFixture(t)
+	installClean(t, root, build)
+
+	wakeDir, err := claudecode.SkillDir("wake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wakeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, targets, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if got := findTarget(t, targets, claudecode.Name, "wake").State; got != harness.Missing {
+		t.Errorf("wake state = %q, want %q", got, harness.Missing)
+	}
+	if got := findTarget(t, targets, claudecode.Name, "brief").State; got != harness.Current {
+		t.Errorf("brief state = %q, want %q (untouched sibling)", got, harness.Current)
+	}
+
+	var missingFindings []Finding
+	for _, f := range findings {
+		if f.Code == MissingHarnessTargetCode {
+			missingFindings = append(missingFindings, f)
+		}
+	}
+	if len(missingFindings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one %s (wake only, brief/retro untouched)", findings, MissingHarnessTargetCode)
+	}
+	if !strings.Contains(missingFindings[0].Message, "wake") || !strings.Contains(missingFindings[0].Message, "clast install "+claudecode.Name) {
+		t.Errorf("finding message = %q, want it to name wake and `clast install %s`", missingFindings[0].Message, claudecode.Name)
+	}
+}
+
+// TestHarnessTargets_MissingSkillTree_NeverInstalledIsClean asserts the
+// absence-vs-drift reading SURFACE V28 step-04 records: every target
+// Missing, with no sibling giving install evidence, reads as "never
+// installed" — clean, not drift. TestHarnessTargets_Missing already covers
+// the plain nothing-installed case with zero findings; this test states
+// the same reading explicitly by the new codes' names.
+func TestHarnessTargets_MissingSkillTree_NeverInstalledIsClean(t *testing.T) {
+	root, build := newFixture(t)
+	// Nothing installed, no splice — a bare, never-touched host.
+
+	findings, _, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if hasCode(findings, MissingHarnessTargetCode) {
+		t.Errorf("findings = %+v, want no %s on a never-installed host", findings, MissingHarnessTargetCode)
+	}
+	if hasCode(findings, MissingHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want no %s on a never-installed host", findings, MissingHarnessSpliceCode)
+	}
+}
+
+// TestHarnessTargets_SpliceAbsentWhileSkillsInstalled asserts the shim-
+// entry-absent splice-drift class: skills installed via InstallSkill
+// directly, bypassing Splice, report MissingHarnessSpliceCode, naming
+// `clast install claude-code` to restore the hook.
+func TestHarnessTargets_SpliceAbsentWhileSkillsInstalled(t *testing.T) {
+	root, build := newFixture(t)
+	m, err := manifest.Build(root, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range claudecode.SkillNames {
+		if _, err := claudecode.InstallSkill(name, m); err != nil {
+			t.Fatalf("claudecode.InstallSkill(%q): %v", name, err)
+		}
+	}
+	// No Splice call: settings.json is never written.
+
+	findings, _, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if !hasCode(findings, MissingHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want a %s finding", findings, MissingHarnessSpliceCode)
+	}
+}
+
+// TestHarnessTargets_SpliceTampered asserts the shim-command-bytes-differ
+// splice-drift class: after a clean install (skills + splice), rewriting
+// the hook's command field to something that still names clast's shim but
+// no longer matches ShimCommand exactly reports TamperedHarnessSpliceCode.
+func TestHarnessTargets_SpliceTampered(t *testing.T) {
+	root, build := newFixture(t)
+	installClean(t, root, build)
+
+	settingsPath, err := claudecode.SettingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(raw), "clast plumbing capture", "clast plumbing capture --tampered", 1)
+	if tampered == string(raw) {
+		t.Fatal("fixture did not find the shim command to tamper with")
+	}
+	if err := os.WriteFile(settingsPath, []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, _, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if !hasCode(findings, TamperedHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want a %s finding", findings, TamperedHarnessSpliceCode)
+	}
+	if hasCode(findings, MissingHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want no %s alongside a tampered entry", findings, MissingHarnessSpliceCode)
+	}
+}
+
+// TestHarnessTargets_SpliceMalformed asserts the settings.json-malformed
+// splice-drift class: a settings.json that will not parse as JSON reports
+// harness.CodeMalformedSplice — the one splice-drift finding that keeps a
+// non-"advisory." prefix, since a broken settings.json blocks
+// `clast install`/`clast uninstall` outright (the same severity
+// Incompatible carries for a stamped target).
+func TestHarnessTargets_SpliceMalformed(t *testing.T) {
+	root, build := newFixture(t)
+	installClean(t, root, build)
+
+	settingsPath, err := claudecode.SettingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, _, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	if len(findings) != 1 || findings[0].Code != harness.CodeMalformedSplice {
+		t.Errorf("findings = %+v, want exactly one %s", findings, harness.CodeMalformedSplice)
+	}
+	if !strings.HasPrefix(findings[0].Code, "validation.") {
+		t.Errorf("finding code = %q, want the validation. prefix (fails doctor's run, unlike the advisory splice-drift codes)", findings[0].Code)
 	}
 }

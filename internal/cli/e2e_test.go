@@ -979,7 +979,14 @@ func TestDoctor_JSON_States(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			skills := t.TempDir()
-			env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills}
+			// CLAST_CLAUDE_SETTINGS_PATH is pinned here, not left to
+			// hermeticEnv's per-call default: c.setup and the doctor
+			// invocation below are two separate binary runs, and SURFACE
+			// V28's splice-drift checks (step-04) now read settings.json
+			// too — an unpinned path would give each run its own random
+			// temp file, so doctor would always see the splice as absent
+			// regardless of what setup actually did.
+			env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + filepath.Join(t.TempDir(), "settings.json")}
 			c.setup(t, skills, env)
 
 			r := run(t, env, "doctor", "--json")
@@ -1076,6 +1083,208 @@ func TestDoctor_TextMode_StateLine(t *testing.T) {
 			t.Fatalf("doctor stdout = %q, want the %s state line ahead of the findings/no-issues line", r.stdout, name)
 		}
 	}
+}
+
+// doctorFindings runs `doctor --json` and returns its findings' codes plus
+// the run's exit code — the shape every install-drift e2e case below
+// checks against.
+func doctorFindings(t *testing.T, env []string) ([]string, int) {
+	t.Helper()
+	r := run(t, env, "doctor", "--json")
+	var payload struct {
+		Findings []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("doctor --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	codes := make([]string, len(payload.Findings))
+	for i, f := range payload.Findings {
+		codes[i] = f.Code
+	}
+	return codes, r.exitCode
+}
+
+// containsString reports whether ss carries s.
+func containsString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDoctor_InstallDriftLifecycle drives SURFACE V28's install-drift
+// checks (C4.5-C4.6, step-04) end to end: clean after install, one finding
+// per induced drift class, and clean again after uninstall. Each drift
+// class is induced independently from its own fresh install, since the
+// fixtures are not composable (e.g. a deleted skill tree and a tampered
+// shim would otherwise sit in the same settings.json).
+func TestDoctor_InstallDriftLifecycle(t *testing.T) {
+	newEnv := func(t *testing.T) (skills, settingsPath string, env []string) {
+		t.Helper()
+		skills = t.TempDir()
+		settingsPath = filepath.Join(t.TempDir(), "settings.json")
+		return skills, settingsPath, []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+	}
+
+	t.Run("clean install has no install-drift findings", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none after a clean install", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
+
+	t.Run("never installed has no install-drift findings", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		// Nothing installed at all — the absence-vs-drift reading:
+		// uninstalled is a clean state, not drift.
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none on a never-installed host", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
+
+	t.Run("deleting one skill tree reports that tree missing", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.RemoveAll(filepath.Join(skills, "wake")); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.missing-harness-target") {
+			t.Fatalf("findings = %v, want advisory.missing-harness-target", codes)
+		}
+		// Recoverable by re-running install, the same severity class as
+		// modified/stale/unowned — advisory, so it does not fail the run.
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("editing a SKILL.md by hand is still reported (existing content-drift path)", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.WriteFile(filepath.Join(skills, "wake", "SKILL.md"), []byte("hand-edited\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.modified-harness-target") {
+			t.Fatalf("findings = %v, want advisory.modified-harness-target", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("removing the splice reports the shim missing", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		// The CLI has no way to install the skill trees without also
+		// splicing, so this removes just the shim entry from
+		// settings.json by hand afterward — the skill trees are left
+		// alone, isolating "skills installed, shim absent" from the
+		// all-Missing clean case.
+		if err := os.WriteFile(settingsPath, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.missing-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.missing-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("tampering the shim command reports it tampered", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		raw, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tampered := strings.Replace(string(raw), "clast plumbing capture", "clast plumbing capture --tampered", 1)
+		if tampered == string(raw) {
+			t.Fatal("fixture did not find the shim command to tamper with")
+		}
+		if err := os.WriteFile(settingsPath, []byte(tampered), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.tampered-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.tampered-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("breaking settings.json reports it malformed and fails the run", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.WriteFile(settingsPath, []byte("{not valid json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		r := run(t, env, "doctor", "--json")
+		if r.exitCode != 1 {
+			t.Fatalf("doctor exit = %d, want 1 (validation.malformed-settings fails the run); stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+		}
+		codes, _ := doctorFindings(t, env)
+		if !containsString(codes, "validation.malformed-settings") {
+			t.Fatalf("findings = %v, want validation.malformed-settings", codes)
+		}
+		envelope := parseErrorEnvelope(t, r.stderr)
+		if envelope.Error.Code != "doctor.findings-present" {
+			t.Errorf("error code = %q, want doctor.findings-present", envelope.Error.Code)
+		}
+	})
+
+	t.Run("uninstall returns to clean", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none after uninstall", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
 }
 
 // --- registry: `clast init` (SURFACE V26) ---
