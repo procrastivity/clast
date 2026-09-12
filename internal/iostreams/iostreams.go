@@ -9,13 +9,16 @@ import (
 	"os"
 )
 
-// Streams is the writer pair threaded into every verb constructor.
+// Streams is the reader/writer set threaded into every verb constructor. In
+// is nil for a verb that never reads input — only curate (SURFACE V14) reads
+// it, for its stdin-or---file document source.
 type Streams struct {
+	In  io.Reader
 	Out io.Writer
 	Err io.Writer
 }
 
 // System returns the real process streams.
 func System() *Streams {
-	return &Streams{Out: os.Stdout, Err: os.Stderr}
+	return &Streams{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}
 }

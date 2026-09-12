@@ -18,10 +18,13 @@ import (
 	breadcrumbsverb "github.com/procrastivity/clast/internal/verbs/breadcrumbs"
 	captureverb "github.com/procrastivity/clast/internal/verbs/capture"
 	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
+	curateverb "github.com/procrastivity/clast/internal/verbs/curate"
+	dismissverb "github.com/procrastivity/clast/internal/verbs/dismiss"
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
 	sessionsverb "github.com/procrastivity/clast/internal/verbs/sessions"
 	showverb "github.com/procrastivity/clast/internal/verbs/show"
 	statsverb "github.com/procrastivity/clast/internal/verbs/stats"
+	undismissverb "github.com/procrastivity/clast/internal/verbs/undismiss"
 	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
 )
 
@@ -49,5 +52,8 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(showverb.Command(streams))
 	cmd.AddCommand(breadcrumbsverb.Command(streams))
 	cmd.AddCommand(statsverb.Command(streams))
+	cmd.AddCommand(curateverb.Command(streams))
+	cmd.AddCommand(dismissverb.Command(streams))
+	cmd.AddCommand(undismissverb.Command(streams))
 	return cmd
 }

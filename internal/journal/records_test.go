@@ -2,6 +2,7 @@ package journal
 
 import (
 	"encoding/json"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -412,6 +413,84 @@ func TestBreadcrumb_RoundTrip(t *testing.T) {
 	}
 	if v, present := m["slug"]; !present || v != nil {
 		t.Errorf(`global crumb "slug" = %v (present=%v), want explicit null`, v, present)
+	}
+}
+
+// TestWriteEntry_RoundTrip_OpaqueBytes asserts WriteEntry writes exactly
+// the bytes it was given, verbatim, to EntryPath's location — the M9-clean
+// posture (state-verbs step 01): this package never parses or otherwise
+// touches entry.md's content, only stores it.
+func TestWriteEntry_RoundTrip_OpaqueBytes(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "8f3a"}
+	shard := "2026-09-11"
+
+	data := []byte("---\ntitle: fixing the flaky test\ntags: []\n---\n\nbody text\n")
+	if err := WriteEntry(root, shard, key, data); err != nil {
+		t.Fatalf("WriteEntry: %v", err)
+	}
+
+	got, err := os.ReadFile(EntryPath(root, shard, key))
+	if err != nil {
+		t.Fatalf("reading entry.md after WriteEntry: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Errorf("entry.md content = %q, want %q verbatim", got, data)
+	}
+
+	// WriteEntry is a write path: it must have triggered EnsureRoot's
+	// init-on-first-write (MODEL M6), same as every other write primitive.
+	if _, ok, err := ReadMarker(root); err != nil || !ok {
+		t.Errorf("ReadMarker after WriteEntry: ok=%v err=%v, want ok=true err=nil", ok, err)
+	}
+}
+
+// TestWriteEntry_Overwrites confirms a second WriteEntry call replaces the
+// first document's bytes entirely — the re-curate case (SURFACE V14) and
+// curate-from-dismissed both depend on entry.md being rewritten whole, not
+// merged.
+func TestWriteEntry_Overwrites(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "8f3a"}
+	shard := "2026-09-11"
+
+	if err := WriteEntry(root, shard, key, []byte("---\ntitle: first\n---\n\nfirst body\n")); err != nil {
+		t.Fatalf("WriteEntry (first): %v", err)
+	}
+	second := []byte("---\ntitle: second\n---\n\nsecond body\n")
+	if err := WriteEntry(root, shard, key, second); err != nil {
+		t.Fatalf("WriteEntry (second): %v", err)
+	}
+
+	got, err := os.ReadFile(EntryPath(root, shard, key))
+	if err != nil {
+		t.Fatalf("reading entry.md: %v", err)
+	}
+	if string(got) != string(second) {
+		t.Errorf("entry.md content = %q, want the second write's bytes %q", got, second)
+	}
+}
+
+// TestWriteEntry_NoStrayTempFileLeftBehind mirrors the entry package's own
+// Write test for the same property, over this package's own primitive.
+func TestWriteEntry_NoStrayTempFileLeftBehind(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "claude", NativeID: "8f3a"}
+	shard := "2026-09-11"
+
+	if err := WriteEntry(root, shard, key, []byte("---\ntitle: clean\n---\n\nbody\n")); err != nil {
+		t.Fatalf("WriteEntry: %v", err)
+	}
+
+	dir := SessionDir(root, shard, key)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if len(e.Name()) >= 5 && e.Name()[:5] == ".tmp-" {
+			t.Errorf("stray temp file left behind: %s", e.Name())
+		}
 	}
 }
 

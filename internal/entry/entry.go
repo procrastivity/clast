@@ -14,6 +14,7 @@
 package entry
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,19 @@ import (
 // delimiter is the frontmatter fence line, exactly as MODEL §4's own
 // entry.md example writes it.
 const delimiter = "---"
+
+// ErrInvalidFrontmatter marks a Parse failure whose frontmatter block
+// itself is malformed: no opening or closing "---" delimiter, or YAML
+// between them that doesn't parse. errors.Is against this (and
+// ErrMissingTitle below) lets a caller distinguish V14's two validation
+// conditions — curate's command layer (state-verbs step 02) reports them
+// under separate codes because a skill acting on the failure wants to
+// know which one.
+var ErrInvalidFrontmatter = errors.New("invalid frontmatter")
+
+// ErrMissingTitle marks a Parse failure whose frontmatter parsed fine but
+// carries no non-empty title (V14's second, independent condition).
+var ErrMissingTitle = errors.New("title must be present")
 
 // Frontmatter is entry.md's YAML frontmatter (MODEL §4): title and tags,
 // and nothing that duplicates session.json — the context for those facts
@@ -49,15 +63,15 @@ type Entry struct {
 func Parse(data []byte) (Entry, error) {
 	fm, body, err := splitFrontmatter(data)
 	if err != nil {
-		return Entry{}, err
+		return Entry{}, fmt.Errorf("entry: %w: %v", ErrInvalidFrontmatter, err)
 	}
 
 	var front Frontmatter
 	if err := yaml.Unmarshal(fm, &front); err != nil {
-		return Entry{}, fmt.Errorf("entry: parsing frontmatter: %w", err)
+		return Entry{}, fmt.Errorf("entry: %w: parsing frontmatter: %v", ErrInvalidFrontmatter, err)
 	}
 	if strings.TrimSpace(front.Title) == "" {
-		return Entry{}, fmt.Errorf("entry: frontmatter must set a non-empty title")
+		return Entry{}, fmt.Errorf("entry: %w: frontmatter must set a non-empty title", ErrMissingTitle)
 	}
 
 	return Entry{Frontmatter: front, Body: body}, nil
