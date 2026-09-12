@@ -1669,6 +1669,201 @@ func TestPlumbingStats_Human_EmptyJournal(t *testing.T) {
 	}
 }
 
+// --- query-verbs seal sweep ---
+
+// TestSeal_ManifestCarriesEveryNewVerb confirms `clast manifest --json`
+// carries kind/usage/outputSchema (C3.2/C3.7/C3.8) for every verb this
+// Matter added: plumbing kind on all five, the Use line's positional
+// recorded verbatim on show/breadcrumb (C3.8), and OutputSchema filled
+// exactly where V35 says a consumer exists (sessions, show) and left
+// unfilled everywhere else (breadcrumbs, stats, breadcrumb — C3.7: never
+// speculatively).
+func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
+	r := run(t, nil, "manifest", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("manifest --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var m struct {
+		Verbs []struct {
+			Name         string          `json:"name"`
+			Kind         string          `json:"kind"`
+			Usage        string          `json:"usage"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"verbs"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil {
+		t.Fatalf("manifest --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+
+	cases := []struct {
+		name       string
+		wantUsage  string
+		wantSchema bool
+	}{
+		{"plumbing sessions", "", true},
+		{"plumbing show", "<session>", true},
+		{"plumbing breadcrumbs", "", false},
+		{"plumbing stats", "", false},
+		{"breadcrumb", "<text>", false},
+	}
+	byName := map[string]struct {
+		Name         string
+		Kind         string
+		Usage        string
+		OutputSchema json.RawMessage
+	}{}
+	for _, v := range m.Verbs {
+		byName[v.Name] = struct {
+			Name         string
+			Kind         string
+			Usage        string
+			OutputSchema json.RawMessage
+		}{v.Name, v.Kind, v.Usage, v.OutputSchema}
+	}
+
+	for _, c := range cases {
+		v, ok := byName[c.name]
+		if !ok {
+			t.Errorf("manifest carries no verb named %q", c.name)
+			continue
+		}
+		if v.Kind != "plumbing" {
+			t.Errorf("%s: kind = %q, want plumbing (C3.2)", c.name, v.Kind)
+		}
+		if v.Usage != c.wantUsage {
+			t.Errorf("%s: usage = %q, want %q (C3.8)", c.name, v.Usage, c.wantUsage)
+		}
+		gotSchema := len(v.OutputSchema) > 0
+		if gotSchema != c.wantSchema {
+			t.Errorf("%s: outputSchema present = %v, want %v (V35/C3.7)", c.name, gotSchema, c.wantSchema)
+		}
+		if gotSchema {
+			var probe any
+			if err := json.Unmarshal(v.OutputSchema, &probe); err != nil {
+				t.Errorf("%s: outputSchema is not valid JSON: %v", c.name, err)
+			}
+		}
+	}
+}
+
+// TestSeal_FiltersComposeAcrossEveryAxis seeds a fixture journal with
+// sessions that differ on every axis `sessions` filters (state, harness,
+// project, machine, day, since) and drives one call combining all of
+// them at once — the composition property step-02's shared Filter layer
+// exists for, exercised end to end through the built binary rather than
+// only unit-tested against internal/query directly.
+func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
+	fx := journaltest.New(t)
+
+	target := journal.SessionKey{Harness: "claude", NativeID: "target-01"}
+	fx.Curated("2026-09-11", target,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "target"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "the one that matches everything",
+	).WithProject("2026-09-11", target, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+		WithMachine("2026-09-11", target, "framework")
+
+	// Differs on state (dismissed, not curated).
+	wrongState := journal.SessionKey{Harness: "claude", NativeID: "wrong-state-01"}
+	fx.Dismissed("2026-09-11", wrongState,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "ws"},
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 5, 0, time.UTC),
+		"framework", "manual",
+	).WithProject("2026-09-11", wrongState, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+		WithMachine("2026-09-11", wrongState, "framework")
+
+	// Differs on harness (codex, not claude).
+	wrongHarness := journal.SessionKey{Harness: "codex", NativeID: "wrong-harness-01"}
+	fx.Curated("2026-09-11", wrongHarness,
+		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 10, SHA256: "wh"},
+		time.Date(2026, 9, 11, 9, 15, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 15, 0, 0, time.UTC),
+		"framework", "wrong harness",
+	).WithProject("2026-09-11", wrongHarness, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+		WithMachine("2026-09-11", wrongHarness, "framework")
+
+	// Differs on day (09-10, not 09-11).
+	wrongDay := journal.SessionKey{Harness: "claude", NativeID: "wrong-day-01"}
+	fx.Curated("2026-09-10", wrongDay,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wd"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC),
+		"framework", "wrong day",
+	).WithProject("2026-09-10", wrongDay, journal.SessionProject{ID: "01P", Slug: "clast", Clone: "01C", Label: "dev", Path: "/x"}).
+		WithMachine("2026-09-10", wrongDay, "framework")
+
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+	r := run(t, env, "plumbing", "sessions",
+		"--state", "curated",
+		"--harness", "claude",
+		"--project", "clast",
+		"--machine", "framework",
+		"--day", "2026-09-11",
+		"--since", "all",
+		"--json",
+	)
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing sessions (composed filters): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Sessions []struct {
+			SessionID string `json:"session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Sessions) != 1 || payload.Sessions[0].SessionID != target.NativeID {
+		t.Fatalf("composed filter result = %+v, want exactly %q", payload.Sessions, target.NativeID)
+	}
+}
+
+// TestSeal_V34CodesEndToEnd drives one representative case per V34 code
+// this Matter's verbs raise, confirming the code and the exit category
+// (C2.4) together, end to end through the built binary.
+func TestSeal_V34CodesEndToEnd(t *testing.T) {
+	fx := journaltest.New(t)
+	a := journal.SessionKey{Harness: "claude", NativeID: "ambiguous-a"}
+	b := journal.SessionKey{Harness: "claude", NativeID: "ambiguous-b"}
+	fx.Captured("2026-09-10", a, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"}, time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC))
+	fx.Captured("2026-09-10", b, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "b"}, time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC))
+	unrendered := journal.SessionKey{Harness: "codex", NativeID: "unrendered"}
+	fx.Captured("2026-09-10", unrendered, journal.TranscriptFingerprint{Format: "nonexistent-format", Lines: 1, SHA256: "c"}, time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)).
+		WithTranscript("2026-09-10", unrendered, []byte("x"))
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	unregisteredDir := initGitRepo(t, "unregistered-seal")
+
+	cases := []struct {
+		name     string
+		args     []string
+		env      []string
+		dir      string
+		wantCode string
+		wantExit int
+	}{
+		{"not-found.session", []string{"plumbing", "show", "claude-nonexistent", "--json"}, env, "", "not-found.session", 1},
+		{"validation.ambiguous-locator", []string{"plumbing", "show", "claude-ambiguous", "--json"}, env, "", "validation.ambiguous-locator", 1},
+		{"validation.unknown-harness", []string{"plumbing", "sessions", "--harness", "no-such-harness", "--json"}, env, "", "validation.unknown-harness", 1},
+		{"validation.unknown-transcript-format", []string{"plumbing", "show", unrendered.DirName(), "--transcript", "--json"}, env, "", "validation.unknown-transcript-format", 1},
+		{"refusal.unknown-clone", []string{"breadcrumb", "a note", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, unregisteredDir, "refusal.unknown-clone", 3},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := runIn(t, c.dir, c.env, c.args...)
+			if r.exitCode != c.wantExit {
+				t.Fatalf("exit=%d, want %d; stderr=%q", r.exitCode, c.wantExit, r.stderr)
+			}
+			envelope := parseErrorEnvelope(t, r.stderr)
+			if envelope.Error.Code != c.wantCode {
+				t.Fatalf("error code = %q, want %q", envelope.Error.Code, c.wantCode)
+			}
+		})
+	}
+}
+
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
 // under it (V2: plumbing verbs are never porcelain).
