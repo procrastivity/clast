@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Render a day-by-project retrospective of captured sessions, curated entries, and breadcrumbs. Use when the user says retro, asks for a look back at a day or period, or wants a retrospective across every project active in it.
+description: "Render a day-by-project retrospective of captured sessions, curated entries, and breadcrumbs. Use when the user says retro, asks for a look back at a day or period, or wants a retrospective across every project active in it."
 ---
 
 # clast retro

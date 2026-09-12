@@ -28,9 +28,15 @@ func realManifest(t *testing.T) toolmanifest.Manifest {
 
 // wantPlumbingVerbs is every verb SURFACE V32 places in the `plumbing`
 // namespace as of this Matter's seed cards (query-verbs, state-verbs,
-// registry, shape-documents) — the exhaustive namespace list, so the test
-// fails the moment a real namespace verb goes missing from the table or a
-// namespace verb this list has not caught up with appears unlisted below.
+// registry, shape-documents) — the exhaustive namespace list, so
+// TestPlumbingVerbTable_EveryNamespaceVerbPresent fails the moment a
+// listed verb goes missing from the table. That test only checks presence
+// of what is listed here, so it does not by itself catch a real namespace
+// verb added since without this list catching up to name it; that
+// guarantee comes from skillmd_test.go's SKILL.md byte-goldens instead —
+// a new verb changes PlumbingVerbTable's rendered bytes, which are
+// embedded verbatim in every skill's golden, so those tests fail first
+// and force this list to catch up.
 var wantPlumbingVerbs = []string{
 	"plumbing capture",
 	"plumbing whereami",

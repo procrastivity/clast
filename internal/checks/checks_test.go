@@ -57,8 +57,8 @@ func installClean(t *testing.T, root *cobra.Command, build buildinfo.Info) strin
 }
 
 // addVerb registers a new verb under root's `plumbing` namespace, after a
-// clean install — the manifest, and so claudecode.Generate's output, now
-// differs from what got stamped (a verb added since install), Status's
+// clean install — the manifest, and so claudecode.GenerateSkill's output,
+// now differs from what got stamped (a verb added since install), Status's
 // binary-vs-stamp question (C4.6), independent of whatever the disk says.
 //
 // It nests the new verb under a `plumbing` group command (creating one if
@@ -391,6 +391,38 @@ func TestHarnessTargets_MissingSkillTree_NeverInstalledIsClean(t *testing.T) {
 	}
 	if hasCode(findings, MissingHarnessSpliceCode) {
 		t.Errorf("findings = %+v, want no %s on a never-installed host", findings, MissingHarnessSpliceCode)
+	}
+	if hasCode(findings, OrphanedHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want no %s on a never-installed host (no splice either) — F1's clean case, unchanged", findings, OrphanedHarnessSpliceCode)
+	}
+}
+
+// TestHarnessTargets_OrphanedSplice_AllTargetsMissing is F1's seal fix: a
+// SpliceCurrent hook surviving while every one of the harness's stamped
+// targets is Missing — the shape an uninstall interrupted between its
+// last-succeeding target and Unsplice leaves behind (internal/verbs/
+// uninstall.go walks targets in order and only reaches Unsplice once every
+// target has succeeded) — must not read as the same "never installed"
+// clean state TestHarnessTargets_MissingSkillTree_NeverInstalledIsClean
+// covers just above; the hook's mere presence proves install did run.
+func TestHarnessTargets_OrphanedSplice_AllTargetsMissing(t *testing.T) {
+	root, build := newFixture(t)
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("claudecode.Splice: %v", err)
+	}
+	// No skill target installed at all — the orphaned-splice shape.
+
+	findings, targets, err := HarnessTargets(root, build)
+	if err != nil {
+		t.Fatalf("HarnessTargets: %v", err)
+	}
+	for _, tg := range targets {
+		if tg.State != harness.Missing {
+			t.Fatalf("target %+v state = %q, want %q (fixture requires every target Missing)", tg, tg.State, harness.Missing)
+		}
+	}
+	if !hasCode(findings, OrphanedHarnessSpliceCode) {
+		t.Errorf("findings = %+v, want a %s finding", findings, OrphanedHarnessSpliceCode)
 	}
 }
 

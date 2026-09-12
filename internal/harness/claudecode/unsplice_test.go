@@ -133,7 +133,7 @@ func TestUnsplice_Golden_ExistingUnrelatedHooks(t *testing.T) {
 // independent hooks.SessionStart group a human (or another tool) added —
 // the case the emptied-group rule exists to protect: removing the shim's
 // own group must never touch a sibling group's hooks.
-const otherGroupFixture = `{"hooks":{"SessionStart":[{"matcher":"other","hooks":[{"type":"command","command":"echo other"}]},{"matcher":"","hooks":[{"type":"command","command":"command -v clast >/dev/null 2>&1 && (clast plumbing capture >/dev/null 2>&1 &); exit 0"}]}]}}`
+const otherGroupFixture = `{"hooks":{"SessionStart":[{"matcher":"other","hooks":[{"type":"command","command":"echo other"}]},{"matcher":"","hooks":[{"type":"command","command":"` + claudecode.ShimCommand + `"}]}]}}`
 
 // TestUnsplice_Golden_SiblingGroupUntouched proves the emptied-group rule
 // is scoped to the shim's own group: a sibling hooks.SessionStart group
@@ -161,7 +161,7 @@ func TestUnsplice_Golden_SiblingGroupUntouched(t *testing.T) {
 // *same* SessionStart group — the other-hooks-in-the-group half of the
 // emptied-group rule: removing the shim hook must leave the group in
 // place (its hooks array is not empty) and the sibling hook untouched.
-const sharedGroupFixture = `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"echo sibling"},{"type":"command","command":"command -v clast >/dev/null 2>&1 && (clast plumbing capture >/dev/null 2>&1 &); exit 0"}]}]}}`
+const sharedGroupFixture = `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"echo sibling"},{"type":"command","command":"` + claudecode.ShimCommand + `"}]}]}}`
 
 // TestUnsplice_Golden_SiblingHookInSameGroupUntouched covers a
 // SessionStart group that carries the shim hook plus another hook: the
@@ -182,6 +182,67 @@ func TestUnsplice_Golden_SiblingHookInSameGroupUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	goldenCompare(t, "unsplice/sibling_hook_in_same_group_untouched.json", got)
+}
+
+// TestUnsplice_Golden_HumanEmptyHooksContainer_CascadeDeletesTheHumanKey
+// pins F2's asymmetric round trip: unlike the wholly-absent-container case
+// (TestUnsplice_Golden_EmptyObjectSpliced, {} -> {}), a human's own
+// pre-existing empty "hooks":{} does not survive an install/uninstall
+// round trip. Splice auto-vivified the shim into it rather than around
+// it, so Unsplice's cascade — unable to tell "Splice created this" from
+// "this was already here" — deletes the human's key along with its own.
+// splice.go's Unsplice doc comment records this as the trade the cascade
+// buys, not a bug to silently work around.
+func TestUnsplice_Golden_HumanEmptyHooksContainer_CascadeDeletesTheHumanKey(t *testing.T) {
+	path := settingsFixture(t, []byte(humanEmptyHooksContainerFixture))
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	result, err := claudecode.Unsplice()
+	if err != nil {
+		t.Fatalf("Unsplice: %v", err)
+	}
+	if result.Status != claudecode.UnspliceStatusUnspliced {
+		t.Errorf("Status = %q, want %q", result.Status, claudecode.UnspliceStatusUnspliced)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldenCompare(t, "unsplice/human_empty_hooks_container_round_trip.json", got)
+	if string(got) == humanEmptyHooksContainerFixture {
+		t.Fatalf("settings.json = %s, want the human's \"hooks\":{} key gone (this pins F2's asymmetry as a known trade, not a desired restoration)", got)
+	}
+}
+
+// TestUnsplice_Golden_HumanEmptySessionStartArray_CascadeDeletesTheHumanKey
+// is the sibling shape: a human-authored "hooks":{"SessionStart":[]}
+// suffers the same fate — both keys are gone after the round trip, not
+// restored to their pre-install shape.
+func TestUnsplice_Golden_HumanEmptySessionStartArray_CascadeDeletesTheHumanKey(t *testing.T) {
+	path := settingsFixture(t, []byte(humanEmptySessionStartArrayFixture))
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	result, err := claudecode.Unsplice()
+	if err != nil {
+		t.Fatalf("Unsplice: %v", err)
+	}
+	if result.Status != claudecode.UnspliceStatusUnspliced {
+		t.Errorf("Status = %q, want %q", result.Status, claudecode.UnspliceStatusUnspliced)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldenCompare(t, "unsplice/human_empty_session_start_array_round_trip.json", got)
+	if string(got) == humanEmptySessionStartArrayFixture {
+		t.Fatalf("settings.json = %s, want the human's \"SessionStart\":[] key gone (this pins F2's asymmetry as a known trade, not a desired restoration)", got)
+	}
 }
 
 // TestUnsplice_ReinstallThenUninstallIsClean covers the "uninstall after a

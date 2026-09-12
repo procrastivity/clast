@@ -1,7 +1,12 @@
 package claudecode_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/procrastivity/clast/internal/buildinfo"
 	"github.com/procrastivity/clast/internal/cli"
@@ -24,6 +29,15 @@ var fixedBuild = buildinfo.Info{Version: "v0.0.0-test"}
 // that one is unexported.
 func skillMDManifest(t *testing.T) toolmanifest.Manifest {
 	t.Helper()
+	// F3: GenerateSkill resolves each skill's description/judgment
+	// through the asset chain (C5.1), which falls back to
+	// $XDG_CONFIG_HOME/clast (or $HOME/.config/clast when unset) when no
+	// override is set here. Left unpinned, a host that happens to carry
+	// its own claude-code skill override under that directory would
+	// silently change this golden's bytes — isolate every caller of this
+	// helper (both tests in this file) to a fresh, empty override dir.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	root := cli.NewRootCommand(iostreams.System(), fixedBuild)
 	m, err := toolmanifest.Build(root, fixedBuild)
 	if err != nil {
@@ -54,6 +68,59 @@ func TestGenerateSkill_Golden(t *testing.T) {
 			}
 			goldenCompare(t, "skillmd/"+name+".SKILL.md", got)
 		})
+	}
+}
+
+// TestGenerateSkill_DescriptionWithColon_YAMLQuoted is F5's regression
+// test: renderSkillMD used to emit `description: %s` unquoted, so a
+// description override containing ": " (allowed — resolveSkillDescription
+// only rejects empty or multi-line values) would reparse as a nested YAML
+// mapping key rather than plain scalar text, breaking frontmatter for any
+// YAML-aware consumer. This plants such an override on wake and asserts
+// the rendered frontmatter still parses as YAML with description carried
+// through exactly, byte for byte.
+func TestGenerateSkill_DescriptionWithColon_YAMLQuoted(t *testing.T) {
+	xdg := t.TempDir()
+	override := filepath.Join(xdg, "clast", "claude-code", "skills", "wake", "description.txt")
+	if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const desc = `Use when the task needs: focused review, or a "quoted" phrase, or a \backslash.`
+	if err := os.WriteFile(override, []byte(desc+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Not skillMDManifest(t): that helper pins its own fresh
+	// XDG_CONFIG_HOME (F3), which would clobber the override just
+	// written above. This test needs the opposite — its override must
+	// win — so it builds the manifest inline instead.
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	root := cli.NewRootCommand(iostreams.System(), fixedBuild)
+	m, err := toolmanifest.Build(root, fixedBuild)
+	if err != nil {
+		t.Fatalf("toolmanifest.Build: %v", err)
+	}
+	files, err := claudecode.GenerateSkill("wake", m)
+	if err != nil {
+		t.Fatalf("GenerateSkill: %v", err)
+	}
+	got, ok := files["SKILL.md"]
+	if !ok {
+		t.Fatalf("GenerateSkill(wake) = %+v, want a SKILL.md entry", files)
+	}
+
+	parts := strings.SplitN(string(got), "---\n", 3)
+	if len(parts) < 3 {
+		t.Fatalf("SKILL.md = %s, want a --- delimited frontmatter block", got)
+	}
+	var frontmatter struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	if err := yaml.Unmarshal([]byte(parts[1]), &frontmatter); err != nil {
+		t.Fatalf("frontmatter did not parse as YAML: %v\nfrontmatter:\n%s", err, parts[1])
+	}
+	if frontmatter.Description != desc {
+		t.Errorf("parsed description = %q, want %q", frontmatter.Description, desc)
 	}
 }
 

@@ -1,6 +1,6 @@
 ---
 name: brief
-description: Synthesize a working brief for the current or a named project from recent curated entries, today's breadcrumbs, and today's sessions. Use when the user says brief, asks what they were working on, wants to resume a project, or needs context restored before starting work.
+description: "Synthesize a working brief for the current or a named project from recent curated entries, today's breadcrumbs, and today's sessions. Use when the user says brief, asks what they were working on, wants to resume a project, or needs context restored before starting work."
 ---
 
 # clast brief

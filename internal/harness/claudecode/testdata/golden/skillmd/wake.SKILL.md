@@ -1,6 +1,6 @@
 ---
 name: wake
-description: Curate captured Claude Code sessions into durable journal entries — the daily catch-up flow. Use when the user says wake, asks for a morning briefing, wants to catch up on recent or yesterday's sessions, or asks to curate/review what happened across projects since they last looked.
+description: "Curate captured Claude Code sessions into durable journal entries — the daily catch-up flow. Use when the user says wake, asks for a morning briefing, wants to catch up on recent or yesterday's sessions, or asks to curate/review what happened across projects since they last looked."
 ---
 
 # clast wake

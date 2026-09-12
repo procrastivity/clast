@@ -1284,6 +1284,59 @@ func TestDoctor_InstallDriftLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("uninstall aborting before Unsplice leaves an orphaned splice; doctor flags it (F1)", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		// Remove the last-walked skill tree by hand — uninstall walks
+		// SkillNames in order (wake, brief, retro), so it removes wake
+		// and brief successfully, then finds retro Missing and errors
+		// out before it ever reaches Unsplice (internal/verbs/
+		// uninstall.go:80-96): the SessionStart hook survives.
+		if err := os.RemoveAll(filepath.Join(skills, "retro")); err != nil {
+			t.Fatal(err)
+		}
+
+		r := run(t, env, "uninstall", "claude-code", "--json")
+		if r.exitCode != 1 {
+			t.Fatalf("uninstall over a partially-missing harness: exit=%d, want 1 (not-found); stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+		}
+		envelope := parseErrorEnvelope(t, r.stderr)
+		if envelope.Error.Code != "not-found.harness-not-installed" {
+			t.Fatalf("error code = %q, want not-found.harness-not-installed", envelope.Error.Code)
+		}
+		for _, name := range []string{"wake", "brief"} {
+			if _, err := os.Stat(filepath.Join(skills, name)); !os.IsNotExist(err) {
+				t.Fatalf("uninstall stopped at retro (Missing), but %s was never removed", name)
+			}
+		}
+
+		// Every target now reads Missing — doctor used to read that as
+		// "never installed" and report nothing. But the hook is still
+		// there: an orphaned splice, not a clean host (F1).
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.orphaned-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.orphaned-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+
+		// Every later uninstall aborts the exact same way: wake is
+		// Missing too now, so it refuses not-found before even reaching
+		// retro again — the hook is never reachable via uninstall from
+		// here on; only hand-editing settings.json (or doctor's finding
+		// telling the user to) can remove it.
+		again := run(t, env, "uninstall", "claude-code", "--json")
+		if again.exitCode != 1 {
+			t.Fatalf("second uninstall: exit=%d, want 1 (not-found); stderr=%q", again.exitCode, again.stderr)
+		}
+		if code := parseErrorEnvelope(t, again.stderr).Error.Code; code != "not-found.harness-not-installed" {
+			t.Fatalf("second uninstall error code = %q, want not-found.harness-not-installed", code)
+		}
+	})
+
 	t.Run("uninstall returns to clean", func(t *testing.T) {
 		_, _, env := newEnv(t)
 		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {

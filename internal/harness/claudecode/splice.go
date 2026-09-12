@@ -278,14 +278,28 @@ const (
 // Splice itself auto-vivifies: if removing the group leaves
 // hooks.SessionStart itself an empty array, that key is removed; if that
 // then leaves "hooks" an empty object, that key is removed too. This is
-// what makes an install/uninstall round trip restore settings.json to
-// its exact pre-install bytes when the splice was the only change —
-// Splice creates "hooks"/"hooks.SessionStart" only when they were absent,
-// so Unsplice deletes them only when its own removal is what empties
-// them; a "hooks": {} or "hooks.SessionStart": [] a human wrote on
-// purpose before install never reaches Unsplice in the first place (there
-// would be no matching hook to find in it), so this cascade never fires
-// on content Unsplice did not itself just empty.
+// what makes an install/uninstall round trip restore settings.json to its
+// exact pre-install bytes when hooks/hooks.SessionStart were both wholly
+// absent before install: Splice created both from nothing, so Unsplice
+// deleting them again is exactly undoing that creation.
+//
+// The trade this buys, stated plainly (F2 — the prior wording here claimed
+// the opposite): Splice's sjson path write auto-vivifies straight INTO an
+// already-present empty container the exact same way it creates a new
+// one, so a settings.json a human wrote as `"hooks": {}` or `"hooks":
+// {"SessionStart": []}` before install *does* reach Unsplice — the shim
+// lands inside the human's own container, now indistinguishable from one
+// Splice made itself. The cascade has no way to tell "I created this"
+// from "this was already here, empty, on purpose," so it deletes the
+// human's key right along with its own: `{"hooks":{}}` before install
+// becomes `{}` after an install/uninstall round trip, not the human's
+// `{"hooks":{}}` restored, and the same happens to a pre-existing
+// `"hooks":{"SessionStart":[]}`. See splice_test.go/unsplice_test.go's
+// human_empty_hooks_container* and human_empty_session_start_array*
+// goldens for both shapes pinned byte-for-byte. This is accepted, not
+// fixed: telling the two cases apart would mean Splice recording which
+// containers it created versus reused, extra bookkeeping to protect an
+// empty container that carries no behavior of its own either way.
 //
 // The .bak Splice writes on a settings.json's first-ever splice is never
 // touched here — not restored over the current file, not deleted.
@@ -398,6 +412,9 @@ func removeShimEntry(data []byte, groupIdx, hookIdx int) ([]byte, error) {
 // writeBakOnce copies original to path+".bak", unless a .bak already
 // exists there — C4.8's one-time backup: the first splice ever preserves
 // the pre-splice file, and nothing after it ever overwrites that copy.
+// The .bak is written with path's own permission bits (F4), not a fixed
+// 0644: settings.json can carry secrets (API keys, tokens in env blocks),
+// so a backup copy must never be more permissive than the file it copies.
 func writeBakOnce(path string, original []byte) error {
 	bak := path + ".bak"
 	switch _, err := os.Stat(bak); {
@@ -406,7 +423,11 @@ func writeBakOnce(path string, original []byte) error {
 	case !os.IsNotExist(err):
 		return fmt.Errorf("claudecode: checking %q: %w", bak, err)
 	}
-	if err := os.WriteFile(bak, original, 0o644); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("claudecode: checking %q: %w", path, err)
+	}
+	if err := os.WriteFile(bak, original, info.Mode().Perm()); err != nil {
 		return fmt.Errorf("claudecode: writing %q: %w", bak, err)
 	}
 	return nil

@@ -23,8 +23,8 @@ type Drifted struct {
 }
 
 // Drift compares want — the checksums the current binary would generate,
-// e.g. from ChecksumFiles(claudecode.Generate(...)) — against a prior
-// install's stamp, and reports every file whose content moved (C4.7:
+// e.g. from ChecksumFiles(claudecode.GenerateSkill(name, ...)) — against a
+// prior install's stamp, and reports every file whose content moved (C4.7:
 // exhaustive, never just the first). This package exposes the comparison
 // and does not itself wire it into any verb.
 func Drift(want map[string]string, stamp Stamp) []Drifted {

@@ -67,6 +67,24 @@ const TamperedHarnessSpliceCode = "advisory.tampered-harness-splice"
 // installed (SURFACE V28, step-04) — see spliceDriftFindings.
 const MissingHarnessSpliceCode = "advisory.missing-harness-splice"
 
+// OrphanedHarnessSpliceCode is the advisory code for a harness's splice
+// target whose shim entry is present and current (harness.SpliceCurrent)
+// while every one of the harness's stamped targets is Missing (F1 seal
+// finding). This is the shape an interrupted `clast uninstall <harness>`
+// leaves behind: uninstall walks a harness's targets in order and only
+// calls Unsplice once every one of them has succeeded
+// (internal/verbs/uninstall.go); a target that refuses, or was already
+// gone, before Unsplice runs stops the whole command first, so the hook
+// is never reached and survives. Once that happens every later
+// `clast uninstall <harness>` aborts the same way (the same missing
+// target refuses again), so no clast verb can ever reach Unsplice for
+// that hook again — doctor is the only place left that can even notice
+// it, and its message says so plainly rather than naming a verb that
+// does not exist: hand-removal of the SessionStart hook from
+// settings.json is the only remedy. See spliceDriftFindings' SpliceCurrent
+// case.
+const OrphanedHarnessSpliceCode = "advisory.orphaned-harness-splice"
+
 // TargetState is one registered harness target's reported drift state —
 // the per-target fact doctor's --json and text output carry beside
 // findings (C4.5). A harness may carry more than one stamped target
@@ -96,7 +114,7 @@ type TargetState struct {
 // One registry walk gives both, because the state already needs each
 // target's install dir and generated files.
 //
-// Findings by state (C4.7: advisory codes never fail the run;
+// Findings by state (C4.7: advisory codes never fail the run; toolsmith's
 // docs/contract-v1-2-reconcile/decisions.md §1.5):
 //   - Current, Missing: no finding.
 //   - Stale: the per-file advisory.stale-harness-artifact findings, one
@@ -260,7 +278,14 @@ func missingTargetFindings(harnessName string, states []TargetState) []Finding {
 //     stamped targets is not Missing — an absent shim alongside a
 //     fully-uninstalled harness is the clean state, the same all-Missing
 //     exception missingTargetFindings applies to its own targets.
-//   - SpliceCurrent: no finding.
+//   - SpliceCurrent: no finding, unless every one of the harness's
+//     stamped targets is Missing too (F1) — an orphaned hook an
+//     interrupted uninstall left behind with no target left to prove it,
+//     reported as advisory.orphaned-harness-splice. Unlike SpliceAbsent's
+//     all-Missing case (genuinely clean: nothing was ever installed and
+//     nothing was ever spliced), a *present, current* hook alongside
+//     all-Missing targets proves install did run — the hook just outlived
+//     the targets it was installed for.
 func spliceDriftFindings(harnessName string, states []TargetState, probe func() (harness.SpliceProbe, error)) ([]Finding, error) {
 	p, err := probe()
 	if err != nil {
@@ -290,7 +315,14 @@ func spliceDriftFindings(harnessName string, states []TargetState, probe func() 
 				harnessName, p.Path, harnessName),
 		}}, nil
 	default: // harness.SpliceCurrent
-		return nil, nil
+		if anyInstallEvidence(states) {
+			return nil, nil
+		}
+		return []Finding{{
+			Code: OrphanedHarnessSpliceCode,
+			Message: fmt.Sprintf("found: %s carries a clast SessionStart hook but no %s skills are installed; no clast verb can safely remove it — remove the hook from %s's hooks.SessionStart array by hand",
+				p.Path, harnessName, p.Path),
+		}}, nil
 	}
 }
 
@@ -324,7 +356,7 @@ func staleFileFindings(harnessName, dir string, files map[string][]byte) ([]Find
 
 // driftFindingCodes gives doctor's finding code for each unsafe state.
 // Only incompatible fails the run, so it alone keeps the refusal code;
-// the other two are advisory (C4.7,
+// the other two are advisory (C4.7, toolsmith's
 // docs/contract-v1-2-reconcile/decisions.md §1.5).
 var driftFindingCodes = map[harness.State]string{
 	harness.UnownedConflict: "advisory.unowned-harness-target",

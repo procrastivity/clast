@@ -161,6 +161,36 @@ func GenerateSkill(name string, m manifest.Manifest) (map[string][]byte, error) 
 	}, nil
 }
 
+// yamlQuoteScalar renders s as a YAML double-quoted flow scalar (F5):
+// description rides into SKILL.md's YAML frontmatter unquoted before this
+// fix, but description is not a Go constant — it resolves through the
+// asset chain (C5.1), so a user override can contain arbitrary one-line
+// text (resolveSkillDescription only rejects empty or multi-line values).
+// An override containing ": " — e.g. "Use when the task needs: focused
+// review" — would reparse as a nested YAML mapping under the description
+// key instead of a plain scalar, breaking frontmatter a YAML-aware
+// consumer needs to parse. Double-quoting is the cheapest sound fix here:
+// tightening resolveSkillDescription's validation instead would mean
+// deciding which of YAML's many special leading/embedded characters
+// (":", "#", "&", "*", "!", "|", ">", "%", "@", leading "-", "?") to ban,
+// an open-ended and still-incomplete list, versus quoting once here and
+// being correct for all of them. Only backslash and the double-quote
+// itself need escaping: resolveSkillDescription has already ruled out
+// embedded newlines/carriage returns, the only other characters YAML's
+// double-quoted style would otherwise ask to be escaped.
+func yamlQuoteScalar(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		if r == '\\' || r == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 // renderSkillMD assembles one skill's SKILL.md: frontmatter (name +
 // description), a generated header naming the source manifest, this
 // skill's judgment prose, and the generated plumbing verb table. Headings
@@ -172,7 +202,7 @@ func renderSkillMD(name string, m manifest.Manifest, description string, judgmen
 
 	fmt.Fprintf(&b, "---\n")
 	fmt.Fprintf(&b, "name: %s\n", name)
-	fmt.Fprintf(&b, "description: %s\n", description)
+	fmt.Fprintf(&b, "description: %s\n", yamlQuoteScalar(description))
 	fmt.Fprintf(&b, "---\n\n")
 
 	fmt.Fprintf(&b, "# %s %s\n\n", m.Tool.Name, name)

@@ -219,6 +219,80 @@ func TestSplice_MalformedSettings_ValidationError(t *testing.T) {
 	}
 }
 
+// humanEmptyHooksContainerFixture and humanEmptySessionStartArrayFixture
+// are settings.json shapes a human wrote on purpose before install: an
+// empty "hooks" object, and one with an explicit but empty "SessionStart"
+// array. F2: splice.go's Unsplice doc comment used to claim these "never
+// reach Unsplice" — false. Splice's sjson path write auto-vivifies straight
+// into an already-present empty container the same way it creates one
+// from scratch, so the shim lands inside the human's own key, and
+// Unsplice's emptied-container cascade — which cannot tell "Splice made
+// this" from "this was already here" — deletes it right along with its
+// own additions on uninstall. See the golden round-trip tests below (this
+// file for the post-Splice half, unsplice_test.go for the full round
+// trip) for both shapes pinned byte-for-byte.
+const (
+	humanEmptyHooksContainerFixture    = `{"model":"opus","hooks":{}}`
+	humanEmptySessionStartArrayFixture = `{"model":"opus","hooks":{"SessionStart":[]}}`
+)
+
+// TestSplice_Golden_HumanEmptyHooksContainer pins what Splice writes when
+// a human already authored an empty "hooks":{} container before install —
+// the shim lands inside that same container rather than beside it.
+func TestSplice_Golden_HumanEmptyHooksContainer(t *testing.T) {
+	path := settingsFixture(t, []byte(humanEmptyHooksContainerFixture))
+
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldenCompare(t, "splice/human_empty_hooks_container.json", got)
+}
+
+// TestSplice_Golden_HumanEmptySessionStartArray pins the sibling shape: a
+// human-authored "hooks":{"SessionStart":[]} — the shim is appended into
+// that same empty array rather than a fresh one.
+func TestSplice_Golden_HumanEmptySessionStartArray(t *testing.T) {
+	path := settingsFixture(t, []byte(humanEmptySessionStartArrayFixture))
+
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldenCompare(t, "splice/human_empty_session_start_array.json", got)
+}
+
+// TestSplice_BakPreservesOriginalPermissions asserts the .bak Splice
+// writes on a settings.json's first-ever splice carries the same
+// permission bits as the original file, not a fixed 0644 — settings.json
+// can carry secrets, so a .bak must never widen its mode (F4).
+func TestSplice_BakPreservesOriginalPermissions(t *testing.T) {
+	path := settingsFixture(t, []byte(unrelatedHooksFixture))
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := claudecode.Splice(); err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	info, err := os.Stat(path + ".bak")
+	if err != nil {
+		t.Fatalf("stat .bak: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf(".bak mode = %o, want 0600 (matching the original settings.json)", perm)
+	}
+}
+
 // TestSpliceStatus_NoSettingsFile asserts SpliceStatus reads a wholly
 // absent settings.json the same way Splice treats it as `{}`: SpliceAbsent,
 // not SpliceMalformed — checks.go, not this probe, decides whether that is
