@@ -1,6 +1,7 @@
 package entry
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,46 @@ func TestParse_MissingTitleKeyRefused(t *testing.T) {
 	_, err := Parse([]byte("---\ntags: []\n---\n\nbody\n"))
 	if err == nil {
 		t.Fatal("Parse: want an error when the title key is absent entirely")
+	}
+}
+
+// TestParse_ErrorSentinels_DistinguishFrontmatterFromTitle asserts that
+// errors.Is can tell V14's two validation conditions apart (state-verbs
+// step 02: curate's command layer reports them under separate codes,
+// validation.entry-frontmatter vs validation.entry-title, because a
+// skill acting on the failure wants to know which one).
+func TestParse_ErrorSentinels_DistinguishFrontmatterFromTitle(t *testing.T) {
+	frontmatterCases := map[string][]byte{
+		"missing opening delimiter": []byte("title: no fence\n---\n\nbody\n"),
+		"missing closing delimiter": []byte("---\ntitle: unterminated\n\nbody\n"),
+		"malformed yaml":            []byte("---\ntitle: [unterminated\n---\n\nbody\n"),
+	}
+	for name, data := range frontmatterCases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse(data)
+			if !errors.Is(err, ErrInvalidFrontmatter) {
+				t.Errorf("Parse error = %v, want errors.Is(err, ErrInvalidFrontmatter)", err)
+			}
+			if errors.Is(err, ErrMissingTitle) {
+				t.Errorf("Parse error = %v, want NOT errors.Is(err, ErrMissingTitle)", err)
+			}
+		})
+	}
+
+	titleCases := map[string][]byte{
+		"empty title":       []byte("---\ntitle: \"\"\ntags: []\n---\n\nbody\n"),
+		"missing title key": []byte("---\ntags: []\n---\n\nbody\n"),
+	}
+	for name, data := range titleCases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Parse(data)
+			if !errors.Is(err, ErrMissingTitle) {
+				t.Errorf("Parse error = %v, want errors.Is(err, ErrMissingTitle)", err)
+			}
+			if errors.Is(err, ErrInvalidFrontmatter) {
+				t.Errorf("Parse error = %v, want NOT errors.Is(err, ErrInvalidFrontmatter)", err)
+			}
+		})
 	}
 }
 
