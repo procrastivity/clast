@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -73,7 +74,14 @@ type result struct {
 // tree currently shells out to a real $EDITOR against the host's temp dir
 // (F2 removed the one path that did), but a stray future child process
 // picking up the host's own TMPDIR is exactly the same class of leak.
-// Add each new harness's seam var to this list when adding a target.
+// CLAST_CLAUDE_SETTINGS_PATH gets the same treatment as of the splice
+// (V32/V33): unset, an install/doctor run would otherwise read and write
+// this host's own ~/.claude/settings.json. Its default points at a path
+// under a fresh temp dir, not an existing file — Splice treats a missing
+// settings.json as `{}` (SURFACE V32/C4.8), so tests that want to start
+// from an existing fixture write one at that same path themselves before
+// invoking the binary. Add each new harness's seam var to this list when
+// adding a target.
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append(os.Environ(), env...)
@@ -88,6 +96,16 @@ func hermeticEnv(t *testing.T, env []string) []string {
 		if !set {
 			out = append(out, name+"="+t.TempDir())
 		}
+	}
+	settingsSet := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "CLAST_CLAUDE_SETTINGS_PATH=") {
+			settingsSet = true
+			break
+		}
+	}
+	if !settingsSet {
+		out = append(out, "CLAST_CLAUDE_SETTINGS_PATH="+filepath.Join(t.TempDir(), "settings.json"))
 	}
 	return out
 }
@@ -260,34 +278,100 @@ func TestManifest_IsDeterministic(t *testing.T) {
 	}
 }
 
-// TestInstallLoop drives the full install lifecycle against a hermetic
-// skills dir: install writes a stamped tree, a re-install reports current,
-// a hand-edit flips install to a refusal (exit 3) and doctor keeps
-// advising, --force recovers, and uninstall removes exactly the tree.
+// claudeCodeSkillNames is the exhaustive SURFACE V32 skill set, in order —
+// this file's own copy of internal/harness/claudecode.SkillNames, since an
+// e2e test drives the built binary as a black box and does not import the
+// package under test.
+var claudeCodeSkillNames = []string{"wake", "brief", "retro"}
+
+// TestInstallLoop drives the fresh-install half of the lifecycle against a
+// hermetic skills dir and settings.json path: install writes three
+// stamped skill trees plus the settings.json splice (SURFACE V32/V33,
+// C4.8). The re-install, hand-edit/--force, uninstall, and uninstall
+// round-trip halves are each their own test below.
 func TestInstallLoop(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	for _, name := range claudeCodeSkillNames {
+		skillDir := filepath.Join(skills, name)
+		for _, f := range []string{"SKILL.md", ".clast-manifest-stamp.json"} {
+			if _, err := os.Stat(filepath.Join(skillDir, f)); err != nil {
+				t.Fatalf("after install, %s/%s: %v", name, f, err)
+			}
+		}
+	}
+	settingsAfterFirstInstall, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("after install, reading %s: %v", settingsPath, err)
+	}
+	if !strings.Contains(string(settingsAfterFirstInstall), `"SessionStart"`) {
+		t.Fatalf("settings.json = %s, want a spliced SessionStart hook", settingsAfterFirstInstall)
+	}
+	if n := strings.Count(string(settingsAfterFirstInstall), "clast plumbing capture"); n != 1 {
+		t.Fatalf("settings.json names the shim command %d time(s), want exactly 1: %s", n, settingsAfterFirstInstall)
+	}
+	// settingsPath did not exist before this install (Splice treats a
+	// missing file as `{}`), so there was nothing to back up: no .bak.
+	if _, err := os.Stat(settingsPath + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf(".bak stat = %v, want IsNotExist — a .bak is only written when a settings.json existed before the splice", err)
+	}
+}
+
+// TestInstallLoop_ReinstallIsCurrentAndIdempotent covers the re-install
+// half of the lifecycle separately from the fresh-install shape above: a
+// second `install claude-code` reports every skill current, doctor is
+// clean, and the shim is not duplicated in settings.json.
+func TestInstallLoop_ReinstallIsCurrentAndIdempotent(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+
+	r := run(t, env, "install", "claude-code", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("re-install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if n := strings.Count(r.stdout, `"status":"current"`); n != len(claudeCodeSkillNames) {
+		t.Fatalf("re-install stdout = %q, want %d skills reporting current", r.stdout, len(claudeCodeSkillNames))
+	}
+	if !strings.Contains(r.stdout, `"status":"already-spliced"`) {
+		t.Fatalf("re-install stdout = %q, want the splice reporting already-spliced", r.stdout)
+	}
+
+	settingsAfterReinstall, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", settingsPath, err)
+	}
+	if n := strings.Count(string(settingsAfterReinstall), "clast plumbing capture"); n != 1 {
+		t.Fatalf("settings.json names the shim command %d time(s) after a re-install, want exactly 1 (idempotent, C4.8): %s", n, settingsAfterReinstall)
+	}
+
+	if r := run(t, env, "doctor"); r.exitCode != 0 {
+		t.Fatalf("doctor on a current install: exit=%d stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+	}
+}
+
+// TestInstallLoop_HandEditRefusesThenForceRecovers covers the refusal half
+// of the lifecycle: a hand-edited skill flips install to a refusal (exit
+// 3) and --force recovers it.
+func TestInstallLoop_HandEditRefusesThenForceRecovers(t *testing.T) {
 	skills := t.TempDir()
 	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills}
 
 	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
 		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
-	skillDir := filepath.Join(skills, "clast")
-	for _, f := range []string{"SKILL.md", ".claude-plugin/plugin.json", ".clast-manifest-stamp.json"} {
-		if _, err := os.Stat(filepath.Join(skillDir, f)); err != nil {
-			t.Fatalf("after install, %s: %v", f, err)
-		}
-	}
 
-	if r := run(t, env, "install", "claude-code", "--json"); r.exitCode != 0 || !strings.Contains(r.stdout, `"status":"current"`) {
-		t.Fatalf("re-install: exit=%d stdout=%q, want status current", r.exitCode, r.stdout)
-	}
-
-	if r := run(t, env, "doctor"); r.exitCode != 0 {
-		t.Fatalf("doctor on a current install: exit=%d stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
-	}
-
-	skillMD := filepath.Join(skillDir, "SKILL.md")
-	if err := os.WriteFile(skillMD, []byte("hand-edited\n"), 0o644); err != nil {
+	wakeMD := filepath.Join(skills, "wake", "SKILL.md")
+	if err := os.WriteFile(wakeMD, []byte("hand-edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if r := run(t, env, "install", "claude-code"); r.exitCode != 3 {
@@ -296,12 +380,177 @@ func TestInstallLoop(t *testing.T) {
 	if r := run(t, env, "install", "claude-code", "--force"); r.exitCode != 0 {
 		t.Fatalf("install --force: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
+}
+
+// TestUninstallLoop_RemovesExactlyTheThreeSkillTreesAndUnsplices asserts
+// uninstall removes every one of the three skill directories install
+// wrote, and also reverses the settings.json splice (step-03): the shim
+// command is gone, and the one-time .bak install wrote is left exactly as
+// it was — uninstall never restores or deletes it (it is the user's
+// file).
+func TestUninstallLoop_RemovesExactlyTheThreeSkillTreesAndUnsplices(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	const preInstall = `{"env":{"FOO":"bar"}}`
+	if err := os.WriteFile(settingsPath, []byte(preInstall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	bakAfterInstall, err := os.ReadFile(settingsPath + ".bak")
+	if err != nil {
+		t.Fatalf("reading .bak after install: %v", err)
+	}
+	if string(bakAfterInstall) != preInstall {
+		t.Fatalf(".bak after install = %s, want the pre-install bytes verbatim", bakAfterInstall)
+	}
+
+	r := run(t, env, "uninstall", "claude-code", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, `"status":"unspliced"`) {
+		t.Fatalf("uninstall stdout = %q, want the splice reporting unspliced", r.stdout)
+	}
+	for _, name := range claudeCodeSkillNames {
+		skillDir := filepath.Join(skills, name)
+		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+			t.Fatalf("after uninstall, %s still exists", skillDir)
+		}
+	}
+
+	afterUninstall, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(afterUninstall), "clast plumbing capture") {
+		t.Fatalf("settings.json after uninstall = %s, still carries the shim command", afterUninstall)
+	}
+
+	bakAfterUninstall, err := os.ReadFile(settingsPath + ".bak")
+	if err != nil {
+		t.Fatalf("reading .bak after uninstall: %v", err)
+	}
+	if string(bakAfterUninstall) != string(bakAfterInstall) {
+		t.Fatalf(".bak changed across uninstall — it is the user's file and must never be touched: before=%s after=%s", bakAfterInstall, bakAfterUninstall)
+	}
+}
+
+// TestUninstallLoop_RoundTripRestoresSettingsByteIdentical is the full
+// install-then-uninstall round trip: given a pre-install settings.json
+// fixture where the splice is the only change install makes, uninstall
+// must restore settings.json to those exact pre-install bytes (the
+// emptied-group cascade undoing exactly what Splice's auto-vivification
+// added) and leave no skill trees behind.
+// projection's own step-05 seal sweep grows this test into the Matter's
+// full cross-verb smoke: install -> doctor clean -> uninstall -> doctor
+// clean -> settings byte-identical, in one chain, rather than the two
+// halves TestDoctor_InstallDriftLifecycle's "clean install"/"uninstall
+// returns to clean" subtests and this test's own settings-restoration
+// assertion previously proved in isolation from each other.
+func TestUninstallLoop_RoundTripRestoresSettingsByteIdentical(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	const preInstall = `{
+  "env": {
+    "FOO": "bar"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo pre"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	if err := os.WriteFile(settingsPath, []byte(preInstall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+
+	if codes, exit := doctorFindings(t, env); len(codes) != 0 || exit != 0 {
+		t.Fatalf("doctor after install: findings=%v exit=%d, want none and 0", codes, exit)
+	}
 
 	if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
 		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
-	if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
-		t.Fatalf("after uninstall, %s still exists", skillDir)
+
+	for _, name := range claudeCodeSkillNames {
+		skillDir := filepath.Join(skills, name)
+		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+			t.Fatalf("after uninstall, %s still exists", skillDir)
+		}
+	}
+
+	if codes, exit := doctorFindings(t, env); len(codes) != 0 || exit != 0 {
+		t.Fatalf("doctor after uninstall: findings=%v exit=%d, want none and 0", codes, exit)
+	}
+
+	afterRoundTrip, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterRoundTrip) != preInstall {
+		t.Fatalf("settings.json after install+uninstall = %s, want the pre-install bytes restored exactly:\n%s", afterRoundTrip, preInstall)
+	}
+}
+
+// TestUninstallLoop_AbsentHookIsNoOp asserts uninstalling a harness whose
+// settings.json exists but has never been spliced (or was already
+// unspliced by hand) is a no-op for the splice half, not a diagnostic —
+// symmetric with Splice's own already-spliced idempotency. The skill
+// trees are removed as usual; only the splice side is exercised here via
+// a settings.json that carries no shim hook at all.
+func TestUninstallLoop_AbsentHookIsNoOp(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	const noHook = `{"env":{"FOO":"bar"}}`
+	if err := os.WriteFile(settingsPath, []byte(noHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	// Undo just the splice by hand, simulating a settings.json a human
+	// already cleaned up, then uninstall — the skill trees are still
+	// present, but there is no hook left for Unsplice to find.
+	if err := os.WriteFile(settingsPath, []byte(noHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := run(t, env, "uninstall", "claude-code", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, `"status":"not-spliced"`) {
+		t.Fatalf("uninstall stdout = %q, want the splice reporting not-spliced (no-op)", r.stdout)
+	}
+
+	afterUninstall, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterUninstall) != noHook {
+		t.Fatalf("settings.json changed on a no-op unsplice: got %s, want %s untouched", afterUninstall, noHook)
 	}
 }
 
@@ -347,23 +596,30 @@ func parseErrorEnvelope(t *testing.T, stderr string) errorEnvelope {
 	return envelope
 }
 
-// installClean installs claude-code cleanly into skills and returns its
-// install directory, the fixture every refusing-state setup below starts
-// from.
+// installClean installs claude-code cleanly (all three skills, plus the
+// splice) into skills and returns the wake skill's install directory — the
+// fixture every refusing-state setup below starts from and mutates. wake
+// stands in for "the" claude-code target the way the chassis's one skill
+// used to (it is always SkillNames' first entry, so install and uninstall
+// both reach it first too); brief and retro install alongside it,
+// untouched by whatever a fixture does to wake's tree afterward.
 func installClean(t *testing.T, skills string, env []string) string {
 	t.Helper()
 	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
 		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}
-	return filepath.Join(skills, "clast")
+	return filepath.Join(skills, "wake")
 }
 
-// makeUnownedConflict puts a file at claude-code's install path with no
-// stamp beside it — Status's UnownedConflict: content the tool never
-// wrote (C4.5).
+// makeUnownedConflict puts a file at claude-code's wake install path with
+// no stamp beside it — Status's UnownedConflict: content the tool never
+// wrote (C4.5). It does not install anything first, so brief and retro
+// stay entirely absent (Missing) — irrelevant to every case that uses this
+// fixture, since install/uninstall both stop at the first refusing
+// target, which is wake.
 func makeUnownedConflict(t *testing.T, skills string, _ []string) string {
 	t.Helper()
-	skillDir := filepath.Join(skills, "clast")
+	skillDir := filepath.Join(skills, "wake")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +629,7 @@ func makeUnownedConflict(t *testing.T, skills string, _ []string) string {
 	return skillDir
 }
 
-// makeModified installs cleanly, then hand-edits a generated file —
+// makeModified installs cleanly, then hand-edits wake's generated file —
 // Status's Modified: the disk no longer matches the stamp (C4.5).
 func makeModified(t *testing.T, skills string, env []string) string {
 	t.Helper()
@@ -384,9 +640,9 @@ func makeModified(t *testing.T, skills string, env []string) string {
 	return skillDir
 }
 
-// makeIncompatibleUnparseable installs cleanly, then corrupts the stamp's
-// JSON — Status's Incompatible via manifest.ErrStampUnparseable (C4.5,
-// §1.2).
+// makeIncompatibleUnparseable installs cleanly, then corrupts wake's
+// stamp's JSON — Status's Incompatible via manifest.ErrStampUnparseable
+// (C4.5, §1.2).
 func makeIncompatibleUnparseable(t *testing.T, skills string, env []string) string {
 	t.Helper()
 	skillDir := installClean(t, skills, env)
@@ -397,7 +653,7 @@ func makeIncompatibleUnparseable(t *testing.T, skills string, env []string) stri
 	return skillDir
 }
 
-// makeIncompatibleSchemaVersion installs cleanly, then rewrites the
+// makeIncompatibleSchemaVersion installs cleanly, then rewrites wake's
 // stamp's schemaVersion to a value this binary does not recognize —
 // Status's Incompatible via the schemaVersion mismatch (C4.5, §1.2).
 func makeIncompatibleSchemaVersion(t *testing.T, skills string, env []string) string {
@@ -425,7 +681,11 @@ func makeIncompatibleSchemaVersion(t *testing.T, skills string, env []string) st
 
 // refusalCases is the fixture table both TestInstall_RefusalCodes and
 // TestUninstall_RefusalCodes drive: one row per refusing state, each
-// naming the code Status maps it to (C4.5 §1.4).
+// naming the code Status maps it to (C4.5 §1.4). Every fixture acts on
+// the wake skill only — install and uninstall both walk a harness's
+// targets in SkillNames order and stop at the first refusal, so a refusal
+// planted on wake (the first target) reproduces the same single-target
+// refusal behavior the chassis's one skill always had.
 var refusalCases = []struct {
 	name  string
 	setup func(t *testing.T, skills string, env []string) string
@@ -505,7 +765,7 @@ func TestUninstall_RefusalCodes(t *testing.T) {
 func TestUninstall_EmptyDirNoStamp_NotFound(t *testing.T) {
 	skills := t.TempDir()
 	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills}
-	skillDir := filepath.Join(skills, "clast")
+	skillDir := filepath.Join(skills, "wake")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -521,9 +781,11 @@ func TestUninstall_EmptyDirNoStamp_NotFound(t *testing.T) {
 }
 
 // TestInstall_MalformedDescriptionOverride pins the error for a user
-// override of the skill description that is empty or spans lines: a
+// override of a skill description that is empty or spans lines: a
 // structured validation code with exit 1, not a plain error that the
-// fallback path reports as usage (C2.4, C2.5).
+// fallback path reports as usage (C2.4, C2.5). It overrides wake's
+// description specifically — wake is SkillNames' first entry, so install
+// reaches it (and so this override) before brief or retro.
 func TestInstall_MalformedDescriptionOverride(t *testing.T) {
 	for name, content := range map[string]string{
 		"two lines": "first line\nsecond line\n",
@@ -531,7 +793,7 @@ func TestInstall_MalformedDescriptionOverride(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			xdg := t.TempDir()
-			override := filepath.Join(xdg, "clast", "templates", "skills", "claude-code", "description.txt")
+			override := filepath.Join(xdg, "clast", "claude-code", "skills", "wake", "description.txt")
 			if err := os.MkdirAll(filepath.Dir(override), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -603,19 +865,95 @@ func TestInstallAll_OneRefused(t *testing.T) {
 	}
 }
 
+// TestInstallAll_HappyPath drives the bare `install` (no harness name)
+// path against a clean host: claude-code's result nests all three skill
+// targets and the splice, aggregated "installed" on the first run and
+// "current"/"already-spliced" on the second.
+func TestInstallAll_HappyPath(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	type target struct {
+		Target string `json:"target"`
+		Dir    string `json:"dir"`
+		Status string `json:"status"`
+	}
+	type splice struct {
+		Path   string `json:"path"`
+		Status string `json:"status"`
+	}
+	type harnessResult struct {
+		Harness string   `json:"harness"`
+		Status  string   `json:"status"`
+		Targets []target `json:"targets"`
+		Splice  *splice  `json:"splice"`
+	}
+	var payload struct {
+		Results []harnessResult `json:"results"`
+	}
+
+	first := run(t, env, "install", "--json")
+	if first.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", first.exitCode, first.stderr)
+	}
+	if err := json.Unmarshal([]byte(first.stdout), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, first.stdout)
+	}
+	if len(payload.Results) != 1 || payload.Results[0].Harness != "claude-code" {
+		t.Fatalf("results = %+v, want exactly one claude-code result", payload.Results)
+	}
+	cc := payload.Results[0]
+	if cc.Status != "installed" {
+		t.Errorf("status = %q, want installed", cc.Status)
+	}
+	if len(cc.Targets) != len(claudeCodeSkillNames) {
+		t.Fatalf("targets = %+v, want %d", cc.Targets, len(claudeCodeSkillNames))
+	}
+	for _, tg := range cc.Targets {
+		if tg.Status != "installed" {
+			t.Errorf("target %q status = %q, want installed", tg.Target, tg.Status)
+		}
+	}
+	if cc.Splice == nil || cc.Splice.Status != "spliced" {
+		t.Errorf("splice = %+v, want status spliced", cc.Splice)
+	}
+
+	second := run(t, env, "install", "--json")
+	if second.exitCode != 0 {
+		t.Fatalf("re-install: exit=%d stderr=%q", second.exitCode, second.stderr)
+	}
+	payload.Results = nil
+	if err := json.Unmarshal([]byte(second.stdout), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, second.stdout)
+	}
+	cc = payload.Results[0]
+	if cc.Status != "current" {
+		t.Errorf("re-install status = %q, want current", cc.Status)
+	}
+	for _, tg := range cc.Targets {
+		if tg.Status != "current" {
+			t.Errorf("re-install target %q status = %q, want current", tg.Target, tg.Status)
+		}
+	}
+	if cc.Splice == nil || cc.Splice.Status != "already-spliced" {
+		t.Errorf("re-install splice = %+v, want status already-spliced", cc.Splice)
+	}
+}
+
 // makeMissing is the doctor state fixture for Missing: nothing installed.
 func makeMissing(t *testing.T, skills string, _ []string) string {
 	t.Helper()
-	return filepath.Join(skills, "clast")
+	return filepath.Join(skills, "wake")
 }
 
-// makeStale installs cleanly, then tampers with one generated file's disk
-// content and its stamp entry together, to the same wrong value — disk
-// still matches the stamp (no Modified), but the current binary's own
-// output for that file (untouched) no longer matches the stamp: Status's
-// Stale, the binary-vs-stamp question alone (C4.6). A plain hand-edit
-// would also break disk-vs-stamp and read as Modified instead, which is
-// why this rewrites the stamp entry too.
+// makeStale installs cleanly, then tampers with wake's generated file's
+// disk content and its stamp entry together, to the same wrong value —
+// disk still matches the stamp (no Modified), but the current binary's
+// own output for that file (untouched) no longer matches the stamp:
+// Status's Stale, the binary-vs-stamp question alone (C4.6). A plain
+// hand-edit would also break disk-vs-stamp and read as Modified instead,
+// which is why this rewrites the stamp entry too.
 func makeStale(t *testing.T, skills string, env []string) string {
 	t.Helper()
 	skillDir := installClean(t, skills, env)
@@ -675,7 +1013,14 @@ func TestDoctor_JSON_States(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			skills := t.TempDir()
-			env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills}
+			// CLAST_CLAUDE_SETTINGS_PATH is pinned here, not left to
+			// hermeticEnv's per-call default: c.setup and the doctor
+			// invocation below are two separate binary runs, and SURFACE
+			// V28's splice-drift checks (step-04) now read settings.json
+			// too — an unpinned path would give each run its own random
+			// temp file, so doctor would always see the splice as absent
+			// regardless of what setup actually did.
+			env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + filepath.Join(t.TempDir(), "settings.json")}
 			c.setup(t, skills, env)
 
 			r := run(t, env, "doctor", "--json")
@@ -690,6 +1035,7 @@ func TestDoctor_JSON_States(t *testing.T) {
 				} `json:"findings"`
 				Targets []struct {
 					Harness string `json:"harness"`
+					Target  string `json:"target"`
 					Dir     string `json:"dir"`
 					State   string `json:"state"`
 				} `json:"targets"`
@@ -697,11 +1043,28 @@ func TestDoctor_JSON_States(t *testing.T) {
 			if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
 				t.Fatalf("doctor --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
 			}
-			if len(payload.Targets) != 1 || payload.Targets[0].Harness != "claude-code" {
-				t.Fatalf("targets = %+v, want exactly one claude-code target", payload.Targets)
+			// Every fixture above acts on wake only (see refusalCases and
+			// makeMissing/makeStale's own comments); brief and retro, when
+			// installed at all, stay current and contribute no findings.
+			if len(payload.Targets) != len(claudeCodeSkillNames) {
+				t.Fatalf("targets = %+v, want exactly %d (one per claude-code skill)", payload.Targets, len(claudeCodeSkillNames))
 			}
-			if payload.Targets[0].State != c.wantState {
-				t.Fatalf("targets[0].state = %q, want %q", payload.Targets[0].State, c.wantState)
+			var wake *struct {
+				Harness string `json:"harness"`
+				Target  string `json:"target"`
+				Dir     string `json:"dir"`
+				State   string `json:"state"`
+			}
+			for i := range payload.Targets {
+				if payload.Targets[i].Harness == "claude-code" && payload.Targets[i].Target == "wake" {
+					wake = &payload.Targets[i]
+				}
+			}
+			if wake == nil {
+				t.Fatalf("targets = %+v, want a claude-code/wake row", payload.Targets)
+			}
+			if wake.State != c.wantState {
+				t.Fatalf("wake target state = %q, want %q", wake.State, c.wantState)
 			}
 
 			gotCodes := map[string]bool{}
@@ -729,29 +1092,286 @@ func TestDoctor_JSON_States(t *testing.T) {
 	}
 }
 
-// TestDoctor_TextMode_StateLine asserts the text-mode "<harness>: <state>
-// at <dir>" line appears ahead of the "no issues found" line.
+// TestDoctor_TextMode_StateLine asserts the text-mode "<harness> <target>:
+// <state> at <dir>" line appears, once per projected skill, ahead of the
+// "no issues found" line.
 func TestDoctor_TextMode_StateLine(t *testing.T) {
 	skills := t.TempDir()
 	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills}
-	skillDir := filepath.Join(skills, "clast")
 
 	r := run(t, env, "doctor")
 	if r.exitCode != 0 {
 		t.Fatalf("doctor: exit=%d, want 0; stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
 	}
-	wantLine := fmt.Sprintf("claude-code: missing at %s", skillDir)
-	stateIdx := strings.Index(r.stdout, wantLine)
-	if stateIdx < 0 {
-		t.Fatalf("doctor stdout = %q, want it to contain %q", r.stdout, wantLine)
-	}
 	issuesIdx := strings.Index(r.stdout, "no issues found")
 	if issuesIdx < 0 {
 		t.Fatalf("doctor stdout = %q, want it to still say no issues found", r.stdout)
 	}
-	if stateIdx > issuesIdx {
-		t.Fatalf("doctor stdout = %q, want the state line ahead of the findings/no-issues line", r.stdout)
+	for _, name := range claudeCodeSkillNames {
+		wantLine := fmt.Sprintf("claude-code %s: missing at %s", name, filepath.Join(skills, name))
+		stateIdx := strings.Index(r.stdout, wantLine)
+		if stateIdx < 0 {
+			t.Fatalf("doctor stdout = %q, want it to contain %q", r.stdout, wantLine)
+		}
+		if stateIdx > issuesIdx {
+			t.Fatalf("doctor stdout = %q, want the %s state line ahead of the findings/no-issues line", r.stdout, name)
+		}
 	}
+}
+
+// doctorFindings runs `doctor --json` and returns its findings' codes plus
+// the run's exit code — the shape every install-drift e2e case below
+// checks against.
+func doctorFindings(t *testing.T, env []string) ([]string, int) {
+	t.Helper()
+	r := run(t, env, "doctor", "--json")
+	var payload struct {
+		Findings []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("doctor --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	codes := make([]string, len(payload.Findings))
+	for i, f := range payload.Findings {
+		codes[i] = f.Code
+	}
+	return codes, r.exitCode
+}
+
+// containsString reports whether ss carries s.
+func containsString(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDoctor_InstallDriftLifecycle drives SURFACE V28's install-drift
+// checks (C4.5-C4.6, step-04) end to end: clean after install, one finding
+// per induced drift class, and clean again after uninstall. Each drift
+// class is induced independently from its own fresh install, since the
+// fixtures are not composable (e.g. a deleted skill tree and a tampered
+// shim would otherwise sit in the same settings.json).
+func TestDoctor_InstallDriftLifecycle(t *testing.T) {
+	newEnv := func(t *testing.T) (skills, settingsPath string, env []string) {
+		t.Helper()
+		skills = t.TempDir()
+		settingsPath = filepath.Join(t.TempDir(), "settings.json")
+		return skills, settingsPath, []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+	}
+
+	t.Run("clean install has no install-drift findings", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none after a clean install", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
+
+	t.Run("never installed has no install-drift findings", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		// Nothing installed at all — the absence-vs-drift reading:
+		// uninstalled is a clean state, not drift.
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none on a never-installed host", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
+
+	t.Run("deleting one skill tree reports that tree missing", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.RemoveAll(filepath.Join(skills, "wake")); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.missing-harness-target") {
+			t.Fatalf("findings = %v, want advisory.missing-harness-target", codes)
+		}
+		// Recoverable by re-running install, the same severity class as
+		// modified/stale/unowned — advisory, so it does not fail the run.
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("editing a SKILL.md by hand is still reported (existing content-drift path)", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.WriteFile(filepath.Join(skills, "wake", "SKILL.md"), []byte("hand-edited\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.modified-harness-target") {
+			t.Fatalf("findings = %v, want advisory.modified-harness-target", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("removing the splice reports the shim missing", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		// The CLI has no way to install the skill trees without also
+		// splicing, so this removes just the shim entry from
+		// settings.json by hand afterward — the skill trees are left
+		// alone, isolating "skills installed, shim absent" from the
+		// all-Missing clean case.
+		if err := os.WriteFile(settingsPath, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.missing-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.missing-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("tampering the shim command reports it tampered", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		raw, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tampered := strings.Replace(string(raw), "clast plumbing capture", "clast plumbing capture --tampered", 1)
+		if tampered == string(raw) {
+			t.Fatal("fixture did not find the shim command to tamper with")
+		}
+		if err := os.WriteFile(settingsPath, []byte(tampered), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.tampered-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.tampered-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+	})
+
+	t.Run("breaking settings.json reports it malformed and fails the run", func(t *testing.T) {
+		_, settingsPath, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if err := os.WriteFile(settingsPath, []byte("{not valid json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		r := run(t, env, "doctor", "--json")
+		if r.exitCode != 1 {
+			t.Fatalf("doctor exit = %d, want 1 (validation.malformed-settings fails the run); stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+		}
+		codes, _ := doctorFindings(t, env)
+		if !containsString(codes, "validation.malformed-settings") {
+			t.Fatalf("findings = %v, want validation.malformed-settings", codes)
+		}
+		envelope := parseErrorEnvelope(t, r.stderr)
+		if envelope.Error.Code != "doctor.findings-present" {
+			t.Errorf("error code = %q, want doctor.findings-present", envelope.Error.Code)
+		}
+	})
+
+	t.Run("uninstall aborting before Unsplice leaves an orphaned splice; doctor flags it (F1)", func(t *testing.T) {
+		skills, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		// Remove the last-walked skill tree by hand — uninstall walks
+		// SkillNames in order (wake, brief, retro), so it removes wake
+		// and brief successfully, then finds retro Missing and errors
+		// out before it ever reaches Unsplice (internal/verbs/
+		// uninstall.go:80-96): the SessionStart hook survives.
+		if err := os.RemoveAll(filepath.Join(skills, "retro")); err != nil {
+			t.Fatal(err)
+		}
+
+		r := run(t, env, "uninstall", "claude-code", "--json")
+		if r.exitCode != 1 {
+			t.Fatalf("uninstall over a partially-missing harness: exit=%d, want 1 (not-found); stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+		}
+		envelope := parseErrorEnvelope(t, r.stderr)
+		if envelope.Error.Code != "not-found.harness-not-installed" {
+			t.Fatalf("error code = %q, want not-found.harness-not-installed", envelope.Error.Code)
+		}
+		for _, name := range []string{"wake", "brief"} {
+			if _, err := os.Stat(filepath.Join(skills, name)); !os.IsNotExist(err) {
+				t.Fatalf("uninstall stopped at retro (Missing), but %s was never removed", name)
+			}
+		}
+
+		// Every target now reads Missing — doctor used to read that as
+		// "never installed" and report nothing. But the hook is still
+		// there: an orphaned splice, not a clean host (F1).
+		codes, exit := doctorFindings(t, env)
+		if !containsString(codes, "advisory.orphaned-harness-splice") {
+			t.Fatalf("findings = %v, want advisory.orphaned-harness-splice", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0 (advisory finding)", exit)
+		}
+
+		// Every later uninstall aborts the exact same way: wake is
+		// Missing too now, so it refuses not-found before even reaching
+		// retro again — the hook is never reachable via uninstall from
+		// here on; only hand-editing settings.json (or doctor's finding
+		// telling the user to) can remove it.
+		again := run(t, env, "uninstall", "claude-code", "--json")
+		if again.exitCode != 1 {
+			t.Fatalf("second uninstall: exit=%d, want 1 (not-found); stderr=%q", again.exitCode, again.stderr)
+		}
+		if code := parseErrorEnvelope(t, again.stderr).Error.Code; code != "not-found.harness-not-installed" {
+			t.Fatalf("second uninstall error code = %q, want not-found.harness-not-installed", code)
+		}
+	})
+
+	t.Run("uninstall returns to clean", func(t *testing.T) {
+		_, _, env := newEnv(t)
+		if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+		if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
+			t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+		}
+
+		codes, exit := doctorFindings(t, env)
+		if len(codes) != 0 {
+			t.Fatalf("findings = %v, want none after uninstall", codes)
+		}
+		if exit != 0 {
+			t.Fatalf("doctor exit = %d, want 0", exit)
+		}
+	})
 }
 
 // --- registry: `clast init` (SURFACE V26) ---
@@ -1994,7 +2614,16 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 // step 06 seal sweep adds the three codes this Matter's own verbs raise
 // that weren't already on the table: not-found.asset (`plumbing asset`),
 // and brief's own validation.not-a-git-repo/validation.unknown-locator
-// pair (V8's "how V10 and V22 read together" finding).
+// pair (V8's "how V10 and V22 read together" finding). projection's own
+// step-05 seal sweep adds the install-family posture: one refusal
+// (refusal.modified-harness-target stands in for the shared
+// harness.RefusalCode vocabulary — TestInstall_RefusalCodes/
+// TestUninstall_RefusalCodes already drive every one of its three states
+// exhaustively, so one representative here is enough), the uninstall-side
+// not-found (not-found.harness-not-installed), and
+// validation.malformed-settings raised by the splice itself through
+// `install` (previously only driven through `doctor`, in
+// TestDoctor_InstallDriftLifecycle).
 func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	fx := journaltest.New(t)
 	a := journal.SessionKey{Harness: "claude", NativeID: "ambiguous-a"}
@@ -2045,6 +2674,24 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	xdgFailingStub := t.TempDir()
 	writeLLMConfig(t, xdgFailingStub, failingStub.URL(), "gpt-test")
 
+	// projection seal sweep: this Matter's own V34 codes need induced
+	// install-drift fixtures.
+	modifiedSkills := t.TempDir()
+	modifiedEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + modifiedSkills}
+	makeModified(t, modifiedSkills, modifiedEnv)
+
+	neverInstalledEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + t.TempDir()}
+
+	malformedSettingsSkills := t.TempDir()
+	malformedSettingsPath := filepath.Join(t.TempDir(), "settings.json")
+	malformedEnv := []string{"CLAST_CLAUDE_SKILLS_DIR=" + malformedSettingsSkills, "CLAST_CLAUDE_SETTINGS_PATH=" + malformedSettingsPath}
+	if r := run(t, malformedEnv, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("seeding validation.malformed-settings fixture: install exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if err := os.WriteFile(malformedSettingsPath, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	cases := []struct {
 		name     string
 		args     []string
@@ -2085,6 +2732,9 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 			[]string{"CLAST_JOURNAL_DIR=" + llmCodesJournal, "XDG_CONFIG_HOME=" + xdgFailingStub, "CLAST_LLM_API_KEY=sk-test-key"},
 			"", "retro.llm-request-failed", 1,
 		},
+		{"refusal.modified-harness-target", []string{"install", "claude-code", "--json"}, modifiedEnv, "", "refusal.modified-harness-target", 3},
+		{"not-found.harness-not-installed", []string{"uninstall", "claude-code", "--json"}, neverInstalledEnv, "", "not-found.harness-not-installed", 1},
+		{"validation.malformed-settings", []string{"install", "claude-code", "--json"}, malformedEnv, "", "validation.malformed-settings", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -3114,6 +3764,130 @@ func TestSeal_OverrideAppliesWithNoReinstall(t *testing.T) {
 	}
 	if human.stdout != overrideContent {
 		t.Errorf("human mode stdout = %q, want the override's own content verbatim", human.stdout)
+	}
+}
+
+// skillAssetInstructionRe matches a projected SKILL.md's own "Read `clast
+// plumbing asset flows/<shape>.md` and follow it exactly as written."
+// instruction line and captures the asset path it names.
+var skillAssetInstructionRe = regexp.MustCompile("`clast plumbing asset (flows/[a-z]+\\.md)`")
+
+// skillInstructionAssetPath extracts the flows/<shape>.md path an
+// installed SKILL.md's own instruction names, by regex over its actual
+// bytes — never hardcoded, so this proves the test is reading what the
+// INSTALLED skill really says rather than what it is assumed to say.
+func skillInstructionAssetPath(t *testing.T, skillMD []byte) string {
+	t.Helper()
+	m := skillAssetInstructionRe.FindSubmatch(skillMD)
+	if m == nil {
+		t.Fatalf("SKILL.md carries no \"clast plumbing asset flows/<shape>.md\" instruction:\n%s", skillMD)
+	}
+	return string(m[1])
+}
+
+// TestSeal_InstalledSkillReadsFlowThroughAsset is projection's own step-05
+// seal sweep addition: the seal condition's "installed skills read flows
+// through asset" clause. Every existing flow-asset test (this file's own
+// TestPlumbingAsset_FlowAssets_EmbeddedLink_ServesExactBytes and
+// TestSeal_OverrideAppliesWithNoReinstall, both shape-documents' seal
+// sweep) drives `plumbing asset flows/<shape>.md` directly — proving the
+// asset chain itself, never that a REAL installed skill actually names
+// that call. This test closes that gap by crossing the projection
+// boundary for real:
+//  1. installs claude-code through the same skills/settings seams every
+//     other install test uses;
+//  2. reads the projected ~/.claude/skills/<shape>/SKILL.md straight off
+//     disk;
+//  3. extracts its own "clast plumbing asset flows/<shape>.md" instruction
+//     by regex, rather than assuming the path;
+//  4. RUNS that exact instruction and confirms the shipped flow's content
+//     comes back;
+//  5. plants a live $XDG_CONFIG_HOME override AFTER the install — no
+//     re-install, no rebuild — and re-runs the SAME installed
+//     instruction, confirming the override wins: the M18 no-re-install
+//     promise crossing the projection boundary, and the installed
+//     SKILL.md itself staying byte-identical throughout (the override
+//     took effect without regenerating anything).
+func TestSeal_InstalledSkillReadsFlowThroughAsset(t *testing.T) {
+	for _, shape := range claudeCodeSkillNames {
+		t.Run(shape, func(t *testing.T) {
+			skills := t.TempDir()
+			settingsPath := filepath.Join(t.TempDir(), "settings.json")
+			xdg := t.TempDir()
+			env := []string{
+				"CLAST_CLAUDE_SKILLS_DIR=" + skills,
+				"CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath,
+				"XDG_CONFIG_HOME=" + xdg,
+			}
+
+			if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+				t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+			}
+
+			skillMDPath := filepath.Join(skills, shape, "SKILL.md")
+			skillMD, err := os.ReadFile(skillMDPath)
+			if err != nil {
+				t.Fatalf("reading installed %s: %v", skillMDPath, err)
+			}
+			assetPath := skillInstructionAssetPath(t, skillMD)
+			if want := "flows/" + shape + ".md"; assetPath != want {
+				t.Fatalf("installed %s skill's instruction names %q, want %q", shape, assetPath, want)
+			}
+
+			// Run the installed skill's own instruction verbatim, no
+			// override planted yet: the shipped flow content comes back.
+			r := run(t, env, "plumbing", "asset", assetPath, "--json")
+			if r.exitCode != 0 {
+				t.Fatalf("plumbing asset %s --json: exit=%d, want 0; stderr=%q", assetPath, r.exitCode, r.stderr)
+			}
+			var payload assetPayload
+			if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+				t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+			}
+			wantShipped := flowAssetFixtureContent(t, shape)
+			if payload.Content != string(wantShipped) {
+				t.Errorf("content before override mismatch for %s: got %d bytes, want the shipped file's %d bytes", assetPath, len(payload.Content), len(wantShipped))
+			}
+			if payload.Link != "embedded" {
+				t.Errorf("link before override = %q, want %q", payload.Link, "embedded")
+			}
+
+			// Plant a live override after the fact — no re-install, no
+			// rebuild — then re-run the SAME installed instruction.
+			overrideDir := filepath.Join(xdg, "clast", "flows")
+			if err := os.MkdirAll(overrideDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			overrideContent := "# " + shape + " — flow\n\noverridden for the installed-skill seal proof; no re-install, no rebuild.\n"
+			if err := os.WriteFile(filepath.Join(overrideDir, shape+".md"), []byte(overrideContent), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			r2 := run(t, env, "plumbing", "asset", assetPath, "--json")
+			if r2.exitCode != 0 {
+				t.Fatalf("plumbing asset %s --json (after override): exit=%d, want 0; stderr=%q", assetPath, r2.exitCode, r2.stderr)
+			}
+			var payload2 assetPayload
+			if err := json.Unmarshal([]byte(r2.stdout), &payload2); err != nil {
+				t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r2.stdout)
+			}
+			if payload2.Link != "override" {
+				t.Errorf("link after override = %q, want %q (M18: takes effect with no re-install)", payload2.Link, "override")
+			}
+			if payload2.Content != overrideContent {
+				t.Errorf("content after override = %q, want the override's own content verbatim", payload2.Content)
+			}
+
+			// The installed SKILL.md itself never changed: the override
+			// crossed the projection boundary without a second install.
+			skillMDAfter, err := os.ReadFile(skillMDPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(skillMDAfter) != string(skillMD) {
+				t.Errorf("installed %s SKILL.md changed after planting an override — it must apply live, not by regenerating the skill", shape)
+			}
+		})
 	}
 }
 

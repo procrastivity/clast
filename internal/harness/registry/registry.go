@@ -12,22 +12,66 @@ package registry
 import (
 	"fmt"
 
+	"github.com/procrastivity/clast/internal/harness"
 	"github.com/procrastivity/clast/internal/harness/claudecode"
 	"github.com/procrastivity/clast/internal/manifest"
 )
 
-// Harness is one row of the install/uninstall/doctor table: a harness's
-// name plus the functions that generate, install, uninstall, locate, and
-// probe its projection. Every field is required — Lookup's callers dispatch
-// through them unconditionally, in place of the N-way switches this table
-// replaces.
-type Harness struct {
-	Name       string
+// Target is one independently stamped, installable subtree within a
+// harness's projection (C4.4) — the shape a single-target harness used to
+// expose directly at the Harness level, before SURFACE V32 gave
+// claude-code three of them (one per skill). Label distinguishes a
+// harness's targets from one another for reporting (install, uninstall,
+// doctor); every other field is the same {InstallDir, Generate, Install,
+// Uninstall} tuple the chassis always had.
+type Target struct {
+	Label      string
 	InstallDir func() (string, error)
 	Generate   func(manifest.Manifest) (map[string][]byte, error)
 	Install    func(manifest.Manifest) (string, error)
 	Uninstall  func() (string, error)
-	Available  func() bool
+}
+
+// SpliceOutcome reports what a harness's Splice call did to its splice
+// target (C4.8) — a foreign-file path edit, not a stamped generated tree,
+// so it carries no drift state of its own; see SpliceStatus and
+// harness.SpliceProbe for that (SURFACE V28, step-04).
+type SpliceOutcome struct {
+	Path   string
+	Status string
+}
+
+// Harness is one row of the install/uninstall/doctor table: a harness's
+// name, its projected targets, and the functions that probe it and
+// splice/unsplice its foreign-file targets. Available is required —
+// Lookup's callers dispatch through it unconditionally. Targets may be
+// empty and Splice/Unsplice may be nil for a harness with neither kind of
+// target (none exist yet, but C4.8 rates both as ordinary extensions of
+// the model).
+type Harness struct {
+	Name      string
+	Available func() bool
+	Targets   []Target
+	// Splice installs this harness's splice target, if it has one (C4.8) —
+	// nil for a harness with none. Only claude-code sets it today.
+	Splice func() (SpliceOutcome, error)
+	// Unsplice reverses Splice (step-03): removes exactly the entry Splice
+	// added, leaving every unrelated byte alone. nil for a harness with no
+	// splice target. Idempotent and symmetric with Splice: a missing file
+	// or an already-absent entry is a no-op, not a diagnostic (see
+	// claudecode.Unsplice's doc comment for the full reasoning).
+	Unsplice func() (SpliceOutcome, error)
+	// SpliceStatus probes this harness's splice target's drift state,
+	// read-only (SURFACE V28, step-04) — nil for a harness with no splice
+	// target. Unlike Splice/Unsplice, it never writes: doctor is its only
+	// caller, and a bare `clast doctor` run must never install or repair
+	// anything as a side effect of reporting on it. Returns the shared
+	// harness.SpliceProbe shape directly (no adapter, unlike
+	// Splice/Unsplice's SpliceOutcome): that type already lives in the
+	// harness-agnostic internal/harness package, the same place State
+	// lives for stamped targets, so there is no harness-specific shape to
+	// translate out of the way here.
+	SpliceStatus func() (harness.SpliceProbe, error)
 }
 
 // All lists every harness this tool can project itself into. The skeleton
@@ -36,13 +80,60 @@ type Harness struct {
 // walks every call site a new target touches.
 var All = []Harness{
 	{
-		Name:       claudecode.Name,
-		InstallDir: claudecode.InstallDir,
-		Generate:   claudecode.Generate,
-		Install:    claudecode.Install,
-		Uninstall:  claudecode.Uninstall,
-		Available:  claudecode.Available,
+		Name:         claudecode.Name,
+		Available:    claudecode.Available,
+		Targets:      claudecodeTargets(),
+		Splice:       claudecodeSplice,
+		Unsplice:     claudecodeUnsplice,
+		SpliceStatus: claudecode.SpliceStatus,
 	},
+}
+
+// claudecodeTargets builds claude-code's three skill targets (SURFACE
+// V32), one per claudecode.SkillNames entry, each closing over its own
+// name so InstallDir/Generate/Install/Uninstall all act on that one
+// skill's tree.
+func claudecodeTargets() []Target {
+	out := make([]Target, 0, len(claudecode.SkillNames))
+	for _, name := range claudecode.SkillNames {
+		out = append(out, Target{
+			Label:      name,
+			InstallDir: func() (string, error) { return claudecode.SkillDir(name) },
+			Generate: func(m manifest.Manifest) (map[string][]byte, error) {
+				return claudecode.GenerateSkill(name, m)
+			},
+			Install: func(m manifest.Manifest) (string, error) {
+				return claudecode.InstallSkill(name, m)
+			},
+			Uninstall: func() (string, error) {
+				return claudecode.UninstallSkill(name)
+			},
+		})
+	}
+	return out
+}
+
+// claudecodeSplice adapts claudecode.Splice's result into the registry's
+// own SpliceOutcome shape, so this package stays the sole shape install,
+// uninstall, and checks read (the same reason Harness itself is defined
+// here rather than in each harness subpackage).
+func claudecodeSplice() (SpliceOutcome, error) {
+	r, err := claudecode.Splice()
+	if err != nil {
+		return SpliceOutcome{}, err
+	}
+	return SpliceOutcome{Path: r.Path, Status: r.Status}, nil
+}
+
+// claudecodeUnsplice adapts claudecode.Unsplice's result into the
+// registry's own SpliceOutcome shape, the same reason claudecodeSplice
+// does — one shape install, uninstall, and checks all read.
+func claudecodeUnsplice() (SpliceOutcome, error) {
+	r, err := claudecode.Unsplice()
+	if err != nil {
+		return SpliceOutcome{}, err
+	}
+	return SpliceOutcome{Path: r.Path, Status: r.Status}, nil
 }
 
 // Names lists every harness in All's order — help text, bare-invocation

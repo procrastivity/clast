@@ -46,27 +46,75 @@ func Run(cs ...Check) ([]Finding, error) {
 // re-running install, so it never fails doctor.
 const StaleHarnessCode = "advisory.stale-harness-artifact"
 
-// TargetState is one registered harness's reported drift state — the
-// per-target fact doctor's --json and text output carry beside findings
-// (C4.5).
+// MissingHarnessTargetCode is the advisory code for a stamped harness
+// target that is Missing while a sibling target under the same harness is
+// not (SURFACE V28, step-04) — partial-install drift: install.go's
+// install/uninstall.go both walk a harness's targets and stop at the
+// first refusal, so a run interrupted partway through, or a tree deleted
+// by hand afterward, can leave exactly this shape. See
+// missingTargetFindings for the all-Missing case this deliberately leaves
+// clean.
+const MissingHarnessTargetCode = "advisory.missing-harness-target"
+
+// TamperedHarnessSpliceCode is the advisory code for a harness's splice
+// target whose shim entry is present but no longer matches the pinned
+// command string exactly (harness.SpliceTampered, SURFACE V28, step-04).
+const TamperedHarnessSpliceCode = "advisory.tampered-harness-splice"
+
+// MissingHarnessSpliceCode is the advisory code for a harness's splice
+// target with no recognizable shim entry at all (harness.SpliceAbsent),
+// reported only when at least one of that harness's stamped targets is
+// installed (SURFACE V28, step-04) — see spliceDriftFindings.
+const MissingHarnessSpliceCode = "advisory.missing-harness-splice"
+
+// OrphanedHarnessSpliceCode is the advisory code for a harness's splice
+// target whose shim entry is present and current (harness.SpliceCurrent)
+// while every one of the harness's stamped targets is Missing (F1 seal
+// finding). This is the shape an interrupted `clast uninstall <harness>`
+// leaves behind: uninstall walks a harness's targets in order and only
+// calls Unsplice once every one of them has succeeded
+// (internal/verbs/uninstall.go); a target that refuses, or was already
+// gone, before Unsplice runs stops the whole command first, so the hook
+// is never reached and survives. Once that happens every later
+// `clast uninstall <harness>` aborts the same way (the same missing
+// target refuses again), so no clast verb can ever reach Unsplice for
+// that hook again — doctor is the only place left that can even notice
+// it, and its message says so plainly rather than naming a verb that
+// does not exist: hand-removal of the SessionStart hook from
+// settings.json is the only remedy. See spliceDriftFindings' SpliceCurrent
+// case.
+const OrphanedHarnessSpliceCode = "advisory.orphaned-harness-splice"
+
+// TargetState is one registered harness target's reported drift state —
+// the per-target fact doctor's --json and text output carry beside
+// findings (C4.5). A harness may carry more than one stamped target
+// (SURFACE V32: claude-code projects three skills, each its own target),
+// so Harness alone does not identify a row; Target does, within that
+// harness.
 type TargetState struct {
 	Harness string        `json:"harness"`
+	Target  string        `json:"target"`
 	Dir     string        `json:"dir"`
 	State   harness.State `json:"state"`
 }
 
-// HarnessTargets derives every registered harness's drift state
-// (harness.Status, C4.6's three comparisons folded into C4.5's six
-// states) in registry.All's order, and returns both doctor's findings and
-// the per-target states doctor reports beside them. root is the
-// *cobra.Command NewRootCommand is assembling, captured by reference — the
-// same pattern install uses — so the manifest this builds reflects every
-// verb actually registered.
+// HarnessTargets derives every registered harness's stamped targets'
+// drift state (harness.Status, C4.6's three comparisons folded into
+// C4.5's six states) in registry.All's order, and returns both doctor's
+// findings and the per-target states doctor reports beside them. root is
+// the *cobra.Command NewRootCommand is assembling, captured by reference —
+// the same pattern install uses — so the manifest this builds reflects
+// every verb actually registered.
+//
+// A harness's splice target (C4.8), if it has one, is folded in below via
+// spliceDriftFindings (SURFACE V28, step-04): its own small vocabulary
+// (harness.SpliceState), since a foreign file carries no stamp to diff the
+// way a stamped target does.
 //
 // One registry walk gives both, because the state already needs each
 // target's install dir and generated files.
 //
-// Findings by state (C4.7: advisory codes never fail the run;
+// Findings by state (C4.7: advisory codes never fail the run; toolsmith's
 // docs/contract-v1-2-reconcile/decisions.md §1.5):
 //   - Current, Missing: no finding.
 //   - Stale: the per-file advisory.stale-harness-artifact findings, one
@@ -79,6 +127,18 @@ type TargetState struct {
 //     no per-file findings — a stamp Status could not trust cannot be
 //     diffed against either. This is the one state that fails the run,
 //     because its code keeps the "refusal." prefix.
+//
+// Beside every target's own state, two more install-drift questions are
+// asked once per harness, after its targets are known (SURFACE V28,
+// step-04): missingTargetFindings (a target Missing while a sibling is
+// not — see its own doc comment for the all-Missing exception) and, for a
+// harness with a splice target, spliceDriftFindings (the shim entry's own
+// three-state drift). Both follow the same advisory-unless-untrustworthy
+// severity split incompatible already established: recoverable-by-
+// reinstall conditions stay advisory (never fail the run); a settings.json
+// that will not even parse keeps harness.CodeMalformedSplice's
+// "validation." prefix, the splice target's analog of Incompatible, and so
+// is the one splice-drift finding that does fail it.
 func HarnessTargets(root *cobra.Command, build buildinfo.Info) ([]Finding, []TargetState, error) {
 	m, err := manifest.Build(root, build)
 	if err != nil {
@@ -86,43 +146,184 @@ func HarnessTargets(root *cobra.Command, build buildinfo.Info) ([]Finding, []Tar
 	}
 
 	var findings []Finding
-	targets := make([]TargetState, 0, len(registry.All))
+	var targets []TargetState
 
 	for _, h := range registry.All {
-		dir, err := h.InstallDir()
-		if err != nil {
-			return nil, nil, err
-		}
-		files, err := h.Generate(m)
-		if err != nil {
-			return nil, nil, err
-		}
-		state, err := harness.Status(dir, files)
-		if err != nil {
-			return nil, nil, err
-		}
-		targets = append(targets, TargetState{Harness: h.Name, Dir: dir, State: state})
+		harnessTargets := make([]TargetState, 0, len(h.Targets))
 
-		switch state {
-		case harness.Stale:
-			fs, err := staleFileFindings(h.Name, dir, files)
+		for _, target := range h.Targets {
+			dir, err := target.InstallDir()
+			if err != nil {
+				return nil, nil, err
+			}
+			files, err := target.Generate(m)
+			if err != nil {
+				return nil, nil, err
+			}
+			state, err := harness.Status(dir, files)
+			if err != nil {
+				return nil, nil, err
+			}
+			harnessTargets = append(harnessTargets, TargetState{Harness: h.Name, Target: target.Label, Dir: dir, State: state})
+
+			// h.Name, not a per-target label, is what harness.Risk and
+			// harness.ForceRemedy fold into a runnable `clast install
+			// <harness> --force` suggestion below — dir already
+			// disambiguates which of the harness's targets (e.g. which
+			// claude-code skill) a finding is about.
+			switch state {
+			case harness.Stale:
+				fs, err := staleFileFindings(h.Name, dir, files)
+				if err != nil {
+					return nil, nil, err
+				}
+				findings = append(findings, fs...)
+			case harness.Modified:
+				fs, err := staleFileFindings(h.Name, dir, files)
+				if err != nil {
+					return nil, nil, err
+				}
+				findings = append(findings, fs...)
+				findings = append(findings, driftFinding(h.Name, dir, state))
+			case harness.UnownedConflict, harness.Incompatible:
+				findings = append(findings, driftFinding(h.Name, dir, state))
+			}
+		}
+
+		targets = append(targets, harnessTargets...)
+		findings = append(findings, missingTargetFindings(h.Name, harnessTargets)...)
+
+		if h.SpliceStatus != nil {
+			fs, err := spliceDriftFindings(h.Name, harnessTargets, h.SpliceStatus)
 			if err != nil {
 				return nil, nil, err
 			}
 			findings = append(findings, fs...)
-		case harness.Modified:
-			fs, err := staleFileFindings(h.Name, dir, files)
-			if err != nil {
-				return nil, nil, err
-			}
-			findings = append(findings, fs...)
-			findings = append(findings, driftFinding(h.Name, dir, state))
-		case harness.UnownedConflict, harness.Incompatible:
-			findings = append(findings, driftFinding(h.Name, dir, state))
 		}
 	}
 
 	return findings, targets, nil
+}
+
+// anyInstallEvidence reports whether states carries at least one target
+// state that proves `clast install <harness>` (or a predecessor of it) ran
+// against this target at some point — the signal both missingTargetFindings
+// and spliceDriftFindings' SpliceAbsent case gate their own finding on, so a
+// never-installed harness reads as clean rather than drifted (SURFACE V28,
+// step-04).
+//
+// Current, Stale, and Modified all mean a stamp this binary trusts is
+// present, so they count. Incompatible also counts — its stamp exists and
+// once matched schemaVersion, or install would never have written it — the
+// stamp merely being unreadable now does not erase that history. Missing
+// obviously does not count. UnownedConflict is the one state that does
+// not: it means content sits at the target path with no stamp at all,
+// which proves nothing about clast's own install ever having run there.
+func anyInstallEvidence(states []TargetState) bool {
+	for _, s := range states {
+		switch s.State {
+		case harness.Current, harness.Stale, harness.Modified, harness.Incompatible:
+			return true
+		}
+	}
+	return false
+}
+
+// missingTargetFindings reports partial-install drift (SURFACE V28,
+// step-04): a harness whose targets are a mix of installed (or drifted)
+// and Missing. A skill tree absent while a sibling skill tree is present
+// can only mean install stopped partway through (it walks targets in
+// order and stops at the first refusal) or a tree was deleted by hand
+// afterward — either way, `clast install <harness>` fixes it.
+//
+// When every one of the harness's targets is Missing, that reads as
+// "never installed" instead, the same clean reading a lone Missing target
+// already gets from harness.Status/C4.5, so this reports nothing for that
+// all-Missing case — the reconciliation this Matter's step-04 was asked
+// to record (matter.md): absence is drift only relative to a sibling that
+// proves install was intended, never on its own.
+func missingTargetFindings(harnessName string, states []TargetState) []Finding {
+	if !anyInstallEvidence(states) {
+		return nil
+	}
+
+	var findings []Finding
+	for _, s := range states {
+		if s.State != harness.Missing {
+			continue
+		}
+		findings = append(findings, Finding{
+			Code: MissingHarnessTargetCode,
+			Message: fmt.Sprintf("found: %s %s skill tree is missing at %s while other %s skills are installed; run `clast install %s` to restore it",
+				harnessName, s.Target, s.Dir, harnessName, harnessName),
+		})
+	}
+	return findings
+}
+
+// spliceDriftFindings reports install-drift for a harness's splice target
+// (C4.8, SURFACE V28 step-04), by probing it (probe, h.SpliceStatus) and
+// reading its harness.SpliceState:
+//
+//   - SpliceMalformed: always a finding, and the one splice-drift finding
+//     that fails the run — harness.CodeMalformedSplice keeps the
+//     "validation." prefix, not "advisory.", because a settings.json that
+//     will not parse blocks `clast install`/`clast uninstall` outright,
+//     the same severity Incompatible carries for a stamped target.
+//   - SpliceTampered: always a finding — an entry that looks like the
+//     shim but no longer matches its pinned bytes is drift regardless of
+//     whether any skill is installed, since the entry's mere presence
+//     proves install wrote it.
+//   - SpliceAbsent: a finding only when at least one of the harness's
+//     stamped targets is not Missing — an absent shim alongside a
+//     fully-uninstalled harness is the clean state, the same all-Missing
+//     exception missingTargetFindings applies to its own targets.
+//   - SpliceCurrent: no finding, unless every one of the harness's
+//     stamped targets is Missing too (F1) — an orphaned hook an
+//     interrupted uninstall left behind with no target left to prove it,
+//     reported as advisory.orphaned-harness-splice. Unlike SpliceAbsent's
+//     all-Missing case (genuinely clean: nothing was ever installed and
+//     nothing was ever spliced), a *present, current* hook alongside
+//     all-Missing targets proves install did run — the hook just outlived
+//     the targets it was installed for.
+func spliceDriftFindings(harnessName string, states []TargetState, probe func() (harness.SpliceProbe, error)) ([]Finding, error) {
+	p, err := probe()
+	if err != nil {
+		return nil, err
+	}
+
+	switch p.State {
+	case harness.SpliceMalformed:
+		return []Finding{{
+			Code: harness.CodeMalformedSplice,
+			Message: fmt.Sprintf("found: %s is not valid JSON; fix it by hand, then re-run `clast install %s` or `clast uninstall %s`",
+				p.Path, harnessName, harnessName),
+		}}, nil
+	case harness.SpliceTampered:
+		return []Finding{{
+			Code: TamperedHarnessSpliceCode,
+			Message: fmt.Sprintf("found: %s's clast SessionStart hook in %s no longer matches the pinned shim command; run `clast install %s` to restore it",
+				harnessName, p.Path, harnessName),
+		}}, nil
+	case harness.SpliceAbsent:
+		if !anyInstallEvidence(states) {
+			return nil, nil
+		}
+		return []Finding{{
+			Code: MissingHarnessSpliceCode,
+			Message: fmt.Sprintf("found: %s skills are installed but %s carries no clast SessionStart hook; run `clast install %s` to restore it",
+				harnessName, p.Path, harnessName),
+		}}, nil
+	default: // harness.SpliceCurrent
+		if anyInstallEvidence(states) {
+			return nil, nil
+		}
+		return []Finding{{
+			Code: OrphanedHarnessSpliceCode,
+			Message: fmt.Sprintf("found: %s carries a clast SessionStart hook but no %s skills are installed; no clast verb can safely remove it — remove the hook from %s's hooks.SessionStart array by hand",
+				p.Path, harnessName, p.Path),
+		}}, nil
+	}
 }
 
 // staleFileFindings reports the per-file advisory.stale-harness-artifact
@@ -155,7 +356,7 @@ func staleFileFindings(harnessName, dir string, files map[string][]byte) ([]Find
 
 // driftFindingCodes gives doctor's finding code for each unsafe state.
 // Only incompatible fails the run, so it alone keeps the refusal code;
-// the other two are advisory (C4.7,
+// the other two are advisory (C4.7, toolsmith's
 // docs/contract-v1-2-reconcile/decisions.md §1.5).
 var driftFindingCodes = map[harness.State]string{
 	harness.UnownedConflict: "advisory.unowned-harness-target",

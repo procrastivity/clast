@@ -27,7 +27,7 @@ func TestIsShippedAssetTable(t *testing.T) {
 
 		{"agent-guidance.md", true},
 		{"config.default.yaml", true},
-		{"templates/skills/claude-code/judgment.md", true},
+		{"claude-code/skills/wake/judgment.md", true},
 	}
 	for _, c := range cases {
 		if got := isShippedAsset(c.path); got != c.want {
