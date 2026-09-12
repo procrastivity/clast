@@ -48,15 +48,20 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	root.PersistentFlags().Bool("json", false, "emit the success payload as one JSON value")
 	root.PersistentFlags().BoolP("verbose", "v", false, "extra diagnostic lines on stderr")
 
-	root.AddCommand(versionverb.Command(streams, build))
-	root.AddCommand(manifestverb.Command(streams, build, root))
+	// Help lists verbs in registration order, which is the SURFACE V2
+	// presentation order — not alphabetical. Register the tool's own
+	// verbs at their V2 positions as their Matters land (wake, brief,
+	// retro, init, breadcrumb before doctor; the plumbing group before
+	// manifest), one package per verb under internal/verbs/ (C1.4).
+	// Every Command constructor ends with surface.Annotate — the
+	// manifest walk hard-errors without it (C3.2).
+	cobra.EnableCommandSorting = false
+	root.AddCommand(doctorverb.Command(streams, build, root))
 	root.AddCommand(installverb.Command(streams, build, root))
 	root.AddCommand(uninstallverb.Command(streams))
-	root.AddCommand(doctorverb.Command(streams, build, root))
-
-	// Register the tool's own verbs here, one package per verb under
-	// internal/verbs/ (C1.4). Every Command constructor ends with
-	// surface.Annotate — the manifest walk hard-errors without it (C3.2).
+	root.AddCommand(versionverb.Command(streams, build))
+	// manifest stays last with one-line help (V2).
+	root.AddCommand(manifestverb.Command(streams, build, root))
 
 	return root
 }
