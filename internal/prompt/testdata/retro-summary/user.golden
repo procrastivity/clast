@@ -1,0 +1,12 @@
+Session to condense:
+- Project: clast
+- Session started: 2026-09-10T09:00:00Z
+- Day: 2026-09-10
+- Session id: sess-01
+
+Entry body:
+## What shipped
+- Fixed wake ordering
+
+## Open threads
+- brief empty-state guard still needs a test

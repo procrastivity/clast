@@ -1,0 +1,17 @@
+Project: clast
+Current workspace (the directory you are in now): dev
+
+Recent curated entries, grouped by workspace (newest first). When a project
+spans more than one directory, entries appear under `## Workspace: <label>`
+headers; a single-workspace project has no headers:
+## Workspace: dev
+
+### Fixed wake ordering (2026-09-09, sess-01)
+
+Groups now sort by most-recently-active project.
+
+Today's breadcrumbs for this project:
+- 09:15 remember to check the stale-curated path before lunch
+
+Today's session activity for this project:
+- sess-02  curated  Wired the brief empty-state guard

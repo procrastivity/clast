@@ -1,0 +1,13 @@
+Session metadata:
+- Project: clast
+- Branch: go
+- Start: 2026-09-10T09:00:00Z
+- End: 2026-09-10T11:30:00Z
+- Approximate messages: 42
+
+Transcript of the session:
+USER: fix the wake ordering bug
+ASSISTANT: found it — groupByProject sorted by first appearance, not recency. Fixed.
+
+Breadcrumbs the user left during this session's day:
+- 09:15 remember to check the stale-curated path before lunch
