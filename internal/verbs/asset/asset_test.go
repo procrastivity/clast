@@ -111,6 +111,65 @@ func TestRun_PathEchoedVerbatim(t *testing.T) {
 	}
 }
 
+// TestRun_PathTraversal_NotFoundAsset asserts that a positional which
+// escapes the asset chain roots — by climbing above them with ".." (however
+// deep) or by naming an absolute path — is refused with the same
+// not-found.asset posture as any other unresolvable path (V25's own error
+// code, never a distinct "forbidden" code), rather than being joined onto a
+// chain root and read. A benign interior ".." that Clean cancels away
+// entirely (no leading ".." survives) is left to resolve normally.
+func TestRun_PathTraversal_NotFoundAsset(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"shallow traversal", "../x"},
+		{"deep traversal that still climbs above root", "a/../../x"},
+		{"absolute path", "/etc/hostname"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+			_, err := asset.Run(c.path)
+			if err == nil {
+				t.Fatalf("Run(%q): want an error, got nil", c.path)
+			}
+			ce, ok := err.(*clasterr.Error)
+			if !ok {
+				t.Fatalf("error %v (%T) is not a *clasterr.Error", err, err)
+			}
+			if ce.Code != "not-found.asset" {
+				t.Errorf("error code = %q, want not-found.asset", ce.Code)
+			}
+		})
+	}
+}
+
+// TestRun_InteriorDotDot_CancelsAndResolves asserts the posture for a
+// benign interior ".." that filepath.Clean cancels away entirely, leaving
+// no leading ".." — it is not treated as a traversal, and resolves like the
+// clean path it's equivalent to. The override link is used (rather than
+// embedded) because the disk join (filepath.Join, which Clean's internally)
+// tolerates the raw uncleaned positional the same way this fix does, while
+// the embedded fallback's fs.FS requires an already-valid path and would
+// fail this positional for a reason unrelated to containment — not the
+// posture this test is pinning down.
+func TestRun_InteriorDotDot_CancelsAndResolves(t *testing.T) {
+	writeOverride(t, "flows/wake.md", "override wake content\n")
+
+	result, err := asset.Run("flows/../flows/wake.md")
+	if err != nil {
+		t.Fatalf("Run(interior ..): want no error, got %v", err)
+	}
+	if result.Link != "override" {
+		t.Errorf("Link = %q, want %q", result.Link, "override")
+	}
+	if string(result.Content) != "override wake content\n" {
+		t.Errorf("Content = %q, want the planted override's own content", result.Content)
+	}
+}
+
 // TestSourceDefaultStillSaysDefault pins the TRAP V25 calls out:
 // assetchain.SourceDefault.String() must keep returning "default" — that is
 // not a bug to fix in internal/asset, it is the exact word this verb's own

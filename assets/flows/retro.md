@@ -25,9 +25,10 @@ list — produce a short summary using the retro-summary prompt pair,
 resolved through `plumbing asset`: `clast plumbing asset
 prompts/retro-summary-system.md` and `clast plumbing asset
 prompts/retro-summary-user.md`. Fill the user template's placeholders
-from that entry: the project, the session's work day, the session id,
-and the entry body. Call the LLM (verb form) or produce the summary
-directly (skill form).
+from that entry: the project, the session's `started_at`, the top-level
+`day` (when the window is a single day), the session id, and the entry
+body. Call the LLM (verb form) or produce the summary directly (skill
+form).
 
 **Decision:** a session with no entry body (an uncurated or dismissed
 session in the window's `sessions` list) is listed by state and title in

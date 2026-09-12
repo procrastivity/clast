@@ -10,6 +10,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	assetchain "github.com/procrastivity/clast/internal/asset"
 	"github.com/procrastivity/clast/internal/clasterr"
@@ -40,6 +42,10 @@ type Result struct {
 // that link's absence, not surfaced as a distinct error — this verb has no
 // occasion to see it separately from not-found.
 func Run(path string) (Result, error) {
+	if !withinChainRoots(path) {
+		return Result{}, clasterr.New("not-found.asset", fmt.Sprintf("no asset at %q: escapes the asset chain roots", path))
+	}
+
 	resolved, err := assetchain.Resolve(path)
 	if err != nil {
 		return Result{}, clasterr.New("not-found.asset", fmt.Sprintf("no asset at %q: %v", path, err))
@@ -70,6 +76,25 @@ func link(s assetchain.Source) string {
 	default:
 		return "unknown"
 	}
+}
+
+// withinChainRoots reports whether path is a plumbing-clean asset-relative
+// path (V25): assetchain.Resolve joins path onto each chain root's
+// directory with no containment check of its own (that package is sealed
+// and out of scope here), so this verb must refuse anything that could
+// walk the join back out of those roots before ever calling Resolve. An
+// absolute path ignores the roots entirely; filepath.Clean(path) starting
+// with ".." (or being exactly "..") climbs above the root by at least one
+// level even after interior "x/.." segments cancel out (e.g.
+// "a/../../etc/hostname" cleans to "../etc/hostname"). A benign interior
+// "..", like "flows/../flows/wake.md", cleans to "flows/wake.md" — no ".."
+// remains, so it is not rejected here.
+func withinChainRoots(path string) bool {
+	if filepath.IsAbs(path) {
+		return false
+	}
+	cleaned := filepath.Clean(path)
+	return cleaned != ".." && !strings.HasPrefix(cleaned, ".."+string(filepath.Separator))
 }
 
 // resolvedFrom is r's disk path, or "embedded" for the fallback link (V25:

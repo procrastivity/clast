@@ -2805,6 +2805,28 @@ func TestPlumbingAsset_UnknownPath_NotFoundAsset(t *testing.T) {
 	}
 }
 
+// TestPlumbingAsset_PathTraversal_NotFoundAsset drives the seal-review
+// finding's own reproduction straight through the built binary: a
+// positional that climbs above the asset chain roots must not be joined
+// onto them and read — not-found.asset, exit 1, empty stdout, same as any
+// other unresolvable path (V25), never an arbitrary file's content with a
+// falsified "override" link.
+func TestPlumbingAsset_PathTraversal_NotFoundAsset(t *testing.T) {
+	env := []string{"XDG_CONFIG_HOME=" + t.TempDir()}
+
+	r := run(t, env, "plumbing", "asset", "../../../../etc/hostname", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing asset (traversal): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "not-found.asset" {
+		t.Errorf("error code = %q, want not-found.asset", envelope.Error.Code)
+	}
+}
+
 // --- flow assets: assets/flows/{wake,brief,retro}.md (SURFACE V6, shape-documents) ---
 
 // flowAssetFixtureContent reads assets/flows/<shape>.md straight off disk —
