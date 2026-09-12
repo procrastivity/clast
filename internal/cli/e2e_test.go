@@ -2796,6 +2796,150 @@ func TestPlumbingAsset_UnknownPath_NotFoundAsset(t *testing.T) {
 	}
 }
 
+// --- flow assets: assets/flows/{wake,brief,retro}.md (SURFACE V6, shape-documents) ---
+
+// flowAssetFixtureContent reads assets/flows/<shape>.md straight off disk —
+// the same fixture-reading pattern embeddedAssetContent already uses for
+// agent-guidance.md — the oracle every embedded-link assertion below
+// compares the CLI's output against.
+func flowAssetFixtureContent(t *testing.T, shape string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "assets", "flows", shape+".md"))
+	if err != nil {
+		t.Fatalf("reading assets/flows/%s.md fixture: %v", shape, err)
+	}
+	return data
+}
+
+// TestPlumbingAsset_FlowAssets_EmbeddedLink_ServesExactBytes drives `plumbing
+// asset flows/<shape>.md` for each of the three shape-documents flow assets
+// against a bare binary (no override, no installed share tree in this
+// process's own layout): link "embedded", and content/sha256 matching the
+// file shipped on disk (M18's last-resort link, C5.1) — the seal condition
+// this step's Matter names for `asset` serving all three flows.
+func TestPlumbingAsset_FlowAssets_EmbeddedLink_ServesExactBytes(t *testing.T) {
+	for _, shape := range []string{"wake", "brief", "retro"} {
+		t.Run(shape, func(t *testing.T) {
+			path := "flows/" + shape + ".md"
+			env := []string{"XDG_CONFIG_HOME=" + t.TempDir()}
+
+			r := run(t, env, "plumbing", "asset", path, "--json")
+			if r.exitCode != 0 {
+				t.Fatalf("plumbing asset %s --json: exit=%d, want 0; stderr=%q", path, r.exitCode, r.stderr)
+			}
+			var payload assetPayload
+			if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+				t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+			}
+			if payload.Path != path {
+				t.Errorf("path = %q, want %q", payload.Path, path)
+			}
+			if payload.Link != "embedded" {
+				t.Errorf("link = %q, want %q", payload.Link, "embedded")
+			}
+			if payload.ResolvedFrom != "embedded" {
+				t.Errorf("resolved_from = %q, want %q (V25)", payload.ResolvedFrom, "embedded")
+			}
+			want := flowAssetFixtureContent(t, shape)
+			if payload.Content != string(want) {
+				t.Errorf("content mismatch for %s: got %d bytes, want the shipped file's %d bytes", path, len(payload.Content), len(want))
+			}
+			wantSum := sha256.Sum256(want)
+			if payload.SHA256 != hex.EncodeToString(wantSum[:]) {
+				t.Errorf("sha256 = %q, want the digest of the shipped file", payload.SHA256)
+			}
+
+			human := run(t, env, "plumbing", "asset", path)
+			if human.exitCode != 0 {
+				t.Fatalf("plumbing asset %s: exit=%d, want 0; stderr=%q", path, human.exitCode, human.stderr)
+			}
+			if human.stdout != string(want) {
+				t.Errorf("human mode stdout for %s does not equal the resolved bytes verbatim", path)
+			}
+		})
+	}
+}
+
+// TestManifest_JSON_ListsFlowAssetsWithChecksums asserts `manifest --json`
+// enumerates all three new flow assets, each with a checksum matching the
+// shipped file's own content — the seal condition this step's Matter names
+// ("asset serves all three flows and names the chain link").
+func TestManifest_JSON_ListsFlowAssetsWithChecksums(t *testing.T) {
+	r := run(t, nil, "manifest", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("manifest --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var m struct {
+		Assets []struct {
+			Path   string `json:"path"`
+			SHA256 string `json:"sha256"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil {
+		t.Fatalf("manifest --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+
+	byPath := make(map[string]string, len(m.Assets))
+	for _, a := range m.Assets {
+		byPath[a.Path] = a.SHA256
+	}
+
+	for _, shape := range []string{"wake", "brief", "retro"} {
+		path := "flows/" + shape + ".md"
+		sum, ok := byPath[path]
+		if !ok {
+			t.Errorf("manifest assets do not list %q", path)
+			continue
+		}
+		if sum == "" {
+			t.Errorf("manifest asset %q carries no checksum", path)
+			continue
+		}
+		want := flowAssetFixtureContent(t, shape)
+		wantSum := sha256.Sum256(want)
+		if sum != hex.EncodeToString(wantSum[:]) {
+			t.Errorf("manifest asset %q sha256 = %q, want the digest of the shipped file", path, sum)
+		}
+	}
+}
+
+// TestFlowAssets_StructuralFormat pins the flow-asset format's two
+// mechanically-checkable invariants (the Brief's binding format spec,
+// shape-documents/brief.md): the title line is exactly "# <shape> — flow",
+// and step §1's body names the same shape's document verb, `clast plumbing
+// <shape> --json` — every C7.4 cross-reference into a flow depends on §1
+// meaning what it says. This is deliberately not a flow-format parser: it
+// checks two fixed strings per file, nothing about step numbering or later
+// sections.
+func TestFlowAssets_StructuralFormat(t *testing.T) {
+	for _, shape := range []string{"wake", "brief", "retro"} {
+		t.Run(shape, func(t *testing.T) {
+			content := string(flowAssetFixtureContent(t, shape))
+
+			wantTitle := "# " + shape + " — flow"
+			if !strings.HasPrefix(content, wantTitle+"\n") {
+				t.Errorf("flows/%s.md does not start with %q", shape, wantTitle)
+			}
+
+			sectionIdx := strings.Index(content, "## §1 —")
+			if sectionIdx == -1 {
+				t.Fatalf("flows/%s.md has no \"## §1 —\" heading", shape)
+			}
+			nextIdx := strings.Index(content[sectionIdx+1:], "\n## ")
+			var section string
+			if nextIdx == -1 {
+				section = content[sectionIdx:]
+			} else {
+				section = content[sectionIdx : sectionIdx+1+nextIdx]
+			}
+			wantCall := "clast plumbing " + shape + " --json"
+			if !strings.Contains(section, wantCall) {
+				t.Errorf("flows/%s.md §1 does not name %q", shape, wantCall)
+			}
+		})
+	}
+}
+
 // --- plumbing: `clast plumbing wake` (SURFACE V8/V20, shape-documents) ---
 
 // TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet seeds a fixture
