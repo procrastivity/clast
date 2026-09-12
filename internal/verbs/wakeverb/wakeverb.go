@@ -65,6 +65,33 @@ const unprojectedLabel = "(no project)"
 // the flow's own literal "--day yesterday" token, not relative to the
 // session's own day.
 func Draft(ctx context.Context, root string, cutoff journal.Cutoff, yesterday journal.Day, item journal.WalkItem, client *llm.Client) (string, error) {
+	return draft(ctx, root, cutoff, yesterday, item, client, "")
+}
+
+// DraftWithFeedback implements flows/wake.md §4's Edit path: "take the
+// requested changes as feedback, regenerate the draft (§3) incorporating
+// them, and return to the decision." It re-reads §2's context and
+// re-renders the wake-draft pair exactly as Draft does, then appends
+// feedback to the rendered user prompt before calling the endpoint again
+// — the old bash porcelain's own mechanism
+// (main:lib/clast/clast-porcelain-subcommands/wake.bash, around lines
+// 470-473: "Revisions requested by user: ${edit_extra}" appended to the
+// filled user prompt), carried forward verbatim as this form's own Edit
+// mechanism (a wip finding: the framing string itself, and the old
+// tool's plain-reassignment — not accumulation — of edit_extra across
+// repeated Edits, both recorded rather than re-decided here). feedback
+// must be non-empty; interactive.go's own Edit case never calls this
+// with an empty string (an empty feedback line still counts as "no
+// changes requested" there, not as a call here).
+func DraftWithFeedback(ctx context.Context, root string, cutoff journal.Cutoff, yesterday journal.Day, item journal.WalkItem, client *llm.Client, feedback string) (string, error) {
+	return draft(ctx, root, cutoff, yesterday, item, client, feedback)
+}
+
+// draft is Draft's and DraftWithFeedback's shared implementation: feedback
+// empty means Draft's own plain §2/§3 pass; feedback non-empty appends the
+// old porcelain's own "Revisions requested by user: …" framing to the
+// rendered user prompt before the completion call.
+func draft(ctx context.Context, root string, cutoff journal.Cutoff, yesterday journal.Day, item journal.WalkItem, client *llm.Client, feedback string) (string, error) {
 	turns, err := show.Transcript(root, item, maxTurnChars)
 	if err != nil {
 		return "", err
@@ -84,7 +111,12 @@ func Draft(ctx context.Context, root string, cutoff journal.Cutoff, yesterday jo
 			fmt.Sprintf("wake: resolving the wake-draft prompt pair: %v", err))
 	}
 
-	text, err := client.Complete(ctx, rendered.System, rendered.User)
+	userPrompt := rendered.User
+	if feedback != "" {
+		userPrompt = rendered.User + "\n\nRevisions requested by user: " + feedback
+	}
+
+	text, err := client.Complete(ctx, rendered.System, userPrompt)
 	if err != nil {
 		return "", clasterr.New("wake.llm-request-failed",
 			fmt.Sprintf("wake: drafting session %s: %v", item.Key.DirName(), err))

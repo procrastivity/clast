@@ -1,11 +1,14 @@
 package wakeverb_test
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/procrastivity/clast/internal/entry"
+	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/journal/journaltest"
 	"github.com/procrastivity/clast/internal/llm"
@@ -13,6 +16,14 @@ import (
 	wakeplumbing "github.com/procrastivity/clast/internal/verbs/wake"
 	"github.com/procrastivity/clast/internal/verbs/wakeverb"
 )
+
+// autoStreams builds a minimal streams pair for RunAuto (no stdin needed:
+// Auto mode never reads input) with an accessible Err buffer for
+// diagnostic assertions (F3, llm-verbs seal sweep).
+func autoStreams() (*iostreams.Streams, *bytes.Buffer) {
+	errBuf := &bytes.Buffer{}
+	return &iostreams.Streams{Out: &bytes.Buffer{}, Err: errBuf}, errBuf
+}
 
 func mustCutoff(t *testing.T) journal.Cutoff {
 	t.Helper()
@@ -55,7 +66,8 @@ func TestRunAuto_SkipBelowThreshold_JournalUntouched(t *testing.T) {
 		t.Fatalf("rows = %+v, want exactly 1", rows)
 	}
 
-	summary, err := wakeverb.RunAuto(context.Background(), fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
+	streams, _ := autoStreams()
+	summary, err := wakeverb.RunAuto(context.Background(), streams, fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
 	if err != nil {
 		t.Fatalf("RunAuto: %v", err)
 	}
@@ -95,7 +107,8 @@ func TestRunAuto_Accept_WritesEntryAndCuration(t *testing.T) {
 		t.Fatalf("wake.Run: %v", err)
 	}
 
-	summary, err := wakeverb.RunAuto(context.Background(), fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
+	streams, _ := autoStreams()
+	summary, err := wakeverb.RunAuto(context.Background(), streams, fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
 	if err != nil {
 		t.Fatalf("RunAuto: %v", err)
 	}
@@ -162,7 +175,8 @@ func TestRunAuto_StaleSession_OfferedAsRecuration(t *testing.T) {
 		t.Fatalf("rows = %+v, want the stale session offered exactly once", rows)
 	}
 
-	summary, err := wakeverb.RunAuto(context.Background(), fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
+	streams, _ := autoStreams()
+	summary, err := wakeverb.RunAuto(context.Background(), streams, fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
 	if err != nil {
 		t.Fatalf("RunAuto: %v", err)
 	}
@@ -183,6 +197,51 @@ func TestRunAuto_StaleSession_OfferedAsRecuration(t *testing.T) {
 	}
 	if e.Title != "session grew, updated summary" {
 		t.Errorf("re-curated title = %q, want the fresh draft's title", e.Title)
+	}
+}
+
+// TestRunAuto_DraftFailure_PrintsDiagnosticAndCountsSeparately pins F3
+// (llm-verbs seal sweep): before this fix, a draft that failed to
+// generate was folded into Skipped with nothing printed anywhere — this
+// confirms the fix's three-part promise for the one session in this run
+// (the LLM stub fails every request): a stderr diagnostic naming the
+// session and the error, Skipped and the new SkippedDraftFailed both
+// incremented, and the run itself still succeeds (err == nil — RunAuto's
+// exit-0 posture is unchanged, only the accounting/diagnostic changed).
+func TestRunAuto_DraftFailure_PrintsDiagnosticAndCountsSeparately(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "claude", NativeID: "draft-fail-01"}
+	started := time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"}, started).
+		WithTranscript("2026-09-11", key, []byte(`{"type":"user","uuid":"u1","message":{"content":"hi"}}`+"\n"))
+
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, `{"error":"boom"}`)
+	client := mustClient(t, stub.URL())
+
+	rows, err := wakeplumbingRun(t, fx.Root())
+	if err != nil {
+		t.Fatalf("wake.Run: %v", err)
+	}
+
+	streams, errBuf := autoStreams()
+	summary, err := wakeverb.RunAuto(context.Background(), streams, fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
+	if err != nil {
+		t.Fatalf("RunAuto: %v, want nil (a failed draft is a skip, not a run failure)", err)
+	}
+	if summary.Drafted != 0 || summary.Skipped != 1 || summary.SkippedDraftFailed != 1 || summary.Accepted != 0 {
+		t.Fatalf("summary = %+v, want 0 drafted, 1 skipped (1 draft-failed), 0 accepted", summary)
+	}
+	if !strings.Contains(errBuf.String(), key.DirName()) {
+		t.Errorf("stderr = %q, want it to name the failed session %q", errBuf.String(), key.DirName())
+	}
+	if !strings.Contains(errBuf.String(), "draft generation failed") {
+		t.Errorf("stderr = %q, want a draft-generation-failed diagnostic", errBuf.String())
+	}
+
+	item := findItem(t, fx.Root(), key)
+	if item.State() != journal.StateCaptured {
+		t.Errorf("session state = %q, want untouched captured", item.State())
 	}
 }
 

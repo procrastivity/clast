@@ -15,11 +15,17 @@ import (
 	"github.com/procrastivity/clast/internal/surface"
 )
 
-// defaultDayArg is retro's own default when no positional is given (V8:
+// DefaultDayArg is retro's own default when no positional is given (V8:
 // "default day: yesterday") — journal.ParseDay's own "yesterday" case
 // resolves it against the current instant and cutoff (MODEL M8), the
 // same seam breadcrumbs' --day "today" default already leans on.
-const defaultDayArg = "yesterday"
+//
+// Exported (llm-verbs seal sweep nit): retroverb's own top-level `retro`
+// command shares this exact default (its own Long text names it), so it
+// reads this one constant rather than hand-copying the literal — the
+// same "wake.ConfiguredAutoMinChars precedent" wakeverb already
+// established for the equivalent auto_min_chars value.
+const DefaultDayArg = "yesterday"
 
 // sessionSchema/sessionRequired are the session.json fact set every row's
 // --json shape embeds verbatim — brief's/wake's own schema fragment,
@@ -165,7 +171,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := cliflags.FromContext(cmd.Context())
 
-			dayArg := defaultDayArg
+			dayArg := DefaultDayArg
 			if len(args) == 1 {
 				dayArg = args[0]
 			}
@@ -186,7 +192,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			windowStart, err := resolveWindowStart(day, since)
+			windowStart, err := ResolveWindowStart(day, since)
 			if err != nil {
 				return err
 			}
@@ -221,7 +227,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	return cmd
 }
 
-// resolveWindowStart is retro's own day+--since composition (finding,
+// ResolveWindowStart is retro's own day+--since composition (finding,
 // documented on Command's Long and on Result.WindowStart): absent
 // --since, the window is exactly day; given it, journal.ParseDuration
 // parses the same "-Nd"/"-Nw" grammar sessions'/wake's own --since
@@ -229,7 +235,12 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 // lower bound is day shifted back that many calendar days. day is always
 // the window's fixed upper bound; --since only ever widens backward from
 // it, never forward.
-func resolveWindowStart(day journal.Day, since string) (journal.Day, error) {
+//
+// Exported (llm-verbs seal sweep nit): retroverb's own top-level `retro`
+// command shares this exact composition, so it calls this one function
+// rather than hand-copying it — the wake.ConfiguredAutoMinChars
+// precedent.
+func ResolveWindowStart(day journal.Day, since string) (journal.Day, error) {
 	if since == "" {
 		return day, nil
 	}

@@ -39,12 +39,14 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			"dismissed, or skipped. Accepting writes through `plumbing curate`; dismissing writes " +
 			"through `plumbing dismiss`; a stale session is offered for re-curation, never revoked. " +
 			"Interactively, each draft is presented with a number menu (accept/edit/dismiss/skip); " +
-			"edit opens $EDITOR on a temp file of the draft, falling back to skip-with-a-message when " +
-			"$EDITOR is unset. --auto runs non-interactively: drafts shorter than the configured " +
-			"wake.auto_min_chars (default 60) are skipped — not written, not dismissed, so they stay " +
-			"available for a later interactive pass — qualifying drafts are accepted automatically, " +
-			"and nothing is ever dismissed or promoted in this mode. An empty working set needs no llm " +
-			"configuration — no endpoint call is ever made for it.",
+			"edit prompts for a one-line feedback description, regenerates the draft with it folded " +
+			"into the request, and returns to the same menu with the revised draft. --auto runs " +
+			"non-interactively: drafts shorter than the configured wake.auto_min_chars (default 60) " +
+			"are skipped — not written, not dismissed, so they stay available for a later interactive " +
+			"pass — qualifying drafts are accepted automatically, and nothing is ever dismissed or " +
+			"promoted in this mode; a draft that fails to generate is skipped with a stderr diagnostic, " +
+			"never a silent drop. An empty working set needs no llm configuration — no endpoint call " +
+			"is ever made for it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cliflags.FromContext(cmd.Context())
@@ -111,7 +113,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 
 			var summary Summary
 			if auto {
-				summary, err = RunAuto(ctx, root, cutoff, yesterday, rows, client, autoMinChars)
+				summary, err = RunAuto(ctx, streams, root, cutoff, yesterday, rows, client, autoMinChars)
 			} else {
 				summary, err = RunInteractive(ctx, streams, root, cutoff, yesterday, rows, client, machine)
 			}
@@ -163,6 +165,7 @@ type jsonPayload struct {
 	Dismissed             int          `json:"dismissed"`
 	Skipped               int          `json:"skipped"`
 	SkippedBelowThreshold int          `json:"skipped_below_threshold"`
+	SkippedDraftFailed    int          `json:"skipped_draft_failed"`
 	ProjectsTouched       int          `json:"projects_touched"`
 	Promoted              promotedJSON `json:"promoted"`
 }
@@ -175,6 +178,7 @@ func writeJSON(streams *iostreams.Streams, s Summary) error {
 		Dismissed:             s.Dismissed,
 		Skipped:               s.Skipped,
 		SkippedBelowThreshold: s.SkippedBelowThreshold,
+		SkippedDraftFailed:    s.SkippedDraftFailed,
 		ProjectsTouched:       s.ProjectsTouched(),
 		Promoted: promotedJSON{
 			Decisions:    s.PromotedDecisions,
@@ -213,6 +217,11 @@ func writeHuman(streams *iostreams.Streams, s Summary, auto bool) error {
 	if auto {
 		if _, err := fmt.Fprintf(streams.Out, "Skipped (below length threshold): %d session(s).\n", s.SkippedBelowThreshold); err != nil {
 			return err
+		}
+		if s.SkippedDraftFailed > 0 {
+			if _, err := fmt.Fprintf(streams.Out, "Skipped (draft generation failed): %d session(s).\n", s.SkippedDraftFailed); err != nil {
+				return err
+			}
 		}
 	}
 	if total := s.PromotedDecisions + s.PromotedCommonIssues + s.PromotedWorkflows; total > 0 {

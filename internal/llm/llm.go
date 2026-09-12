@@ -97,6 +97,15 @@ func NewClient(cfg config.Config) (*Client, error) {
 	}, nil
 }
 
+// Model returns the resolved llm.model this Client was constructed with
+// (SURFACE V31) — exported for a caller that needs the model string itself
+// as a fact, not just to send it (llm-verbs seal sweep, F5: retro's cache
+// fingerprint mixes this in so a changed model never serves a stale-model
+// summary).
+func (c *Client) Model() string {
+	return c.model
+}
+
 // llmConfigValues reads cfg's "llm" section and returns its base_url and
 // model strings, "" when the section, or a given key within it, is
 // absent — NewClient's presence check turns that into

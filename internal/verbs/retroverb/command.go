@@ -17,19 +17,12 @@ import (
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
 )
 
-// defaultDayArg mirrors plumbing retro's own default (V8: "default day:
-// yesterday") — repeated here rather than exported from internal/verbs/
-// retro, the same posture briefverb takes for every other small constant
-// it needs from its own plumbing verb (that package's command.go doesn't
-// export this one either).
-const defaultDayArg = "yesterday"
-
 // Command constructs the top-level `clast retro [<day>]` verb (SURFACE
 // V11): the retro shape's verb form. <day> and --since mirror `plumbing
 // retro`'s own surface exactly (day/--since resolution posture, task
-// brief) — resolveWindowStart below is plumbing retro's own
-// resolveWindowStart, repeated for the same unexported-elsewhere reason
-// as defaultDayArg.
+// brief) — retroplumbing.DefaultDayArg/ResolveWindowStart are plumbing
+// retro's own exported default/composition (llm-verbs seal sweep nit: no
+// longer hand-copied here — the wake.ConfiguredAutoMinChars precedent).
 func Command(streams *iostreams.Streams) *cobra.Command {
 	var since string
 	var refresh bool
@@ -55,7 +48,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			flags := cliflags.FromContext(cmd.Context())
 			ctx := cmd.Context()
 
-			dayArg := defaultDayArg
+			dayArg := retroplumbing.DefaultDayArg
 			if len(args) == 1 {
 				dayArg = args[0]
 			}
@@ -76,7 +69,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			windowStart, err := resolveWindowStart(day, since)
+			windowStart, err := retroplumbing.ResolveWindowStart(day, since)
 			if err != nil {
 				return err
 			}
@@ -139,22 +132,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 
 	surface.Annotate(cmd, surface.LLM)
 	return cmd
-}
-
-// resolveWindowStart is plumbing retro's own resolveWindowStart,
-// repeated here (see Command's doc comment): absent --since, the window
-// is exactly day; given it, journal.ParseDuration parses the same
-// "-Nd"/"-Nw" grammar and the window's lower bound is day shifted back
-// that many calendar days.
-func resolveWindowStart(day journal.Day, since string) (journal.Day, error) {
-	if since == "" {
-		return day, nil
-	}
-	n, err := journal.ParseDuration(since)
-	if err != nil {
-		return "", err
-	}
-	return day.AddDays(-n)
 }
 
 // displaySlug renders a group's slug for --json/human output: "" for the

@@ -36,16 +36,16 @@ func TestCacheDir_XDGUnset_FallsBackToDotCache(t *testing.T) {
 
 func TestFingerprint_SameInputSameFingerprint(t *testing.T) {
 	r := prompt.Rendered{System: "sys", User: "user body"}
-	a := Fingerprint(r)
-	b := Fingerprint(r)
+	a := Fingerprint(r, "gpt-test")
+	b := Fingerprint(r, "gpt-test")
 	if a != b {
 		t.Errorf("Fingerprint not stable: %q != %q", a, b)
 	}
 }
 
 func TestFingerprint_DifferentBodyDifferentFingerprint(t *testing.T) {
-	a := Fingerprint(prompt.Rendered{System: "sys", User: "body one"})
-	b := Fingerprint(prompt.Rendered{System: "sys", User: "body two"})
+	a := Fingerprint(prompt.Rendered{System: "sys", User: "body one"}, "gpt-test")
+	b := Fingerprint(prompt.Rendered{System: "sys", User: "body two"}, "gpt-test")
 	if a == b {
 		t.Error("Fingerprint identical for two different user prompts, want distinct")
 	}
@@ -56,8 +56,8 @@ func TestFingerprint_DifferentBodyDifferentFingerprint(t *testing.T) {
 // "combined" and "syscom" + "bined" must not fingerprint the same, even
 // though naive string concatenation would make them equal.
 func TestFingerprint_NoSeparatorCollision(t *testing.T) {
-	a := Fingerprint(prompt.Rendered{System: "sys", User: "combined"})
-	b := Fingerprint(prompt.Rendered{System: "syscom", User: "bined"})
+	a := Fingerprint(prompt.Rendered{System: "sys", User: "combined"}, "gpt-test")
+	b := Fingerprint(prompt.Rendered{System: "syscom", User: "bined"}, "gpt-test")
 	if a == b {
 		t.Error("Fingerprint collided across a system/user boundary shift, want the NUL separator to prevent this")
 	}
@@ -67,10 +67,26 @@ func TestFingerprint_TemplateChangeChangesFingerprint(t *testing.T) {
 	// Same "content" (User) but a different System half (standing in for
 	// an edited prompt-pair template) must fingerprint differently — a
 	// template edit must bust the cache.
-	a := Fingerprint(prompt.Rendered{System: "system v1", User: "same body"})
-	b := Fingerprint(prompt.Rendered{System: "system v2", User: "same body"})
+	a := Fingerprint(prompt.Rendered{System: "system v1", User: "same body"}, "gpt-test")
+	b := Fingerprint(prompt.Rendered{System: "system v2", User: "same body"}, "gpt-test")
 	if a == b {
 		t.Error("Fingerprint identical despite a changed system prompt, want it to change")
+	}
+}
+
+// TestFingerprint_ModelChangeChangesFingerprint pins F5 (llm-verbs seal
+// sweep): the exact same rendered pair under two different llm.model
+// values must fingerprint differently, so a config change from one model
+// to another never serves the old model's cached summary. Old cache
+// entries (written before this field existed in the recipe) simply miss
+// once under the new fingerprint — the correct, disposable-cache
+// behavior (MODEL M-§6).
+func TestFingerprint_ModelChangeChangesFingerprint(t *testing.T) {
+	r := prompt.Rendered{System: "sys", User: "same body"}
+	a := Fingerprint(r, "gpt-4")
+	b := Fingerprint(r, "gpt-5")
+	if a == b {
+		t.Error("Fingerprint identical despite a changed model, want it to change (F5)")
 	}
 }
 

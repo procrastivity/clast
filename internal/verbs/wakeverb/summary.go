@@ -23,10 +23,14 @@ type Summary struct {
 	Dismissed int
 	// Skipped counts every session left untouched: an interactive Skip
 	// choice, a draft that failed to generate (either mode), or (Auto
-	// mode) a draft below the length threshold. SkippedBelowThreshold is
-	// the subset of this total attributable to the threshold specifically.
+	// mode) a draft below the length threshold. SkippedBelowThreshold and
+	// SkippedDraftFailed are the subsets of this total attributable to
+	// each specific cause (llm-verbs seal sweep F3 adds the latter: a
+	// failed draft was already counted in Skipped before, but with no way
+	// to tell it apart from a deliberate skip or a below-threshold one).
 	Skipped               int
 	SkippedBelowThreshold int
+	SkippedDraftFailed    int
 	// PromotedDecisions/PromotedCommonIssues/PromotedWorkflows count §5's
 	// promoted sections, by kind, across the whole run (Auto mode never
 	// promotes — §5 is skipped there entirely, per the flow).

@@ -3,12 +3,12 @@ package wakeverb
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/entry"
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
@@ -47,7 +47,7 @@ const promotionMenu = "Promote a section before writing?\n1) Decision\n2) Common
 // without adding a fifth menu choice V9's four-state disposition never
 // named.
 //
-// Every draft, menu, and prompt this function (and accept/openEditor)
+// Every draft, menu, and prompt this function (and accept/disposition)
 // prints goes to streams.Err, never streams.Out (C2.1: stdout carries
 // exactly one thing) — command.go reserves Out for the run's own closing
 // summary (human text, or the --json payload), the same way --verbose
@@ -82,11 +82,25 @@ func RunInteractive(ctx context.Context, streams *iostreams.Streams, root string
 		}
 		summary.Drafted++
 
-		stop, err := disposition(ctx, streams, scanner, root, row.Item, raw, machine, &summary)
+		stop, err := disposition(ctx, streams, scanner, root, cutoff, yesterday, row.Item, raw, machine, client, &summary)
 		if err != nil {
 			return summary, err
 		}
 		if stop {
+			// F4 (llm-verbs seal sweep): running out of stdin mid-review
+			// leaves this row (never dispositioned) and every later row
+			// (never even reached) with no Accepted/Dismissed/Skipped
+			// disposition at all — Considered (fixed at the top of this
+			// function) would then no longer reconcile against
+			// Accepted+Dismissed+Skipped, breaking §7's own summary
+			// invariant. Count every one of them as skipped and say so,
+			// rather than silently under-reporting: honest reporting over
+			// a quieter, wrong total.
+			notReached := len(rows) - i
+			summary.Skipped += notReached
+			if _, err := fmt.Fprintf(streams.Err, "\nstopped early, %d session(s) not reached\n", notReached); err != nil {
+				return summary, err
+			}
 			break
 		}
 	}
@@ -96,8 +110,12 @@ func RunInteractive(ctx context.Context, streams *iostreams.Streams, root string
 
 // disposition drives one session's §4 decision loop (accept/edit/
 // dismiss/skip), looping on Edit until the reviewer picks one of the
-// other three or stdin runs out.
-func disposition(ctx context.Context, streams *iostreams.Streams, scanner *bufio.Scanner, root string, item journal.WalkItem, raw, machine string, summary *Summary) (stop bool, err error) {
+// other three or stdin runs out. Only running out of stdin at THIS loop's
+// own top-level "Choice:" prompt halts the whole run (stop=true,
+// RunInteractive's own EOF posture, F4) — every other EOF this function
+// or accept sees below (mid-promotion, mid-feedback) is this one
+// session's own EOF-means-skip fallback, never the run's.
+func disposition(ctx context.Context, streams *iostreams.Streams, scanner *bufio.Scanner, root string, cutoff journal.Cutoff, yesterday journal.Day, item journal.WalkItem, raw, machine string, client *llm.Client, summary *Summary) (stop bool, err error) {
 	for {
 		if _, err := fmt.Fprintf(streams.Err, "\n%s\n\n%s\nChoice: ", raw, menu); err != nil {
 			return false, err
@@ -114,17 +132,57 @@ func disposition(ctx context.Context, streams *iostreams.Streams, scanner *bufio
 			}
 			return false, nil
 		case "2":
-			edited, ok := openEditor(ctx, raw)
+			// F2 (llm-verbs seal sweep): flows/wake.md §4's Edit path is
+			// "take the requested changes as feedback, regenerate the
+			// draft (§3) incorporating them, and return to this
+			// decision" — not the old $EDITOR-on-a-temp-file mechanism
+			// this form shipped with (removed; see wakeverb.go's
+			// DraftWithFeedback doc comment for the old porcelain's own
+			// framing this carries forward). EOF here (stdin closed
+			// mid-feedback-prompt) is this session's own skip, mirroring
+			// choice "4" and the menu's own EOF posture — it never
+			// escalates to a whole-run stop the way EOF at THIS loop's
+			// own top-level Choice prompt does.
+			if _, err := fmt.Fprint(streams.Err, "\n  What should change? "); err != nil {
+				return false, err
+			}
+			feedback, ok := readLine(scanner)
 			if !ok {
-				if _, err := fmt.Fprintln(streams.Err, "  $EDITOR is not set (or failed) — skipping this session."); err != nil {
-					return false, err
+				summary.Skipped++
+				return false, nil
+			}
+			revised, err := DraftWithFeedback(ctx, root, cutoff, yesterday, item, client, feedback)
+			if err != nil {
+				if _, werr := fmt.Fprintf(streams.Err, "  draft generation failed: %v — skipping\n", err); werr != nil {
+					return false, werr
 				}
 				summary.Skipped++
 				return false, nil
 			}
-			raw = edited
+			raw = revised
 		case "3":
 			if _, err := dismiss.Run(root, item.Key.DirName(), dismiss.DefaultReason, time.Now(), machine); err != nil {
+				// F1 (llm-verbs seal sweep): dismiss.Run refuses
+				// validation.curated for any session that already has an
+				// entry.md on disk — which is every stale row this form
+				// offers (flows/wake.md §6: a stale session walks §2-§5
+				// like a fresh one, and §4 offers Dismiss unconditionally
+				// — the choice is never hidden for a stale row, but the
+				// refusal is real and this per-session, not fatal to the
+				// run). Print the refusal as a diagnostic, count this one
+				// session as skipped (not dismissed — nothing changed on
+				// disk for it), and let the run continue to the next
+				// row. Any OTHER error from dismiss.Run (not this one
+				// named refusal) is a real failure and still aborts the
+				// run, unchanged from before.
+				var cerr *clasterr.Error
+				if errors.As(err, &cerr) && cerr.Code == "validation.curated" {
+					if _, werr := fmt.Fprintf(streams.Err, "  cannot dismiss: %v — skipping this session.\n", err); werr != nil {
+						return false, werr
+					}
+					summary.Skipped++
+					return false, nil
+				}
 				return false, err
 			}
 			summary.Dismissed++
@@ -220,60 +278,4 @@ func readLine(scanner *bufio.Scanner) (line string, ok bool) {
 		return "", false
 	}
 	return strings.TrimRight(scanner.Text(), "\r"), true
-}
-
-// openEditor implements §4's Edit path per the step brief: opens $EDITOR
-// on a temp file carrying raw, waits for it to exit, and returns the
-// file's content as the revised draft. ok is false — the caller's
-// skip-with-message fallback (a wakeverb-owned decision, recorded per the
-// step brief's own ask) — when $EDITOR is unset or blank, the temp file
-// can't be created/written, or the editor command itself fails to run or
-// exits non-zero; a successfully-run editor that left the file
-// unchanged still returns ok true with the same content.
-//
-// The child process's stdio is wired to the real OS handles (os.Stdin/
-// Stdout/Stderr), not streams' own In/Out — an interactive $EDITOR (vim,
-// nano, ...) needs a real terminal to run at all, exactly the same as any
-// other CLI tool shelling out to one; a non-interactive stand-in (a test
-// fixture script that rewrites the file and exits) never touches stdin,
-// so this still drives cleanly under the e2e harness's piped stdin.
-func openEditor(ctx context.Context, raw string) (string, bool) {
-	editor := strings.TrimSpace(os.Getenv("EDITOR"))
-	if editor == "" {
-		return "", false
-	}
-
-	tmp, err := os.CreateTemp("", "clast-wake-draft-*.md")
-	if err != nil {
-		return "", false
-	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	if _, err := tmp.WriteString(raw); err != nil {
-		_ = tmp.Close()
-		return "", false
-	}
-	if err := tmp.Close(); err != nil {
-		return "", false
-	}
-
-	parts := strings.Fields(editor)
-	if len(parts) == 0 {
-		return "", false
-	}
-	args := append(append([]string{}, parts[1:]...), tmpPath)
-	cmd := exec.CommandContext(ctx, parts[0], args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", false
-	}
-
-	edited, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return "", false
-	}
-	return string(edited), true
 }

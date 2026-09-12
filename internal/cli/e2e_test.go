@@ -11,10 +11,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,12 +62,22 @@ type result struct {
 // XDG_CACHE_HOME joins this list with llm-verbs/step-05: `clast retro`
 // writes its own fingerprinted summary cache under
 // $XDG_CACHE_HOME/clast/retro/, and this suite must never read or write
-// this host's own real cache tree either.
+// this host's own real cache tree either. XDG_CONFIG_HOME and TMPDIR join
+// with the llm-verbs seal sweep (F6): config.Load reads
+// $XDG_CONFIG_HOME/clast/config.yaml, and several tests in this file
+// already set XDG_CONFIG_HOME explicitly (writeLLMConfig's own callers) —
+// those explicit sets still win, since the loop below only defaults a
+// name the caller's own env didn't already set; a test that forgets to
+// set it now gets its own per-test temp dir instead of silently reading
+// this host's real ~/.config/clast. TMPDIR is defensive: nothing in this
+// tree currently shells out to a real $EDITOR against the host's temp dir
+// (F2 removed the one path that did), but a stray future child process
+// picking up the host's own TMPDIR is exactly the same class of leak.
 // Add each new harness's seam var to this list when adding a target.
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append(os.Environ(), env...)
-	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR", "XDG_CACHE_HOME"} {
+	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"} {
 		set := false
 		for _, e := range env {
 			if strings.HasPrefix(e, name+"=") {
@@ -4425,7 +4438,11 @@ const wakeQualifyingDraft = "# Session: fixed the wake ordering bug\n\n" +
 // itself fails; Auto mode's own rule is "a draft that fails to generate
 // is skipped, not retried" — never an aborted run). The stub must see
 // exactly one request: the broken session never reaches the LLM call at
-// all.
+// all. F3 (llm-verbs seal sweep) amends this test's own assertions: the
+// broken session's skip must now carry its own skipped_draft_failed
+// count (distinct from skipped_below_threshold) and a stderr diagnostic
+// naming it — before the fix, this same failure was a silent plain skip,
+// indistinguishable from a below-threshold one.
 func TestWake_Auto_AcceptAndSkipInOneRun_AgainstStub(t *testing.T) {
 	journalDir := t.TempDir()
 	xdg := t.TempDir()
@@ -4460,6 +4477,7 @@ func TestWake_Auto_AcceptAndSkipInOneRun_AgainstStub(t *testing.T) {
 		Dismissed             int `json:"dismissed"`
 		Skipped               int `json:"skipped"`
 		SkippedBelowThreshold int `json:"skipped_below_threshold"`
+		SkippedDraftFailed    int `json:"skipped_draft_failed"`
 		ProjectsTouched       int `json:"projects_touched"`
 	}
 	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
@@ -4468,8 +4486,17 @@ func TestWake_Auto_AcceptAndSkipInOneRun_AgainstStub(t *testing.T) {
 	if payload.Considered != 2 || payload.Drafted != 1 || payload.Accepted != 1 || payload.Skipped != 1 || payload.Dismissed != 0 {
 		t.Fatalf("payload = %+v, want considered=2 drafted=1 accepted=1 skipped=1 dismissed=0", payload)
 	}
+	if payload.SkippedDraftFailed != 1 || payload.SkippedBelowThreshold != 0 {
+		t.Fatalf("payload = %+v, want skipped_draft_failed=1 skipped_below_threshold=0 (F3)", payload)
+	}
 	if reqs := stub.Requests(); len(reqs) != 1 {
 		t.Fatalf("stub captured %d requests, want exactly 1 (the broken session never reaches the endpoint)", len(reqs))
+	}
+	if !strings.Contains(r.stderr, broken.DirName()) {
+		t.Errorf("stderr = %q, want a diagnostic naming the broken session %q (F3)", r.stderr, broken.DirName())
+	}
+	if !strings.Contains(r.stderr, "draft generation failed") {
+		t.Errorf("stderr = %q, want a draft-generation-failed diagnostic (F3)", r.stderr)
 	}
 
 	// The accepted session is now curated; the broken one is untouched.
@@ -4570,42 +4597,69 @@ func TestWake_EmptyWorkingSet_NoLLMConfigNeeded(t *testing.T) {
 	}
 }
 
-// editedWakeDraft is what fakeEditorScript rewrites the temp file to —
-// distinct from wakeQualifyingDraft so a test can tell whether the
-// accepted entry carries the ORIGINAL draft or the edited one.
-const editedWakeDraft = "# Session: edited via a fake $EDITOR\n\n" +
-	"## Goal\nProve the edit path's revised content is what actually gets curated.\n\n" +
-	"Suggested tags: edited\n"
+// editedWakeDraft is a sequencedLLMStub's SECOND response — distinct from
+// wakeQualifyingDraft so a test can tell whether the accepted entry
+// carries the ORIGINAL draft or the regenerated one.
+const editedWakeDraft = "# Session: revised per feedback\n\n" +
+	"## Goal\nProve the Edit path's regenerated content is what actually gets curated.\n\n" +
+	"Suggested tags: revised\n"
 
-// fakeEditorScript writes a standalone shell script to dir that ignores
-// whatever openEditor's temp file already contains and overwrites it with
-// editedWakeDraft — a non-interactive stand-in for a real $EDITOR (vim,
-// nano, ...), the same posture openEditor's own doc comment calls for
-// ("a test fixture script that rewrites the file and exits"). Returns the
-// script's absolute path, ready to use as $EDITOR verbatim (no arguments
-// needed: openEditor appends the temp file path as the last argument).
-func fakeEditorScript(t *testing.T, dir string) string {
+// sequencedLLMStub is a minimal OpenAI-compatible /chat/completions stub
+// that answers its Nth request with responses[N] (its last response for
+// any request beyond len(responses)) — llmtest.Server's own single canned
+// response can't change mid-run, and driving `wake`'s Edit path (F2,
+// llm-verbs seal sweep) through the actual built binary needs a first
+// draft and a distinguishable regenerated one from that one process's own
+// two requests.
+func sequencedLLMStub(t *testing.T, responses ...string) *httptest.Server {
 	t.Helper()
-	path := filepath.Join(dir, "fake-editor.sh")
-	script := "#!/bin/sh\ncat > \"$1\" <<'CLASTDRAFTEOF'\n" + editedWakeDraft + "CLASTDRAFTEOF\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake $EDITOR script: %v", err)
-	}
-	return path
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		idx := n
+		n++
+		mu.Unlock()
+		resp := responses[len(responses)-1]
+		if idx < len(responses) {
+			resp = responses[idx]
+		}
+		var out struct {
+			Choices []struct {
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		out.Choices = make([]struct {
+			Message struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"message"`
+		}, 1)
+		out.Choices[0].Message.Role = "assistant"
+		out.Choices[0].Message.Content = resp
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
-// TestWake_Interactive_EditThroughRealEditor_AgainstStub drives `clast
-// wake --json` (interactive) over a one-session working set, choosing
-// Edit (menu choice "2") before Accept: interactive_test.go's own unit
-// tests only ever exercise the $EDITOR-unset fallback
-// (TestRunInteractive_EditUnsetEditor_SkipsWithMessage) — this is the
-// full edit round trip end to end through the built binary, $EDITOR
-// pointed at fakeEditorScript, confirming the entry `plumbing curate`
-// ultimately writes carries the EDITED draft's title, not the original
-// one the LLM stub returned first (llm-verbs/step-07 seal sweep: flagged
-// as unit-only in the step brief, e2e'd here since a fake $EDITOR script
-// makes it cheap).
-func TestWake_Interactive_EditThroughRealEditor_AgainstStub(t *testing.T) {
+// TestWake_Interactive_EditRegeneratesWithFeedback_AgainstStub drives
+// `clast wake --json` (interactive) over a one-session working set,
+// choosing Edit (menu choice "2") before Accept: F2 (llm-verbs seal
+// sweep) replaced the old $EDITOR-on-a-temp-file mechanism with
+// flows/wake.md §4's own "take the requested changes as feedback,
+// regenerate the draft, and return to the decision" — this is that round
+// trip end to end through the built binary (a sequenced stub stands in
+// for the LLM, since a real process can't have its stub reconfigured
+// mid-run), confirming the entry `plumbing curate` ultimately writes
+// carries the REGENERATED draft's title, not the original one the stub
+// returned first, and that the regeneration request itself carried the
+// feedback line.
+func TestWake_Interactive_EditRegeneratesWithFeedback_AgainstStub(t *testing.T) {
 	journalDir := t.TempDir()
 	xdg := t.TempDir()
 
@@ -4613,18 +4667,13 @@ func TestWake_Interactive_EditThroughRealEditor_AgainstStub(t *testing.T) {
 	key := journal.SessionKey{Harness: "claude", NativeID: "wake-edit-01"}
 	wakeSessionWithTranscript(t, journalDir, now.Add(-3*time.Hour).Format("2006-01-02"), key, now.Add(-3*time.Hour))
 
-	stub := llmtest.New(t, wakeQualifyingDraft)
-	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
-	editor := fakeEditorScript(t, t.TempDir())
-	env := []string{
-		"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key",
-		"EDITOR=" + editor,
-	}
+	stub := sequencedLLMStub(t, wakeQualifyingDraft, editedWakeDraft)
+	writeLLMConfig(t, xdg, stub.URL, "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
 
-	// "2" (Edit) -> fake $EDITOR rewrites the draft -> back to the main
-	// menu with the edited draft shown -> "1" (Accept) -> "4" (no more
-	// promotions).
-	r := runWithStdin(t, env, "2\n1\n4\n", "wake", "--json")
+	// "2" (Edit) -> feedback line -> regenerated draft shown -> "1"
+	// (Accept) -> "4" (no more promotions).
+	r := runWithStdin(t, env, "2\nplease make it shorter\n1\n4\n", "wake", "--json")
 	if r.exitCode != 0 {
 		t.Fatalf("wake --json (edit): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
 	}
@@ -4652,8 +4701,8 @@ func TestWake_Interactive_EditThroughRealEditor_AgainstStub(t *testing.T) {
 	if err := json.Unmarshal([]byte(show.stdout), &showPayload); err != nil {
 		t.Fatalf("plumbing show --json stdout: %v; stdout=%q", err, show.stdout)
 	}
-	if showPayload.Entry.Title != "edited via a fake $EDITOR" {
-		t.Errorf("entry.title = %q, want the EDITED draft's title, not the stub's original", showPayload.Entry.Title)
+	if showPayload.Entry.Title != "revised per feedback" {
+		t.Errorf("entry.title = %q, want the REGENERATED draft's title, not the stub's original", showPayload.Entry.Title)
 	}
 }
 
@@ -4709,6 +4758,83 @@ func TestWake_Interactive_Dismiss_WritesManualReason_UndismissRevives(t *testing
 	}
 	if _, ok, err := journal.ReadCuration(journalDir, shard, key); err != nil || ok {
 		t.Fatalf("curation after undismiss: ok=%v err=%v, want ok=false (captured, no curation.json)", ok, err)
+	}
+}
+
+// TestWake_Interactive_StaleDismissRefused_SkipsAndContinues_ThroughTopLevelVerb
+// pins F1 (the seal blocker, llm-verbs seal sweep) end to end through the
+// built binary: a stale curated session already carries an entry.md on
+// disk, so `plumbing dismiss` (and so wake's own Dismiss path) refuses it
+// (validation.curated) — flows/wake.md §6 walks a stale session through
+// §2-§5 like a fresh one, and §4 offers Dismiss unconditionally, so the
+// choice must stay offered and the refusal must be a per-session
+// diagnostic on stderr, never a run-aborting error. This drives the stale
+// session first (Dismiss, refused) and a fresh session after it (Accept):
+// before the fix, dismiss.Run's error propagated straight out of the
+// process (a non-zero exit, no §7 summary at all), and the fresh session
+// below was never reached.
+func TestWake_Interactive_StaleDismissRefused_SkipsAndContinues_ThroughTopLevelVerb(t *testing.T) {
+	fx := journaltest.New(t)
+	xdg := t.TempDir()
+
+	now := time.Now()
+	staleKey := journal.SessionKey{Harness: "claude", NativeID: "wake-stale-dismiss"}
+	freshKey := journal.SessionKey{Harness: "claude", NativeID: "wake-fresh-after-stale"}
+	staleShard := now.Add(-3 * time.Hour).Format("2006-01-02")
+	freshShard := now.Add(-2 * time.Hour).Format("2006-01-02")
+
+	// Curated against a shorter transcript than what's on disk now (M7:
+	// stale = curated && transcript != transcript_at_curation) — so this
+	// row already carries an entry.md, exactly the shape dismiss.Run
+	// refuses.
+	fx.CuratedStale(staleShard, staleKey,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "grown"},
+		journal.TranscriptStamp{Lines: 1, SHA256: "original"},
+		now.Add(-3*time.Hour), now.Add(-2*time.Hour), "framework", "old title before the session grew",
+	).WithTranscript(staleShard, staleKey, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello, grown"}}`+"\n"))
+	fx.Captured(freshShard, freshKey, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "s-fresh"}, now.Add(-2*time.Hour)).
+		WithTranscript(freshShard, freshKey, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello from fresh"}}`+"\n"))
+
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root(), "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	// Row order is chronological by StartedAt: staleKey (-3h) then
+	// freshKey (-2h). "3" (Dismiss, refused -> skip) for the stale row,
+	// then "1"/"4" (Accept, no promotions) for the fresh one.
+	r := runWithStdin(t, env, "3\n1\n4\n", "wake", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --json (stale dismiss): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered int `json:"considered"`
+		Accepted   int `json:"accepted"`
+		Dismissed  int `json:"dismissed"`
+		Skipped    int `json:"skipped"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 2 || payload.Dismissed != 0 || payload.Skipped != 1 || payload.Accepted != 1 {
+		t.Fatalf("payload = %+v, want considered=2 dismissed=0 skipped=1 accepted=1", payload)
+	}
+	if !strings.Contains(r.stderr, "cannot dismiss") {
+		t.Errorf("stderr = %q, want a per-session diagnostic naming the refusal", r.stderr)
+	}
+
+	staleShow := run(t, env, "plumbing", "show", staleKey.DirName(), "--json")
+	if staleShow.exitCode != 0 {
+		t.Fatalf("plumbing show %s: exit=%d stderr=%q", staleKey.DirName(), staleShow.exitCode, staleShow.stderr)
+	}
+	if !strings.Contains(staleShow.stdout, `"state":"curated"`) {
+		t.Errorf("stale session show = %q, want still curated (dismiss refused, unchanged)", staleShow.stdout)
+	}
+	freshShow := run(t, env, "plumbing", "show", freshKey.DirName(), "--json")
+	if freshShow.exitCode != 0 {
+		t.Fatalf("plumbing show %s: exit=%d stderr=%q", freshKey.DirName(), freshShow.exitCode, freshShow.stderr)
+	}
+	if !strings.Contains(freshShow.stdout, `"state":"curated"`) {
+		t.Errorf("fresh session show = %q, want curated (accepted after the run continued past the refusal)", freshShow.stdout)
 	}
 }
 

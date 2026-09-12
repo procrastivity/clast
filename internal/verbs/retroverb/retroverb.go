@@ -140,7 +140,7 @@ func summarizeEntry(ctx context.Context, groupSlug string, singleDay bool, topDa
 			fmt.Sprintf("retro: resolving the retro-summary prompt pair: %v", err))
 	}
 
-	fingerprint := Fingerprint(rendered)
+	fingerprint := Fingerprint(rendered, client.Model())
 	if !refresh {
 		if cached, ok := cacheGet(cacheDir, fingerprint); ok {
 			return cached, true, nil

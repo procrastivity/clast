@@ -43,27 +43,37 @@ func CacheDir() (string, error) {
 }
 
 // Fingerprint returns the cache key for one rendered retro-summary prompt
-// pair: the hex-encoded sha256 of rendered.System and rendered.User,
-// joined by a single NUL byte so the two halves can never collide by
-// plain concatenation (a "foo"+"bar" vs "fo"+"obar" style seam).
+// pair against model: the hex-encoded sha256 of rendered.System,
+// rendered.User, and model, each joined by a single NUL byte so no two
+// components can ever collide by plain concatenation (a "foo"+"bar" vs
+// "fo"+"obar" style seam).
 //
-// Recipe (wip finding, llm-verbs/step-05): fingerprinting the fully
-// *rendered* pair — not the raw entry body alone, and not the raw prompt
-// templates alone — captures every fact §2 fills the templates from in
-// one hash: the entry body itself, the session's project/day/started_at/
-// session_id (all baked into the filled user prompt), AND the prompt
-// templates' own content (both halves, unfilled, are also baked in via
-// the surrounding template text). So a fingerprint changes — and the
-// cache correctly misses — on any of: a re-curated entry body, a changed
-// prompt-pair asset (an override edit, or a shipped-template update), or
-// (vacuously) a different session/day, while staying stable run to run
-// for the one thing V11 asks it to be stable for: an unchanged curated
-// session, re-run later, is not re-summarized.
-func Fingerprint(rendered prompt.Rendered) string {
+// Recipe (wip finding, llm-verbs/step-05, amended llm-verbs seal sweep
+// F5): fingerprinting the fully *rendered* pair — not the raw entry body
+// alone, and not the raw prompt templates alone — captures every fact §2
+// fills the templates from in one hash: the entry body itself, the
+// session's project/day/started_at/session_id (all baked into the filled
+// user prompt), AND the prompt templates' own content (both halves,
+// unfilled, are also baked in via the surrounding template text). model
+// joins as a third component (not folded into the rendered pair itself)
+// because it is a fact about the *call*, not the *prompt* — a config
+// change to llm.model produces a materially different completion for the
+// identical rendered pair, and without this a cache built under one model
+// would silently keep serving that model's summaries after the config
+// moved to another. So a fingerprint changes — and the cache correctly
+// misses — on any of: a re-curated entry body, a changed prompt-pair
+// asset (an override edit, or a shipped-template update), a changed
+// llm.model, or (vacuously) a different session/day, while staying
+// stable run to run for the one thing V11 asks it to be stable for: an
+// unchanged curated session under an unchanged model, re-run later, is
+// not re-summarized.
+func Fingerprint(rendered prompt.Rendered, model string) string {
 	h := sha256.New()
 	h.Write([]byte(rendered.System))
 	h.Write([]byte{0})
 	h.Write([]byte(rendered.User))
+	h.Write([]byte{0})
+	h.Write([]byte(model))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
