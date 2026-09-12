@@ -18,6 +18,7 @@ import (
 	captureverb "github.com/procrastivity/clast/internal/verbs/capture"
 	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
 	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
+	sessionsverb "github.com/procrastivity/clast/internal/verbs/sessions"
 	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
 )
 
@@ -41,5 +42,6 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	cmd.AddCommand(whereamiverb.Command(streams))
 	cmd.AddCommand(projectsverb.Command(streams))
 	cmd.AddCommand(clonesverb.Command(streams))
+	cmd.AddCommand(sessionsverb.Command(streams))
 	return cmd
 }

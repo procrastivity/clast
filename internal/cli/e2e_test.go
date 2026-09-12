@@ -15,6 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/journal/journaltest"
 )
 
 var binPath string
@@ -1228,6 +1232,94 @@ func TestPlumbingBare_PrintsHelp_ExitZero(t *testing.T) {
 	}
 }
 
+// --- plumbing: `clast plumbing sessions` (SURFACE V17) ---
+
+// TestPlumbingSessions_Human_NoSessions confirms an empty journal prints a
+// plain line rather than an empty table.
+func TestPlumbingSessions_Human_NoSessions(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "sessions")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing sessions: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if strings.TrimSpace(r.stdout) != "no sessions" {
+		t.Errorf("stdout = %q, want %q", r.stdout, "no sessions")
+	}
+}
+
+// TestPlumbingSessions_JSON_FiltersAndSorts seeds a fixture journal
+// directly (journaltest, sharing internal/journal's own write primitives)
+// under CLAST_JOURNAL_DIR, then drives the real binary: --state curated
+// narrows to the curated session, and the full session.json fact set
+// rides alongside state/stale/title in the --json payload.
+func TestPlumbingSessions_JSON_FiltersAndSorts(t *testing.T) {
+	fx := journaltest.New(t)
+	captured := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
+	curated := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
+	fx.Captured("2026-09-10", captured,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a"},
+		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+	)
+	fx.Curated("2026-09-11", curated,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"framework", "a curated session",
+	)
+	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
+
+	r := run(t, env, "plumbing", "sessions", "--state", "curated", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing sessions --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Sessions []struct {
+			Harness   string `json:"harness"`
+			SessionID string `json:"session_id"`
+			State     string `json:"state"`
+			Stale     bool   `json:"stale"`
+			Title     string `json:"title"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing sessions --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want exactly 1 (curated only)", payload.Sessions)
+	}
+	got := payload.Sessions[0]
+	if got.SessionID != curated.NativeID {
+		t.Errorf("session_id = %q, want %q", got.SessionID, curated.NativeID)
+	}
+	if got.State != "curated" {
+		t.Errorf("state = %q, want curated", got.State)
+	}
+	if got.Stale {
+		t.Error("stale = true, want false")
+	}
+	if got.Title != "a curated session" {
+		t.Errorf("title = %q, want %q", got.Title, "a curated session")
+	}
+}
+
+// TestPlumbingSessions_UnknownHarness_JSONEnvelope confirms --harness
+// validates against the source registry (V30).
+func TestPlumbingSessions_UnknownHarness_JSONEnvelope(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir}
+
+	r := run(t, env, "plumbing", "sessions", "--harness", "no-such-harness", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing sessions --harness no-such-harness: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.unknown-harness" {
+		t.Fatalf("error code = %q, want validation.unknown-harness", envelope.Error.Code)
+	}
+}
+
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
 // under it (V2: plumbing verbs are never porcelain).
@@ -1240,6 +1332,10 @@ func TestRootHelp_DoesNotListPlumbingVerbs(t *testing.T) {
 		t.Errorf("stdout = %q, want it to list the plumbing namespace entry", r.stdout)
 	}
 	for _, verb := range []string{"whereami", "projects", "clones"} {
+		// "sessions" is deliberately not checked here: the root command's own
+		// Short description ("capture agent sessions...") already contains
+		// the word, which would make this a false positive rather than a
+		// real signal about the plumbing verb.
 		if strings.Contains(r.stdout, verb) {
 			t.Errorf("stdout = %q, want it NOT to list plumbing verb %q among the porcelain", r.stdout, verb)
 		}
