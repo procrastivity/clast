@@ -123,12 +123,23 @@ func TestRun_UnregisteredClone_RefusesUnknownClone(t *testing.T) {
 	assertUnknownClone(t, err)
 }
 
-func TestRun_NotAGitRepo_AlsoRefusesUnknownClone(t *testing.T) {
+// TestRun_NotAGitRepo_PassesThroughUnderlyingError covers the pass-through
+// path: a dir that is not inside a git repository at all fails
+// registry.ResolveCurrentClone with a wrapped git error, not
+// registry.ErrUnknownClone, so it must reach the caller unchanged rather
+// than being folded into refusal.unknown-clone (mirrors whereami's own
+// errors.Is split).
+func TestRun_NotAGitRepo_PassesThroughUnderlyingError(t *testing.T) {
 	root := t.TempDir()
 	dir := t.TempDir()
 
 	_, err := Run(ctx, root, dir, "a note", false, time.Now())
-	assertUnknownClone(t, err)
+	if err == nil {
+		t.Fatal("Run: want an error for a dir outside any git repository")
+	}
+	if ce, ok := err.(*clasterr.Error); ok {
+		t.Fatalf("Run: got *clasterr.Error %+v, want the underlying registry error to pass through unchanged", ce)
+	}
 }
 
 func TestRun_Global_NeverFailsEvenOutsideAnyGitRepo(t *testing.T) {

@@ -8,6 +8,7 @@ package breadcrumb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,21 +22,23 @@ import (
 //
 // When global is false, dir is resolved through
 // registry.ResolveCurrentClone — the same lookup `clast init` and
-// session capture use. ANY failure to resolve a registered clone at dir
-// (dir is not even inside a git repository, or it is one nobody has
-// registered yet) is treated as the same "unregistered cwd" case V27
-// names: refuse (refusal.unknown-clone) naming --global and `clast init`
-// as the two outs, rather than distinguishing sub-cases the spec does
-// not ask this verb to (a judgment call — whereami's own refusal keeps
-// "not a git repo" as a separate validation.not-a-git-repo code, but
-// breadcrumb has no reason to draw that distinction: refuse over guess
-// either way, M16).
+// session capture use. Only registry.ErrUnknownClone — dir resolves to no
+// clone registered under this machine's name — is treated as the
+// "unregistered cwd" case V27 names: refuse (refusal.unknown-clone)
+// naming --global and `clast init` as the two outs. Every other error
+// (dir is not even inside a git repository, or some other lookup
+// failure) passes through unchanged, mirroring whereami's own split
+// between refusal.unknown-clone and everything else (M16: refuse over
+// guess, but do not mislabel an unrelated failure as this one).
 func Run(ctx context.Context, root, dir, text string, global bool, now time.Time) (journal.Breadcrumb, error) {
 	var slug *string
 	if !global {
 		current, err := registry.ResolveCurrentClone(ctx, root, dir)
 		if err != nil {
-			return journal.Breadcrumb{}, unknownClone(dir)
+			if errors.Is(err, registry.ErrUnknownClone) {
+				return journal.Breadcrumb{}, unknownClone(dir)
+			}
+			return journal.Breadcrumb{}, err
 		}
 		slug = &current.Project.Slug
 	}
