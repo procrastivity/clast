@@ -58,9 +58,16 @@ func Run(root, locator, reason string, now time.Time, machine string) (Result, e
 		return Result{}, err
 	}
 
-	if item.State() == journal.StateCurated {
+	// Curated sessions are refused outright, and so is a session whose
+	// entry.md exists without curation.json: curate writes entry.md
+	// before curation.json (its own doc comment), so a crash between the
+	// two writes leaves exactly that shape — read back as "captured", but
+	// with an entry already on disk that dismiss would otherwise orphan.
+	// Same code (validation.curated) and rationale (V15) either way: the
+	// entry would be orphaned.
+	if item.State() == journal.StateCurated || item.EntryExists {
 		return Result{}, clasterr.New("validation.curated",
-			"refused — "+item.Key.DirName()+" is curated; dismissing it would orphan its entry")
+			"refused — "+item.Key.DirName()+" has an entry.md on disk; dismissing it would orphan the entry")
 	}
 
 	redismiss := item.State() == journal.StateDismissed

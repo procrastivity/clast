@@ -2,6 +2,7 @@ package dismiss
 
 import (
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -102,6 +103,30 @@ func TestRun_RefusesCurated(t *testing.T) {
 	}
 	if curation.State != journal.StateCurated {
 		t.Errorf("State = %q after a refused dismiss, want unchanged %q", curation.State, journal.StateCurated)
+	}
+}
+
+// TestRun_RefusesEntryExistsWithoutCuration covers the crash-window
+// orphan: curate writes entry.md before curation.json, so a crash between
+// the two leaves a session that reads back as captured (no curation.json)
+// but already has an entry.md on disk. dismiss must refuse it the same
+// way it refuses an actually-curated session (validation.curated) rather
+// than orphaning that entry.
+func TestRun_RefusesEntryExistsWithoutCuration(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	root := journaltest.New(t).
+		Captured("2026-09-11", key, journal.TranscriptFingerprint{Lines: 1, SHA256: "x"},
+			time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC)).
+		Root()
+	if err := os.WriteFile(journal.EntryPath(root, "2026-09-11", key), []byte("---\ntitle: mid-curate\n---\n\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write entry.md: %v", err)
+	}
+
+	_, err := Run(root, "claude-8f3a", "not useful", fixedNow, "framework")
+	assertCode(t, err, "validation.curated")
+
+	if _, ok, err := journal.ReadCuration(root, "2026-09-11", key); err != nil || ok {
+		t.Errorf("ReadCuration after a refused dismiss: ok=%v err=%v, want ok=false (still no curation.json)", ok, err)
 	}
 }
 
