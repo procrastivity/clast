@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -140,62 +139,5 @@ func TestRead_MalformedFileIsAnError(t *testing.T) {
 	}
 	if !ok {
 		t.Errorf("Read ok = false, want true — the file exists, it just doesn't parse")
-	}
-}
-
-func TestWrite_ThenReadRoundTrips(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "sessions", "2026-09-12", "claude-abc", "entry.md")
-	data := []byte("---\ntitle: round trip\ntags: [a, b]\n---\n\nsome body text\n")
-
-	if err := Write(path, data); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if string(got) != string(data) {
-		t.Errorf("written bytes = %q, want %q", got, data)
-	}
-
-	e, ok, err := Read(path)
-	if err != nil || !ok {
-		t.Fatalf("Read: ok=%v err=%v", ok, err)
-	}
-	if e.Title != "round trip" {
-		t.Errorf("Title = %q, want %q", e.Title, "round trip")
-	}
-}
-
-func TestWrite_CreatesParentDirectories(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a", "b", "c", "entry.md")
-	if err := Write(path, []byte("---\ntitle: nested\n---\n\nbody\n")); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("Stat after Write: %v", err)
-	}
-}
-
-func TestWrite_NoStrayTempFileLeftBehind(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "entry.md")
-	if err := Write(path, []byte("---\ntitle: clean\n---\n\nbody\n")); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".tmp-") {
-			t.Errorf("stray temp file left behind: %s", e.Name())
-		}
-	}
-	if len(entries) != 1 || entries[0].Name() != "entry.md" {
-		t.Errorf("dir entries = %+v, want exactly entry.md", entries)
 	}
 }

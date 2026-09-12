@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -120,40 +119,4 @@ func Read(path string) (Entry, bool, error) {
 		return Entry{}, true, fmt.Errorf("entry: parsing %s: %w", path, err)
 	}
 	return e, true, nil
-}
-
-// Write atomically writes data — a complete entry.md document, already
-// validated by Parse — to path via temp-file-and-rename: the same MODEL
-// §4 write discipline the store package applies to its own JSON
-// documents, applied here instead of there because entry.md's content
-// (and so its writing) stays out of internal/journal by the M9 boundary.
-// path is typically journal.EntryPath's result; Write creates path's
-// parent directory as needed, mirroring the store package's own write
-// primitives.
-func Write(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("entry: creating %s: %w", dir, err)
-	}
-
-	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
-	if err != nil {
-		return fmt.Errorf("entry: creating temp file in %s: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	// Deliberate discard: a no-op once the rename below succeeds, and
-	// there is nothing more useful to do with a cleanup failure here.
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("entry: writing %s: %w", tmpPath, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("entry: closing %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("entry: renaming %s to %s: %w", tmpPath, path, err)
-	}
-	return nil
 }
