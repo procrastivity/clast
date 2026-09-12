@@ -41,11 +41,12 @@ type SpliceOutcome struct {
 }
 
 // Harness is one row of the install/uninstall/doctor table: a harness's
-// name, its projected targets, and the functions that probe it and splice
-// its foreign-file targets. Available is required — Lookup's callers
-// dispatch through it unconditionally. Targets may be empty and Splice may
-// be nil for a harness with neither kind of target (none exist yet, but
-// C4.8 rates both as ordinary extensions of the model).
+// name, its projected targets, and the functions that probe it and
+// splice/unsplice its foreign-file targets. Available is required —
+// Lookup's callers dispatch through it unconditionally. Targets may be
+// empty and Splice/Unsplice may be nil for a harness with neither kind of
+// target (none exist yet, but C4.8 rates both as ordinary extensions of
+// the model).
 type Harness struct {
 	Name      string
 	Available func() bool
@@ -53,6 +54,12 @@ type Harness struct {
 	// Splice installs this harness's splice target, if it has one (C4.8) —
 	// nil for a harness with none. Only claude-code sets it today.
 	Splice func() (SpliceOutcome, error)
+	// Unsplice reverses Splice (step-03): removes exactly the entry Splice
+	// added, leaving every unrelated byte alone. nil for a harness with no
+	// splice target. Idempotent and symmetric with Splice: a missing file
+	// or an already-absent entry is a no-op, not a diagnostic (see
+	// claudecode.Unsplice's doc comment for the full reasoning).
+	Unsplice func() (SpliceOutcome, error)
 }
 
 // All lists every harness this tool can project itself into. The skeleton
@@ -65,6 +72,7 @@ var All = []Harness{
 		Available: claudecode.Available,
 		Targets:   claudecodeTargets(),
 		Splice:    claudecodeSplice,
+		Unsplice:  claudecodeUnsplice,
 	},
 }
 
@@ -98,6 +106,17 @@ func claudecodeTargets() []Target {
 // here rather than in each harness subpackage).
 func claudecodeSplice() (SpliceOutcome, error) {
 	r, err := claudecode.Splice()
+	if err != nil {
+		return SpliceOutcome{}, err
+	}
+	return SpliceOutcome{Path: r.Path, Status: r.Status}, nil
+}
+
+// claudecodeUnsplice adapts claudecode.Unsplice's result into the
+// registry's own SpliceOutcome shape, the same reason claudecodeSplice
+// does — one shape install, uninstall, and checks all read.
+func claudecodeUnsplice() (SpliceOutcome, error) {
+	r, err := claudecode.Unsplice()
 	if err != nil {
 		return SpliceOutcome{}, err
 	}

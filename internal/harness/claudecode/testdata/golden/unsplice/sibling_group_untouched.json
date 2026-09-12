@@ -1,0 +1,1 @@
+{"hooks":{"SessionStart":[{"matcher":"other","hooks":[{"type":"command","command":"echo other"}]}]}}

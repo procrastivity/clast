@@ -265,13 +265,11 @@ func TestManifest_IsDeterministic(t *testing.T) {
 // package under test.
 var claudeCodeSkillNames = []string{"wake", "brief", "retro"}
 
-// TestInstallLoop drives the full install lifecycle against a hermetic
-// skills dir and settings.json path: install writes three stamped skill
-// trees plus the settings.json splice, a re-install reports current and
-// does not duplicate the hook, a hand-edit flips install to a refusal
-// (exit 3) and doctor keeps advising, --force recovers, and uninstall
-// removes exactly the three skill trees (never the splice — step-03's
-// job, SURFACE V32/V33, C4.8).
+// TestInstallLoop drives the fresh-install half of the lifecycle against a
+// hermetic skills dir and settings.json path: install writes three
+// stamped skill trees plus the settings.json splice (SURFACE V32/V33,
+// C4.8). The re-install, hand-edit/--force, uninstall, and uninstall
+// round-trip halves are each their own test below.
 func TestInstallLoop(t *testing.T) {
 	skills := t.TempDir()
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
@@ -365,25 +363,39 @@ func TestInstallLoop_HandEditRefusesThenForceRecovers(t *testing.T) {
 	}
 }
 
-// TestUninstallLoop_RemovesExactlyTheThreeSkillTrees asserts uninstall
-// removes every one of the three skill directories install wrote, and
-// leaves the settings.json splice untouched (reversing it is step-03's
-// job, not this step's).
-func TestUninstallLoop_RemovesExactlyTheThreeSkillTrees(t *testing.T) {
+// TestUninstallLoop_RemovesExactlyTheThreeSkillTreesAndUnsplices asserts
+// uninstall removes every one of the three skill directories install
+// wrote, and also reverses the settings.json splice (step-03): the shim
+// command is gone, and the one-time .bak install wrote is left exactly as
+// it was — uninstall never restores or deletes it (it is the user's
+// file).
+func TestUninstallLoop_RemovesExactlyTheThreeSkillTreesAndUnsplices(t *testing.T) {
 	skills := t.TempDir()
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
 	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
 
-	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
-		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
-	}
-	beforeUninstall, err := os.ReadFile(settingsPath)
-	if err != nil {
+	const preInstall = `{"env":{"FOO":"bar"}}`
+	if err := os.WriteFile(settingsPath, []byte(preInstall), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	bakAfterInstall, err := os.ReadFile(settingsPath + ".bak")
+	if err != nil {
+		t.Fatalf("reading .bak after install: %v", err)
+	}
+	if string(bakAfterInstall) != preInstall {
+		t.Fatalf(".bak after install = %s, want the pre-install bytes verbatim", bakAfterInstall)
+	}
+
+	r := run(t, env, "uninstall", "claude-code", "--json")
+	if r.exitCode != 0 {
 		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, `"status":"unspliced"`) {
+		t.Fatalf("uninstall stdout = %q, want the splice reporting unspliced", r.stdout)
 	}
 	for _, name := range claudeCodeSkillNames {
 		skillDir := filepath.Join(skills, name)
@@ -396,8 +408,115 @@ func TestUninstallLoop_RemovesExactlyTheThreeSkillTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(afterUninstall) != string(beforeUninstall) {
-		t.Fatalf("uninstall touched settings.json — it should not (splice removal is step-03's job): before=%s after=%s", beforeUninstall, afterUninstall)
+	if strings.Contains(string(afterUninstall), "clast plumbing capture") {
+		t.Fatalf("settings.json after uninstall = %s, still carries the shim command", afterUninstall)
+	}
+
+	bakAfterUninstall, err := os.ReadFile(settingsPath + ".bak")
+	if err != nil {
+		t.Fatalf("reading .bak after uninstall: %v", err)
+	}
+	if string(bakAfterUninstall) != string(bakAfterInstall) {
+		t.Fatalf(".bak changed across uninstall — it is the user's file and must never be touched: before=%s after=%s", bakAfterInstall, bakAfterUninstall)
+	}
+}
+
+// TestUninstallLoop_RoundTripRestoresSettingsByteIdentical is the full
+// install-then-uninstall round trip: given a pre-install settings.json
+// fixture where the splice is the only change install makes, uninstall
+// must restore settings.json to those exact pre-install bytes (the
+// emptied-group cascade undoing exactly what Splice's auto-vivification
+// added) and leave no skill trees behind.
+func TestUninstallLoop_RoundTripRestoresSettingsByteIdentical(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	const preInstall = `{
+  "env": {
+    "FOO": "bar"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo pre"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	if err := os.WriteFile(settingsPath, []byte(preInstall), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if r := run(t, env, "uninstall", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+
+	for _, name := range claudeCodeSkillNames {
+		skillDir := filepath.Join(skills, name)
+		if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+			t.Fatalf("after uninstall, %s still exists", skillDir)
+		}
+	}
+
+	afterRoundTrip, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterRoundTrip) != preInstall {
+		t.Fatalf("settings.json after install+uninstall = %s, want the pre-install bytes restored exactly:\n%s", afterRoundTrip, preInstall)
+	}
+}
+
+// TestUninstallLoop_AbsentHookIsNoOp asserts uninstalling a harness whose
+// settings.json exists but has never been spliced (or was already
+// unspliced by hand) is a no-op for the splice half, not a diagnostic —
+// symmetric with Splice's own already-spliced idempotency. The skill
+// trees are removed as usual; only the splice side is exercised here via
+// a settings.json that carries no shim hook at all.
+func TestUninstallLoop_AbsentHookIsNoOp(t *testing.T) {
+	skills := t.TempDir()
+	settingsPath := filepath.Join(t.TempDir(), "settings.json")
+	env := []string{"CLAST_CLAUDE_SKILLS_DIR=" + skills, "CLAST_CLAUDE_SETTINGS_PATH=" + settingsPath}
+
+	const noHook = `{"env":{"FOO":"bar"}}`
+	if err := os.WriteFile(settingsPath, []byte(noHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, env, "install", "claude-code"); r.exitCode != 0 {
+		t.Fatalf("install: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	// Undo just the splice by hand, simulating a settings.json a human
+	// already cleaned up, then uninstall — the skill trees are still
+	// present, but there is no hook left for Unsplice to find.
+	if err := os.WriteFile(settingsPath, []byte(noHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := run(t, env, "uninstall", "claude-code", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("uninstall: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	if !strings.Contains(r.stdout, `"status":"not-spliced"`) {
+		t.Fatalf("uninstall stdout = %q, want the splice reporting not-spliced (no-op)", r.stdout)
+	}
+
+	afterUninstall, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterUninstall) != noHook {
+		t.Fatalf("settings.json changed on a no-op unsplice: got %s, want %s untouched", afterUninstall, noHook)
 	}
 }
 

@@ -7,13 +7,15 @@
 // claude-code's three skills, each independently stamped) — this walks
 // every one of them, stopping at the first refusal, same as install does.
 //
-// It does not touch a harness's splice target (C4.8: claude-code's
-// settings.json SessionStart hook). Reversing that splice cleanly —
-// removing exactly the entry install added, not any hook a human added
-// beside it — is deliberately deferred: see this Matter's step-03
-// ("uninstall claude-code: reverse the projection cleanly"). Today's
-// `uninstall claude-code` removes the three skill directories and leaves
-// the spliced settings.json hook in place.
+// Once every stamped target succeeds, it reverses the harness's splice
+// target, if it has one (C4.8: claude-code's settings.json SessionStart
+// hook) — removing exactly the hook entry install's Splice added via
+// registry.Harness.Unsplice, never a hook a human added beside it. See
+// internal/harness/claudecode.Unsplice for the removal rule (the emptied-
+// group cascade) and its idempotency posture (a missing file or an
+// already-absent entry is a no-op, not a diagnostic — symmetric with
+// Splice). The .bak Splice may have written is never touched by uninstall
+// either way: it is the user's file.
 package uninstall
 
 import (
@@ -35,6 +37,15 @@ import (
 type targetResult struct {
 	Target string `json:"target"`
 	Dir    string `json:"dir"`
+}
+
+// spliceResult is a harness's splice target's reversal outcome (C4.8):
+// "unspliced" (the hook entry was just removed, with the emptied-group
+// cascade applied) or "not-spliced" (nothing to remove — idempotent
+// no-op, same posture as install's already-spliced).
+type spliceResult struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
 }
 
 // Command constructs the `clast uninstall <harness>` verb.
@@ -75,11 +86,21 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 				results = append(results, targetResult{Target: target.Label, Dir: dir})
 			}
 
+			var splice *spliceResult
+			if h.Unsplice != nil {
+				outcome, err := h.Unsplice()
+				if err != nil {
+					return err
+				}
+				splice = &spliceResult{Path: outcome.Path, Status: outcome.Status}
+			}
+
 			if flags.JSON {
 				payload := struct {
 					Harness string         `json:"harness"`
 					Targets []targetResult `json:"targets"`
-				}{Harness: harnessName, Targets: results}
+					Splice  *spliceResult  `json:"splice,omitempty"`
+				}{Harness: harnessName, Targets: results, Splice: splice}
 				b, err := json.Marshal(payload)
 				if err != nil {
 					return err
@@ -90,6 +111,17 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 
 			for _, r := range results {
 				if _, err := fmt.Fprintf(streams.Out, "uninstalled %s %s skill from %s\n", harnessName, r.Target, r.Dir); err != nil {
+					return err
+				}
+			}
+			if splice != nil {
+				var line string
+				if splice.Status == "unspliced" {
+					line = fmt.Sprintf("removed the clast SessionStart hook from %s", splice.Path)
+				} else {
+					line = fmt.Sprintf("%s has no clast SessionStart hook to remove", splice.Path)
+				}
+				if _, err := fmt.Fprintln(streams.Out, line); err != nil {
 					return err
 				}
 			}

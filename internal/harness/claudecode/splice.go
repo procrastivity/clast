@@ -174,6 +174,162 @@ func marshalJSONString(s string) (string, error) {
 	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
+// Unsplice's outcome codes (registry.Harness.Unsplice wraps these into
+// registry.SpliceOutcome, the same shape Splice's codes ride in).
+const (
+	// UnspliceStatusUnspliced means Unsplice found and removed the shim
+	// hook entry: settings.json was just rewritten.
+	UnspliceStatusUnspliced = "unspliced"
+	// UnspliceStatusNotSpliced means there was nothing to remove — no
+	// settings.json, or a settings.json with no hook entry carrying
+	// ShimCommand's exact bytes. Unsplice touched nothing.
+	UnspliceStatusNotSpliced = "not-spliced"
+)
+
+// Unsplice reverses exactly what Splice adds (SURFACE V32/V33, C4.8):
+// it removes the one hooks.SessionStart[*].hooks[*] entry whose command
+// byte-matches ShimCommand, via the same gjson/sjson path-edit discipline
+// Splice uses, so every unrelated byte — other keys, other hooks, other
+// SessionStart groups — survives untouched.
+//
+// Symmetric with Splice's idempotency: a missing settings.json, or one
+// with no matching hook, is a no-op (UnspliceStatusNotSpliced) rather than
+// a diagnostic. C4.7's "refuse on a missing stamp" posture governs a
+// stamped tree (the skills UninstallSkill removes); the splice target
+// carries no stamp of its own (registry.SpliceOutcome's doc comment) and
+// so is not bound by that clause. Splice itself never errors on an
+// already-spliced or missing-file input — it reports a status and moves
+// on — and Unsplice mirrors that: calling `clast uninstall claude-code`
+// against a settings.json a human already hand-edited the hook out of
+// (or that never existed) must not fail the run.
+//
+// Emptied-group rule: removing the matching hook can leave its enclosing
+// hooks.SessionStart[i] group's own "hooks" array empty. When that
+// happens, Unsplice removes that whole group entry too — leaving an
+// empty `{"matcher":"","hooks":[]}` litter behind would be a group Splice
+// never wrote in that shape. A sibling group's other hooks (or a
+// SessionStart group some other tool added) are left completely alone.
+// The same emptying check then cascades one level up at each container
+// Splice itself auto-vivifies: if removing the group leaves
+// hooks.SessionStart itself an empty array, that key is removed; if that
+// then leaves "hooks" an empty object, that key is removed too. This is
+// what makes an install/uninstall round trip restore settings.json to
+// its exact pre-install bytes when the splice was the only change —
+// Splice creates "hooks"/"hooks.SessionStart" only when they were absent,
+// so Unsplice deletes them only when its own removal is what empties
+// them; a "hooks": {} or "hooks.SessionStart": [] a human wrote on
+// purpose before install never reaches Unsplice in the first place (there
+// would be no matching hook to find in it), so this cascade never fires
+// on content Unsplice did not itself just empty.
+//
+// The .bak Splice writes on a settings.json's first-ever splice is never
+// touched here — not restored over the current file, not deleted.
+// Splice's own doc comment already frames it as a one-time snapshot
+// (C4.8); once written it is the user's file, kept only as their own
+// escape hatch if they want it, and Unsplice has no business deciding
+// whether to give it back.
+func Unsplice() (UnspliceResult, error) {
+	path, err := SettingsPath()
+	if err != nil {
+		return UnspliceResult{}, err
+	}
+
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return UnspliceResult{Path: path, Status: UnspliceStatusNotSpliced}, nil
+	case err != nil:
+		return UnspliceResult{}, fmt.Errorf("claudecode: reading %q: %w", path, err)
+	}
+
+	if !gjson.ValidBytes(data) {
+		return UnspliceResult{}, clasterr.New("validation.malformed-settings",
+			fmt.Sprintf("%s is not valid JSON; fix it by hand before re-running `clast uninstall %s`", path, Name))
+	}
+
+	groupIdx, hookIdx, found := findShimEntry(data)
+	if !found {
+		return UnspliceResult{Path: path, Status: UnspliceStatusNotSpliced}, nil
+	}
+
+	out, err := removeShimEntry(data, groupIdx, hookIdx)
+	if err != nil {
+		return UnspliceResult{}, err
+	}
+
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return UnspliceResult{}, fmt.Errorf("claudecode: writing %q: %w", path, err)
+	}
+
+	return UnspliceResult{Path: path, Status: UnspliceStatusUnspliced}, nil
+}
+
+// UnspliceResult reports what one Unsplice call did.
+type UnspliceResult struct {
+	// Path is SettingsPath()'s value — the file Unsplice read and, if it
+	// wrote, wrote back.
+	Path string
+	// Status is UnspliceStatusUnspliced or UnspliceStatusNotSpliced.
+	Status string
+}
+
+// findShimEntry locates the first hooks.SessionStart[groupIdx].hooks[hookIdx]
+// entry whose command is exactly ShimCommand, walking groups and their
+// hooks in order — the same scan hasShimEntry runs, just reporting the
+// position instead of a bare bool. ok is false, with groupIdx/hookIdx
+// meaningless, when no such entry exists.
+func findShimEntry(data []byte) (groupIdx, hookIdx int, ok bool) {
+	groups := gjson.GetBytes(data, sessionStartPath).Array()
+	for gi, group := range groups {
+		hooks := group.Get("hooks").Array()
+		for hi, hook := range hooks {
+			if hook.Get("command").String() == ShimCommand {
+				return gi, hi, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// removeShimEntry deletes hooks.SessionStart[groupIdx].hooks[hookIdx] from
+// data, then cascades the emptied-group rule upward: an emptied group is
+// removed from hooks.SessionStart, an emptied hooks.SessionStart is
+// removed from hooks, and an emptied hooks is removed entirely — each
+// check only fires when that container is genuinely empty, so a
+// non-empty sibling group, sibling hook, or sibling top-level hooks.*
+// key (like PreToolUse) is left exactly as it was.
+func removeShimEntry(data []byte, groupIdx, hookIdx int) ([]byte, error) {
+	hookPath := fmt.Sprintf("%s.%d.hooks.%d", sessionStartPath, groupIdx, hookIdx)
+	out, err := sjson.DeleteBytes(data, hookPath)
+	if err != nil {
+		return nil, fmt.Errorf("claudecode: removing shim hook: %w", err)
+	}
+
+	groupPath := fmt.Sprintf("%s.%d", sessionStartPath, groupIdx)
+	if len(gjson.GetBytes(out, groupPath+".hooks").Array()) == 0 {
+		out, err = sjson.DeleteBytes(out, groupPath)
+		if err != nil {
+			return nil, fmt.Errorf("claudecode: removing emptied SessionStart group: %w", err)
+		}
+	}
+
+	if len(gjson.GetBytes(out, sessionStartPath).Array()) == 0 {
+		out, err = sjson.DeleteBytes(out, sessionStartPath)
+		if err != nil {
+			return nil, fmt.Errorf("claudecode: removing emptied hooks.SessionStart: %w", err)
+		}
+	}
+
+	if len(gjson.GetBytes(out, "hooks").Map()) == 0 {
+		out, err = sjson.DeleteBytes(out, "hooks")
+		if err != nil {
+			return nil, fmt.Errorf("claudecode: removing emptied hooks: %w", err)
+		}
+	}
+
+	return out, nil
+}
+
 // writeBakOnce copies original to path+".bak", unless a .bak already
 // exists there — C4.8's one-time backup: the first splice ever preserves
 // the pre-splice file, and nothing after it ever overwrites that copy.
