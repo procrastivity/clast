@@ -1958,7 +1958,12 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 
 // TestSeal_V34CodesEndToEnd drives one representative case per V34 code
 // this Matter's verbs raise, confirming the code and the exit category
-// (C2.4) together, end to end through the built binary.
+// (C2.4) together, end to end through the built binary. query-verbs' own
+// step 09 seeded the first five cases (its own seal sweep); shape-documents'
+// step 06 seal sweep adds the three codes this Matter's own verbs raise
+// that weren't already on the table: not-found.asset (`plumbing asset`),
+// and brief's own validation.not-a-git-repo/validation.unknown-locator
+// pair (V8's "how V10 and V22 read together" finding).
 func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	fx := journaltest.New(t)
 	a := journal.SessionKey{Harness: "claude", NativeID: "ambiguous-a"}
@@ -1971,6 +1976,7 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
 
 	unregisteredDir := initGitRepo(t, "unregistered-seal")
+	outsideGitDir := t.TempDir() // no .git anywhere above it
 
 	cases := []struct {
 		name     string
@@ -1985,6 +1991,9 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 		{"validation.unknown-harness", []string{"plumbing", "sessions", "--harness", "no-such-harness", "--json"}, env, "", "validation.unknown-harness", 1},
 		{"validation.unknown-transcript-format", []string{"plumbing", "show", unrendered.DirName(), "--transcript", "--json"}, env, "", "validation.unknown-transcript-format", 1},
 		{"refusal.unknown-clone", []string{"breadcrumb", "a note", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, unregisteredDir, "refusal.unknown-clone", 3},
+		{"not-found.asset", []string{"plumbing", "asset", "no/such/asset.md", "--json"}, env, "", "not-found.asset", 1},
+		{"validation.not-a-git-repo", []string{"plumbing", "brief", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, outsideGitDir, "validation.not-a-git-repo", 1},
+		{"validation.unknown-locator", []string{"plumbing", "brief", "no-such-project", "--json"}, []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}, "", "validation.unknown-locator", 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2940,6 +2949,61 @@ func TestFlowAssets_StructuralFormat(t *testing.T) {
 	}
 }
 
+// TestSeal_OverrideAppliesWithNoReinstall is the shape-documents Matter's
+// own override-liveness seal proof: "an override in $XDG_CONFIG_HOME takes
+// effect with no re-install." binPath (TestMain, top of this file) is built
+// exactly once for the whole suite; this test writes a MODIFIED
+// flows/wake.md into a fake $XDG_CONFIG_HOME/clast/flows/ only after that
+// build, then drives that SAME binary — no rebuild, no second install step,
+// nothing but a file dropped where M18's resolution chain already looks.
+// The other half of the seal condition ("asset serves all three flows and
+// names the chain link") is already proven for the embedded link by
+// TestPlumbingAsset_FlowAssets_EmbeddedLink_ServesExactBytes (all three
+// shapes) and for the shipped link by
+// TestPlumbingAsset_ShippedLink_ResolvesFromInstalledShareTree (flows/
+// retro.md, via installedLayout) — this test only needed to add the
+// missing override half, and only needs one shape to prove the chain
+// itself is override-live.
+func TestSeal_OverrideAppliesWithNoReinstall(t *testing.T) {
+	xdg := t.TempDir()
+	overrideDir := filepath.Join(xdg, "clast", "flows")
+	if err := os.MkdirAll(overrideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	overridePath := filepath.Join(overrideDir, "wake.md")
+	overrideContent := "# wake — flow\n\noverridden for the seal sweep; no re-install, no rebuild.\n"
+	if err := os.WriteFile(overridePath, []byte(overrideContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"XDG_CONFIG_HOME=" + xdg}
+
+	r := run(t, env, "plumbing", "asset", "flows/wake.md", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset flows/wake.md --json (override): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload assetPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Link != "override" {
+		t.Errorf("link = %q, want %q (M18: an override takes effect with no re-install)", payload.Link, "override")
+	}
+	if payload.ResolvedFrom != overridePath {
+		t.Errorf("resolved_from = %q, want the override's own disk path %q", payload.ResolvedFrom, overridePath)
+	}
+	if payload.Content != overrideContent {
+		t.Errorf("content = %q, want the override's own content verbatim", payload.Content)
+	}
+
+	human := run(t, env, "plumbing", "asset", "flows/wake.md")
+	if human.exitCode != 0 {
+		t.Fatalf("plumbing asset flows/wake.md (override, human): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if human.stdout != overrideContent {
+		t.Errorf("human mode stdout = %q, want the override's own content verbatim", human.stdout)
+	}
+}
+
 // --- plumbing: `clast plumbing wake` (SURFACE V8/V20, shape-documents) ---
 
 // TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet seeds a fixture
@@ -3608,5 +3672,123 @@ func TestPlumbingRetro_EmptyDay_ReportsReadably(t *testing.T) {
 	}
 	if len(payload.GlobalBreadcrumbs) != 0 {
 		t.Errorf("global_breadcrumbs = %v, want none", payload.GlobalBreadcrumbs)
+	}
+}
+
+// --- cross-verb composition smoke (shape-documents seal sweep) ---
+
+// TestSeal_DocumentTrioComposesAcrossCuration walks one fixture session
+// through the state-machine-to-document-verbs seam no per-step test
+// crossed: `plumbing wake` offers it while it's merely captured; once
+// `plumbing curate` writes an entry for it, it leaves wake's working set
+// (fresh curated, not stale, MODEL M7) and shows up both in `plumbing
+// brief`'s gathered entries (grouped under its workspace label) and in
+// `plumbing retro`'s day document (curated, with its title) for the day it
+// was captured on. One test, not a matrix — the point is the seam, not
+// re-covering each verb's own per-step assertions.
+func TestSeal_DocumentTrioComposesAcrossCuration(t *testing.T) {
+	fx := journaltest.New(t)
+	root := fx.Root()
+	fx.Project("clast", journal.Project{ID: "p-clast", Slug: "clast"})
+
+	key := journal.SessionKey{Harness: "claude", NativeID: "trio-01"}
+	const shard = "2026-09-05"
+	startedAt := time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)
+	fx.Captured(shard, key,
+		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "trio"},
+		startedAt,
+	).WithProject(shard, key, journal.SessionProject{ID: "p-clast", Slug: "clast", Clone: "c1", Label: "dev", Path: "/dev"})
+
+	env := []string{"CLAST_JOURNAL_DIR=" + root}
+
+	// Before curation: wake's working set carries it (captured).
+	wakeBefore := run(t, env, "plumbing", "wake", "--since", "all", "--json")
+	if wakeBefore.exitCode != 0 {
+		t.Fatalf("plumbing wake --json (before curate): exit=%d, want 0; stderr=%q", wakeBefore.exitCode, wakeBefore.stderr)
+	}
+	if !strings.Contains(wakeBefore.stdout, key.NativeID) {
+		t.Fatalf("wake (before curate) = %q, want it to carry %q as part of the working set", wakeBefore.stdout, key.NativeID)
+	}
+
+	// Curate it — the state-machine write this seam pivots on.
+	path := writeEntryFile(t, wellFormedEntryDoc("trio entry"))
+	curateResult := run(t, env, "plumbing", "curate", key.DirName(), "--file", path, "--json")
+	if curateResult.exitCode != 0 {
+		t.Fatalf("plumbing curate --json: exit=%d, want 0; stderr=%q", curateResult.exitCode, curateResult.stderr)
+	}
+
+	// After curation: wake's working set no longer carries it (curated and
+	// fresh — never revoked, but no longer offered either, V8).
+	wakeAfter := run(t, env, "plumbing", "wake", "--since", "all", "--json")
+	if wakeAfter.exitCode != 0 {
+		t.Fatalf("plumbing wake --json (after curate): exit=%d, want 0; stderr=%q", wakeAfter.exitCode, wakeAfter.stderr)
+	}
+	if strings.Contains(wakeAfter.stdout, key.NativeID) {
+		t.Errorf("wake (after curate) = %q, want %q gone from the working set (fresh curated)", wakeAfter.stdout, key.NativeID)
+	}
+
+	// brief's gathered entries now carry it, under its workspace label.
+	briefResult := run(t, env, "plumbing", "brief", "clast", "--since", "all", "--json")
+	if briefResult.exitCode != 0 {
+		t.Fatalf("plumbing brief --json: exit=%d, want 0; stderr=%q", briefResult.exitCode, briefResult.stderr)
+	}
+	var briefPayload struct {
+		Groups []struct {
+			Workspace string `json:"workspace"`
+			Entries   []struct {
+				Title string `json:"title"`
+			} `json:"entries"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(briefResult.stdout), &briefPayload); err != nil {
+		t.Fatalf("plumbing brief --json stdout is not one JSON value: %v; stdout=%q", err, briefResult.stdout)
+	}
+	foundInBrief := false
+	for _, g := range briefPayload.Groups {
+		if g.Workspace != "dev" {
+			continue
+		}
+		for _, e := range g.Entries {
+			if e.Title == "trio entry" {
+				foundInBrief = true
+			}
+		}
+	}
+	if !foundInBrief {
+		t.Errorf("brief groups = %+v, want the curated entry gathered under workspace %q", briefPayload.Groups, "dev")
+	}
+
+	// retro's day document lists the session, curated, with its title, on
+	// the day it was captured.
+	retroResult := run(t, env, "plumbing", "retro", shard, "--json")
+	if retroResult.exitCode != 0 {
+		t.Fatalf("plumbing retro --json: exit=%d, want 0; stderr=%q", retroResult.exitCode, retroResult.stderr)
+	}
+	var retroPayload struct {
+		Projects []struct {
+			Project  string `json:"project"`
+			Sessions []struct {
+				SessionID string `json:"session_id"`
+				State     string `json:"state"`
+				Title     string `json:"title"`
+			} `json:"sessions"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(retroResult.stdout), &retroPayload); err != nil {
+		t.Fatalf("plumbing retro --json stdout is not one JSON value: %v; stdout=%q", err, retroResult.stdout)
+	}
+	foundInRetro := false
+	for _, g := range retroPayload.Projects {
+		if g.Project != "clast" {
+			continue
+		}
+		for _, s := range g.Sessions {
+			if s.SessionID == key.NativeID && s.State == "curated" && s.Title == "trio entry" {
+				foundInRetro = true
+			}
+		}
+	}
+	if !foundInRetro {
+		t.Errorf("retro projects = %+v, want %q listed curated with its title under project %q", retroPayload.Projects, key.NativeID, "clast")
 	}
 }
