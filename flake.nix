@@ -15,7 +15,7 @@
         # So the Nix path stamps the commit where the make path stamps the
         # release tag (C1.7): `nix build` reports `abc1234`, `make build`
         # at a tag reports `v0.1.0`. Both name the same commit, and for
-        # `nix build github:OWNER/clast/v0.1.0` the rev is the tag
+        # `nix build github:procrastivity/clast/v0.1.0` the rev is the tag
         # resolved — a stricter identifier, not a looser one. Do not "fix"
         # this with a VERSION file: the tag is the single source of truth,
         # and a second copy would go stale in silence.
@@ -52,7 +52,7 @@
           '';
 
           meta = {
-            description = "clast — TODO: one line on what this tool is";
+            description = "clast — capture agent sessions, curate them, resurface what mattered";
             license = pkgs.lib.licenses.mit;
             mainProgram = "clast";
           };

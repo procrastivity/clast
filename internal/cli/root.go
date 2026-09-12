@@ -23,7 +23,7 @@ import (
 func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "clast",
-		Short: "clast — TODO: one line on what this tool is",
+		Short: "clast — capture agent sessions, curate them, resurface what mattered",
 		// We render every error ourselves (see Execute) so human and
 		// --json modes come from one code path; Cobra's own printing
 		// would double up or bypass the --json envelope (C2.5).

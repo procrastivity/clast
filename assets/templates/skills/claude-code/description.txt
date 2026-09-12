@@ -1,1 +1,1 @@
-TODO(clast): replace with one line saying when to reach for this tool — Claude reads it to decide when to load the skill.
+Journal of agent sessions — capture, curate, and resurface them. Use for wake/brief/retro flows, breadcrumbs, and querying past session records.

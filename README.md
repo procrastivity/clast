@@ -1,6 +1,11 @@
 # clast
 
-TODO(clast): one paragraph on what this tool is and who it is for.
+clast keeps a journal of your coding-agent sessions. It captures each
+session's transcript and facts into a durable store, you curate the
+sessions worth keeping into short entries, and the wake, brief, and
+retro flows resurface that record when you return to the work. It is
+for people who run many agent sessions across many projects and want
+what happened to survive the terminal scrollback.
 
 Built on the [toolsmith contract](https://github.com/procrastivity/toolsmith)
 (`toolsmith/v1` — the manifest declares it): a single static Go binary
@@ -9,7 +14,7 @@ that projects itself into agent harnesses as generated, stamped skills.
 ## Install
 
 ```
-nix profile install github:OWNER/clast   # the binary, system-wide
+nix profile install github:procrastivity/clast   # the binary, system-wide
 clast install                            # project into every detected harness
 ```
 
@@ -31,6 +36,8 @@ CHANGELOG.md is generated per release, never committed.
 
 ## Design of record
 
-TODO(clast): name where the design of record lives (a sidecar planning
-repo, docs/ — whatever this tool uses), so a reader knows where decisions
-come from.
+The design of record lives in a sidecar planning repo
+(`clast-reboot`): MODEL.md holds the concepts and store layout;
+SURFACE.md holds the verb surface and projection. Decisions are cited
+from code as M-numbers and V-numbers. What building each Matter forced
+lands in `docs/<matter>/decisions.md` here.
