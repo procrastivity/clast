@@ -72,6 +72,47 @@ func ReadMarker(root string) (marker Marker, ok bool, err error) {
 	return marker, true, nil
 }
 
+// recordSchemaVersion is the schema_version stamped into every record
+// document defined in records.go (session.json, curation.json,
+// project.json, clones.<machine>.json — MODEL §4). Kept distinct from
+// markerSchemaVersion even though both are currently 1: each document's
+// schema can version forward independently.
+const recordSchemaVersion = 1
+
+// readDocument reads and JSON-decodes path into a T. A missing file
+// returns the zero value, false, nil — never an error, the same posture
+// as ReadMarker. A malformed file is returned as an error; callers such as
+// the walk (a later step) count that as a per-document diagnostic rather
+// than treating it as fatal.
+func readDocument[T any](path string) (T, bool, error) {
+	var doc T
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return doc, false, nil
+		}
+		return doc, false, fmt.Errorf("journal: reading %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return doc, false, fmt.Errorf("journal: parsing %s: %w", path, err)
+	}
+	return doc, true, nil
+}
+
+// writeDocument ensures root (and its journal.json marker) exists, then
+// writes v to path whole, atomically (MODEL §4). It creates path's parent
+// directory as needed — a session or project directory may not exist yet
+// on a document's first write.
+func writeDocument(root, path string, v any) error {
+	if err := EnsureRoot(root); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("journal: creating %s: %w", filepath.Dir(path), err)
+	}
+	return writeJSONAtomic(path, v)
+}
+
 // writeJSONAtomic writes v to path as JSON via temp-file-and-rename, the
 // atomic write discipline MODEL §4 requires of every store document. path's
 // parent directory must already exist (EnsureRoot's job, not this one's).
