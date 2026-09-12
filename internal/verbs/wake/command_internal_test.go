@@ -27,31 +27,31 @@ func writeConfigOverride(t *testing.T, content string) {
 
 // TestConfiguredAutoMinChars covers the SURFACE V8 amendment (2026-09-12):
 // wake's --json payload carries the merged wake.auto_min_chars value.
-// configuredAutoMinChars reads config.Load's own merged result — these
+// ConfiguredAutoMinChars reads config.Load's own merged result — these
 // cases exercise the read, not the merge itself (config.Load's Load
 // already merges config.yaml over config.default.yaml, override winning
 // key-by-key; TestConfiguredAutoMinChars_OverrideWinsOverShippedDefault
 // below proves that merge lands the value this function then reads).
 func TestConfiguredAutoMinChars(t *testing.T) {
-	if v, err := configuredAutoMinChars(config.Config{}); err != nil || v != defaultAutoMinChars {
+	if v, err := ConfiguredAutoMinChars(config.Config{}); err != nil || v != defaultAutoMinChars {
 		t.Errorf("absent key: %v %v, want %d, nil", v, err, defaultAutoMinChars)
 	}
-	if v, err := configuredAutoMinChars(config.Config{"wake": map[string]any{"auto_min_chars": 90}}); err != nil || v != 90 {
+	if v, err := ConfiguredAutoMinChars(config.Config{"wake": map[string]any{"auto_min_chars": 90}}); err != nil || v != 90 {
 		t.Errorf("explicit override: %v %v, want 90, nil", v, err)
 	}
 	// config.Load's actual shape: yaml.v3 types nested mappings as the
 	// parent map's type, config.Config (mirrors capture.autoDismissNoop's
 	// own dual-shape acceptance).
-	if v, err := configuredAutoMinChars(config.Config{"wake": config.Config{"auto_min_chars": 90}}); err != nil || v != 90 {
+	if v, err := ConfiguredAutoMinChars(config.Config{"wake": config.Config{"auto_min_chars": 90}}); err != nil || v != 90 {
 		t.Errorf("nested config.Config override: %v %v, want 90, nil", v, err)
 	}
-	if v, err := configuredAutoMinChars(config.Config{"wake": map[string]any{}}); err != nil || v != defaultAutoMinChars {
+	if v, err := ConfiguredAutoMinChars(config.Config{"wake": map[string]any{}}); err != nil || v != defaultAutoMinChars {
 		t.Errorf("section present, key absent: %v %v, want %d, nil", v, err, defaultAutoMinChars)
 	}
-	if _, err := configuredAutoMinChars(config.Config{"wake": "sixty"}); err == nil {
+	if _, err := ConfiguredAutoMinChars(config.Config{"wake": "sixty"}); err == nil {
 		t.Error("mistyped section accepted")
 	}
-	if _, err := configuredAutoMinChars(config.Config{"wake": map[string]any{"auto_min_chars": "sixty"}}); err == nil {
+	if _, err := ConfiguredAutoMinChars(config.Config{"wake": map[string]any{"auto_min_chars": "sixty"}}); err == nil {
 		t.Error("mistyped value accepted")
 	}
 }
@@ -69,11 +69,11 @@ func TestConfiguredAutoMinChars_OverrideWinsOverShippedDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	got, err := configuredAutoMinChars(cfg)
+	got, err := ConfiguredAutoMinChars(cfg)
 	if err != nil {
-		t.Fatalf("configuredAutoMinChars: %v", err)
+		t.Fatalf("ConfiguredAutoMinChars: %v", err)
 	}
 	if got != 120 {
-		t.Errorf("configuredAutoMinChars = %d, want 120 (config.yaml override over the shipped 60)", got)
+		t.Errorf("ConfiguredAutoMinChars = %d, want 120 (config.yaml override over the shipped 60)", got)
 	}
 }

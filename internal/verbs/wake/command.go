@@ -103,14 +103,22 @@ const defaultAutoMinChars = 60
 // lives under (SURFACE V8's 2026-09-12 amendment).
 const autoMinCharsConfigKey = "wake"
 
-// configuredAutoMinChars reads cfg's merged wake.auto_min_chars (V8
+// ConfiguredAutoMinChars reads cfg's merged wake.auto_min_chars (V8
 // amendment): config.yaml's value wins over config.default.yaml's
 // wherever config.Load already merged them, this function only reads
 // the result. A present-but-mistyped section or key is a plain error
 // naming the key, never a silent fallback on a config typo — mirrors
 // capture.autoDismissNoop (internal/verbs/capture/command.go) and
 // internal/llm's llmConfigValues for a nested tool-config section.
-func configuredAutoMinChars(cfg config.Config) (int, error) {
+//
+// Exported (llm-verbs/step-06): the top-level `wake` verb form's auto
+// mode needs this exact value (flows/wake.md's Auto mode section reads
+// `auto_min_chars` from the same merged config `plumbing wake --json`
+// already carries), and wakeverb composes directly on plumbing wake's own
+// package for it rather than re-deriving the read — the same "same-named
+// plumbing document verb" reuse briefverb/retroverb already established
+// for their own plumbing packages' Run.
+func ConfiguredAutoMinChars(cfg config.Config) (int, error) {
 	raw, present := cfg[autoMinCharsConfigKey]
 	if !present || raw == nil {
 		return defaultAutoMinChars, nil
@@ -193,7 +201,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			}
 
 			if flags.JSON {
-				autoMinChars, err := configuredAutoMinChars(cfg)
+				autoMinChars, err := ConfiguredAutoMinChars(cfg)
 				if err != nil {
 					return err
 				}

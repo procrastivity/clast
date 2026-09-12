@@ -4303,3 +4303,196 @@ func TestRetro_Cache_HitOnSecondRun_RefreshOnThird(t *testing.T) {
 		t.Errorf("run 3 stdout = %q, want the refreshed completion", thirdRun.stdout)
 	}
 }
+
+// --- porcelain: `clast wake [--auto]` (SURFACE V9, llm-verbs/step-06) ---
+
+// wakeSessionWithTranscript seeds a captured session, with a transcript
+// copy on disk (so `plumbing show --transcript` can actually render it —
+// unlike brief/retro, wake's §2 reads the transcript's own content, not
+// just an entry body), at startedAt relative to time.Now() so it falls
+// inside the top-level `wake` verb's own default `since` window (-14d,
+// V9 exposes no --since flag at all).
+func wakeSessionWithTranscript(t *testing.T, root, shard string, key journal.SessionKey, startedAt time.Time) {
+	t.Helper()
+	if err := journal.WriteSession(root, shard, key, journal.Session{
+		Harness: key.Harness, SessionID: key.NativeID, Machine: "framework",
+		Branch:       "main",
+		StartedAt:    startedAt,
+		LastActiveAt: startedAt.Add(20 * time.Minute),
+		CapturedAt:   startedAt.Add(25 * time.Minute),
+		Counts:       journal.SessionCounts{User: 2, Assistant: 2},
+		Substantive:  true,
+		Transcript:   journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "s-" + key.NativeID},
+	}); err != nil {
+		t.Fatalf("wakeSessionWithTranscript: WriteSession(%s): %v", key.DirName(), err)
+	}
+	path := journal.TranscriptPath(root, shard, key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"u1","message":{"content":"hello from ` + key.NativeID + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// wakeQualifyingDraft is long enough (well over the shipped
+// wake.auto_min_chars default of 60) to be accepted in both auto and
+// interactive mode.
+const wakeQualifyingDraft = "# Session: fixed the wake ordering bug\n\n" +
+	"## Goal\nSort the working set by recency, matching the old skill's wanted order.\n\n" +
+	"## What shipped\n- Reordered groupByProject to sort by most-recently-active project.\n\n" +
+	"Suggested tags: bugfix, wake\n"
+
+// TestWake_Auto_AcceptAndSkipInOneRun_AgainstStub drives `clast wake
+// --auto --json` over a two-session working set: one session whose
+// transcript copy is readable (drafts successfully, and — carrying the
+// long wakeQualifyingDraft completion — is accepted) and one whose
+// transcript copy is simply missing on disk (§2's read fails, so Draft
+// itself fails; Auto mode's own rule is "a draft that fails to generate
+// is skipped, not retried" — never an aborted run). The stub must see
+// exactly one request: the broken session never reaches the LLM call at
+// all.
+func TestWake_Auto_AcceptAndSkipInOneRun_AgainstStub(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+
+	now := time.Now()
+	ok := journal.SessionKey{Harness: "claude", NativeID: "wake-auto-ok"}
+	broken := journal.SessionKey{Harness: "claude", NativeID: "wake-auto-broken"}
+	wakeSessionWithTranscript(t, journalDir, now.Add(-3*time.Hour).Format("2006-01-02"), ok, now.Add(-3*time.Hour))
+	// broken carries session.json but no transcript copy at all — show's
+	// os.Open fails, so Draft fails before ever calling the endpoint.
+	if err := journal.WriteSession(journalDir, now.Add(-2*time.Hour).Format("2006-01-02"), broken, journal.Session{
+		Harness: broken.Harness, SessionID: broken.NativeID, Machine: "framework",
+		Branch: "main", StartedAt: now.Add(-2 * time.Hour), LastActiveAt: now.Add(-2 * time.Hour).Add(20 * time.Minute),
+		CapturedAt: now.Add(-2 * time.Hour).Add(25 * time.Minute), Counts: journal.SessionCounts{User: 1, Assistant: 1},
+		Substantive: true, Transcript: journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "missing"},
+	}); err != nil {
+		t.Fatalf("WriteSession(broken): %v", err)
+	}
+
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := run(t, env, "wake", "--auto", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --auto --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered            int `json:"considered"`
+		Drafted               int `json:"drafted"`
+		Accepted              int `json:"accepted"`
+		Dismissed             int `json:"dismissed"`
+		Skipped               int `json:"skipped"`
+		SkippedBelowThreshold int `json:"skipped_below_threshold"`
+		ProjectsTouched       int `json:"projects_touched"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --auto --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 2 || payload.Drafted != 1 || payload.Accepted != 1 || payload.Skipped != 1 || payload.Dismissed != 0 {
+		t.Fatalf("payload = %+v, want considered=2 drafted=1 accepted=1 skipped=1 dismissed=0", payload)
+	}
+	if reqs := stub.Requests(); len(reqs) != 1 {
+		t.Fatalf("stub captured %d requests, want exactly 1 (the broken session never reaches the endpoint)", len(reqs))
+	}
+
+	// The accepted session is now curated; the broken one is untouched.
+	okShow := run(t, env, "plumbing", "show", ok.DirName(), "--json")
+	if okShow.exitCode != 0 {
+		t.Fatalf("plumbing show %s: exit=%d stderr=%q", ok.DirName(), okShow.exitCode, okShow.stderr)
+	}
+	if !strings.Contains(okShow.stdout, `"state":"curated"`) {
+		t.Errorf("accepted session show = %q, want state curated", okShow.stdout)
+	}
+	brokenShow := run(t, env, "plumbing", "show", broken.DirName(), "--json")
+	if brokenShow.exitCode != 0 {
+		t.Fatalf("plumbing show %s: exit=%d stderr=%q", broken.DirName(), brokenShow.exitCode, brokenShow.stderr)
+	}
+	if !strings.Contains(brokenShow.stdout, `"state":"captured"`) {
+		t.Errorf("skipped session show = %q, want state captured (untouched)", brokenShow.stdout)
+	}
+}
+
+// TestWake_Interactive_AcceptAndSkip_DrivenByStdin drives `clast wake
+// --json` (no --auto) over a two-session working set, feeding the number
+// menu over piped stdin: "1\n4\n4\n" accepts the first session (with no
+// promotions) and skips the second.
+func TestWake_Interactive_AcceptAndSkip_DrivenByStdin(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+
+	now := time.Now()
+	first := journal.SessionKey{Harness: "claude", NativeID: "wake-int-first"}
+	second := journal.SessionKey{Harness: "claude", NativeID: "wake-int-second"}
+	wakeSessionWithTranscript(t, journalDir, now.Add(-3*time.Hour).Format("2006-01-02"), first, now.Add(-3*time.Hour))
+	wakeSessionWithTranscript(t, journalDir, now.Add(-2*time.Hour).Format("2006-01-02"), second, now.Add(-2*time.Hour))
+
+	stub := llmtest.New(t, wakeQualifyingDraft)
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY=sk-test-key"}
+
+	r := runWithStdin(t, env, "1\n4\n4\n", "wake", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --json (interactive): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered int `json:"considered"`
+		Accepted   int `json:"accepted"`
+		Skipped    int `json:"skipped"`
+		Dismissed  int `json:"dismissed"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 2 || payload.Accepted != 1 || payload.Skipped != 1 || payload.Dismissed != 0 {
+		t.Fatalf("payload = %+v, want considered=2 accepted=1 skipped=1 dismissed=0", payload)
+	}
+	if reqs := stub.Requests(); len(reqs) != 2 {
+		t.Fatalf("stub captured %d requests, want exactly 2 (one draft per session)", len(reqs))
+	}
+}
+
+// TestWake_EmptyWorkingSet_NoLLMConfigNeeded drives `clast wake --json`
+// against an empty journal: exit 0, an all-zero summary, and — since it
+// plants an llm config pointed at a stub configured to fail every
+// request, with no CLAST_LLM_API_KEY at all — proof that the empty-
+// working-set stop happens before any llm.Client is ever constructed
+// (mirrors TestBrief_EmptyState_NoLLMConfigNeeded_NoRequests and
+// TestRetro_EmptyWindow_NoLLMConfigNeeded_NoRequests).
+func TestWake_EmptyWorkingSet_NoLLMConfigNeeded(t *testing.T) {
+	journalDir := t.TempDir()
+	xdg := t.TempDir()
+
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, "must never be called for an empty working set")
+	writeLLMConfig(t, xdg, stub.URL(), "gpt-test")
+	env := []string{"CLAST_JOURNAL_DIR=" + journalDir, "XDG_CONFIG_HOME=" + xdg, "CLAST_LLM_API_KEY="}
+
+	r := run(t, env, "wake", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("wake --json (empty): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Considered int `json:"considered"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("wake --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Considered != 0 {
+		t.Errorf("considered = %d, want 0", payload.Considered)
+	}
+	if reqs := stub.Requests(); len(reqs) != 0 {
+		t.Fatalf("stub captured %d requests, want 0 (the empty case must never reach the endpoint)", len(reqs))
+	}
+
+	human := run(t, env, "wake")
+	if human.exitCode != 0 {
+		t.Fatalf("wake (human, empty): exit=%d, want 0; stderr=%q", human.exitCode, human.stderr)
+	}
+	if !strings.Contains(human.stdout, "Nothing to curate") {
+		t.Errorf("wake (human, empty) stdout = %q, want it to report the empty working set readably", human.stdout)
+	}
+}

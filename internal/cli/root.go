@@ -20,6 +20,7 @@ import (
 	retroverb "github.com/procrastivity/clast/internal/verbs/retroverb"
 	uninstallverb "github.com/procrastivity/clast/internal/verbs/uninstall"
 	versionverb "github.com/procrastivity/clast/internal/verbs/version"
+	wakeverb "github.com/procrastivity/clast/internal/verbs/wakeverb"
 )
 
 // NewRootCommand builds the clast root command with both global flags
@@ -61,6 +62,7 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	// Every Command constructor ends with surface.Annotate — the
 	// manifest walk hard-errors without it (C3.2).
 	cobra.EnableCommandSorting = false
+	root.AddCommand(wakeverb.Command(streams))
 	root.AddCommand(briefverb.Command(streams))
 	root.AddCommand(retroverb.Command(streams))
 	root.AddCommand(initverb.Command(streams))
