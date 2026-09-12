@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1729,6 +1730,7 @@ func TestSeal_ManifestCarriesEveryNewVerb(t *testing.T) {
 		{"plumbing breadcrumbs", "", false},
 		{"plumbing stats", "", false},
 		{"breadcrumb", "<text>", false},
+		{"plumbing asset", "<path>", true},
 	}
 	byName := map[string]struct {
 		Name         string
@@ -2539,5 +2541,252 @@ func TestPlumbingCurate_BadJournalDirConfig_TranslatedToClasterr(t *testing.T) {
 	envelope := parseErrorEnvelope(t, r.stderr)
 	if envelope.Error.Code != "validation.config" {
 		t.Errorf("error code = %q, want validation.config", envelope.Error.Code)
+	}
+}
+
+// --- plumbing: `clast plumbing asset <path>` (SURFACE V25, shape-documents) ---
+
+// embeddedAssetContent reads assets/agent-guidance.md straight off disk, the
+// oracle every embedded-link assertion below compares the CLI's output
+// against — that file ships with the tree and is always embedded (M18's
+// last-resort link), regardless of what the test's own $XDG_CONFIG_HOME or
+// installed-share-tree fixtures otherwise put in front of it.
+func embeddedAssetContent(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "assets", "agent-guidance.md"))
+	if err != nil {
+		t.Fatalf("reading assets/agent-guidance.md fixture: %v", err)
+	}
+	return data
+}
+
+// installedLayout copies the already-built e2e binary into <prefix>/bin/clast
+// and returns prefix: internal/asset.DefaultDir resolves the shipped-default
+// directory purely from the running executable's own path
+// (<prefix>/bin/clast -> <prefix>/share/clast/assets), so putting a copy of
+// the binary at that exact relative layout is the one seam an e2e test can
+// drive to make the binary's own DefaultDir() resolve into a share tree this
+// test controls — no source rebuild needed, a copy of the binary suffices.
+func installedLayout(t *testing.T) string {
+	t.Helper()
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.Open(binPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = src.Close() }()
+	dst, err := os.OpenFile(filepath.Join(binDir, "clast"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dst.Close() }()
+	if _, err := io.Copy(dst, src); err != nil {
+		t.Fatal(err)
+	}
+	return prefix
+}
+
+// runInstalled is run, against the binary copy installedLayout placed at
+// prefix/bin/clast rather than the suite's shared binPath.
+func runInstalled(t *testing.T, prefix string, env []string, args ...string) result {
+	t.Helper()
+	cmd := exec.Command(filepath.Join(prefix, "bin", "clast"), args...)
+	cmd.Env = hermeticEnv(t, env)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("running %v: %v", args, err)
+		}
+		exitCode = exitErr.ExitCode()
+	}
+	return result{stdout: stdout.String(), stderr: stderr.String(), exitCode: exitCode}
+}
+
+type assetPayload struct {
+	Path         string `json:"path"`
+	Link         string `json:"link"`
+	ResolvedFrom string `json:"resolved_from"`
+	SHA256       string `json:"sha256"`
+	Content      string `json:"content"`
+}
+
+// TestPlumbingAsset_JSON_EmbeddedLink drives a path present only in the
+// embedded fallback (no override, no installed share tree in this process's
+// own layout): link "embedded", resolved_from the "embedded" sentinel (V25),
+// and content/sha256 matching the file shipped on disk.
+func TestPlumbingAsset_JSON_EmbeddedLink(t *testing.T) {
+	xdg := t.TempDir() // empty: no override present
+	env := []string{"XDG_CONFIG_HOME=" + xdg}
+
+	r := run(t, env, "plumbing", "asset", "agent-guidance.md", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload assetPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Path != "agent-guidance.md" {
+		t.Errorf("path = %q, want %q", payload.Path, "agent-guidance.md")
+	}
+	if payload.Link != "embedded" {
+		t.Errorf("link = %q, want %q", payload.Link, "embedded")
+	}
+	if payload.ResolvedFrom != "embedded" {
+		t.Errorf("resolved_from = %q, want %q (V25)", payload.ResolvedFrom, "embedded")
+	}
+	want := embeddedAssetContent(t)
+	if payload.Content != string(want) {
+		t.Errorf("content mismatch: got %d bytes, want the shipped file's %d bytes", len(payload.Content), len(want))
+	}
+	wantSum := sha256.Sum256(want)
+	if payload.SHA256 != hex.EncodeToString(wantSum[:]) {
+		t.Errorf("sha256 = %q, want the digest of the shipped file", payload.SHA256)
+	}
+}
+
+// TestPlumbingAsset_HumanMode_PrintsResolvedBytesOnly asserts human mode's
+// byte promise (V25): stdout is exactly the resolved content, nothing else.
+func TestPlumbingAsset_HumanMode_PrintsResolvedBytesOnly(t *testing.T) {
+	env := []string{"XDG_CONFIG_HOME=" + t.TempDir()}
+
+	r := run(t, env, "plumbing", "asset", "agent-guidance.md")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	want := embeddedAssetContent(t)
+	if r.stdout != string(want) {
+		t.Errorf("stdout does not equal the resolved bytes verbatim (got %d bytes, want %d)", len(r.stdout), len(want))
+	}
+	if r.stderr != "" {
+		t.Errorf("stderr = %q, want empty without -v", r.stderr)
+	}
+}
+
+// TestPlumbingAsset_Verbose_StderrNamesLink asserts -v adds exactly one
+// stderr line naming the chain link, while stdout keeps carrying only the
+// resolved bytes (V25).
+func TestPlumbingAsset_Verbose_StderrNamesLink(t *testing.T) {
+	env := []string{"XDG_CONFIG_HOME=" + t.TempDir()}
+
+	r := run(t, env, "plumbing", "asset", "agent-guidance.md", "-v")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset -v: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	want := embeddedAssetContent(t)
+	if r.stdout != string(want) {
+		t.Errorf("stdout does not equal the resolved bytes verbatim under -v")
+	}
+	if !strings.Contains(r.stderr, "embedded") {
+		t.Errorf("stderr = %q, want it to name the embedded link", r.stderr)
+	}
+	if strings.Count(r.stderr, "\n") != 1 {
+		t.Errorf("stderr = %q, want exactly one line", r.stderr)
+	}
+}
+
+// TestPlumbingAsset_OverridePresent_WinsOverEmbedded plants a
+// $XDG_CONFIG_HOME/clast override at the same relative path as an embedded
+// asset and asserts the override's own content and link answer — shadow by
+// name (C5.2), an override takes effect with no re-install (M18).
+func TestPlumbingAsset_OverridePresent_WinsOverEmbedded(t *testing.T) {
+	xdg := t.TempDir()
+	overrideDir := filepath.Join(xdg, "clast")
+	if err := os.MkdirAll(overrideDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	overridePath := filepath.Join(overrideDir, "agent-guidance.md")
+	overrideContent := "e2e override content\n"
+	if err := os.WriteFile(overridePath, []byte(overrideContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"XDG_CONFIG_HOME=" + xdg}
+
+	r := run(t, env, "plumbing", "asset", "agent-guidance.md", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset --json (override): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload assetPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Link != "override" {
+		t.Errorf("link = %q, want %q", payload.Link, "override")
+	}
+	if payload.ResolvedFrom != overridePath {
+		t.Errorf("resolved_from = %q, want the override's own disk path %q", payload.ResolvedFrom, overridePath)
+	}
+	if payload.Content != overrideContent {
+		t.Errorf("content = %q, want the override's own content %q", payload.Content, overrideContent)
+	}
+}
+
+// TestPlumbingAsset_ShippedLink_ResolvesFromInstalledShareTree drives the
+// middle link of the chain end to end: a binary installed at
+// <prefix>/bin/clast with a sibling <prefix>/share/clast/assets/<path> (the
+// buildGoModule layout internal/asset.DefaultDir assumes) resolves that
+// file with link "shipped" — the surface word for the TRAP:
+// internal/asset's own Source.String() calls this same link "default",
+// which must never leak here (V25).
+func TestPlumbingAsset_ShippedLink_ResolvesFromInstalledShareTree(t *testing.T) {
+	prefix := installedLayout(t)
+	shareDir := filepath.Join(prefix, "share", "clast", "assets")
+	if err := os.MkdirAll(shareDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shippedPath := filepath.Join(shareDir, "flows", "retro.md")
+	if err := os.MkdirAll(filepath.Dir(shippedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shippedContent := "shipped flow content\n"
+	if err := os.WriteFile(shippedPath, []byte(shippedContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"XDG_CONFIG_HOME=" + t.TempDir()} // no override present
+
+	r := runInstalled(t, prefix, env, "plumbing", "asset", "flows/retro.md", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing asset --json (shipped): exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload assetPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("plumbing asset --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.Link != "shipped" {
+		t.Errorf("link = %q, want %q (never internal/asset's own \"default\")", payload.Link, "shipped")
+	}
+	if payload.ResolvedFrom != shippedPath {
+		t.Errorf("resolved_from = %q, want the installed share path %q", payload.ResolvedFrom, shippedPath)
+	}
+	if payload.Content != shippedContent {
+		t.Errorf("content = %q, want the shipped file's own content %q", payload.Content, shippedContent)
+	}
+}
+
+// TestPlumbingAsset_UnknownPath_NotFoundAsset drives a path absent from
+// every link of the chain: not-found.asset, exit 1, empty stdout (V25).
+func TestPlumbingAsset_UnknownPath_NotFoundAsset(t *testing.T) {
+	env := []string{"XDG_CONFIG_HOME=" + t.TempDir()}
+
+	r := run(t, env, "plumbing", "asset", "no/such/asset.md", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("plumbing asset (unknown path): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", r.stdout)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "not-found.asset" {
+		t.Errorf("error code = %q, want not-found.asset", envelope.Error.Code)
 	}
 }
