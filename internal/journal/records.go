@@ -72,12 +72,16 @@ func ReadSession(root, shard string, key SessionKey) (Session, bool, error) {
 	return readDocument[Session](SessionJSONPath(root, shard, key))
 }
 
-// CurationState is curation.json's "state" field (MODEL §2). There is no
-// constant for `captured`: that state is never written — a missing
-// curation.json means captured, by construction.
+// CurationState is curation.json's "state" field (MODEL §2), plus
+// StateCaptured — the one value never written to a curation.json (its
+// absence means captured, by construction), only ever produced by
+// walk.go's derivation from "does curation.json exist at all".
 type CurationState string
 
 const (
+	// StateCaptured marks a session with no curation.json at all —
+	// derived, never stored (walk.go).
+	StateCaptured CurationState = "captured"
 	// StateCurated marks a session with an entry (entry.md present).
 	StateCurated CurationState = "curated"
 	// StateDismissed marks a session deliberately excluded, with a reason.

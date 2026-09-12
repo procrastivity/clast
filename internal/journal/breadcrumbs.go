@@ -71,12 +71,13 @@ type BreadcrumbEntry struct {
 	Machine string
 }
 
-// BreadcrumbDiagnostic names one unparseable breadcrumb line, skipped
-// during a read rather than failing it — the walk's malformed-document
-// posture (store brief, MODEL §7's "tolerant of what it doesn't own"
-// spirit), applied here to our own JSONL: a garbage line is a counted
-// diagnostic, never a fatal error.
-type BreadcrumbDiagnostic struct {
+// Diagnostic names one malformed or unreadable thing this package chose
+// to skip and count rather than fail on: one JSONL breadcrumb line, or
+// (walk.go) one session directory. One shared type rather than a bespoke
+// one per source, so every tolerant read in this package (store brief,
+// MODEL §7's "tolerant of what it doesn't own" spirit) reports the same
+// shape. Line is 0 when the diagnostic isn't line-scoped.
+type Diagnostic struct {
 	Path string
 	Line int
 	Err  error
@@ -90,7 +91,7 @@ type BreadcrumbDiagnostic struct {
 // day_cutoff is a later step's job (M8), not this read's. No file for
 // shard is not an error: it returns no entries. An unparseable line is
 // skipped and reported in diags rather than failing the read.
-func ReadBreadcrumbs(root, shard string) (entries []BreadcrumbEntry, diags []BreadcrumbDiagnostic, err error) {
+func ReadBreadcrumbs(root, shard string) (entries []BreadcrumbEntry, diags []Diagnostic, err error) {
 	pattern := filepath.Join(root, "breadcrumbs", shard+".*.jsonl")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
@@ -120,7 +121,7 @@ func machineFromBreadcrumbFilename(shard, path string) string {
 
 // readBreadcrumbFile parses one machine's breadcrumb file line by line,
 // counting an unparseable line as a diagnostic instead of failing.
-func readBreadcrumbFile(path, machine string) ([]BreadcrumbEntry, []BreadcrumbDiagnostic, error) {
+func readBreadcrumbFile(path, machine string) ([]BreadcrumbEntry, []Diagnostic, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("journal: opening %s: %w", path, err)
@@ -128,7 +129,7 @@ func readBreadcrumbFile(path, machine string) ([]BreadcrumbEntry, []BreadcrumbDi
 	defer func() { _ = f.Close() }()
 
 	var entries []BreadcrumbEntry
-	var diags []BreadcrumbDiagnostic
+	var diags []Diagnostic
 
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
@@ -140,7 +141,7 @@ func readBreadcrumbFile(path, machine string) ([]BreadcrumbEntry, []BreadcrumbDi
 		}
 		var b Breadcrumb
 		if err := json.Unmarshal(line, &b); err != nil {
-			diags = append(diags, BreadcrumbDiagnostic{Path: path, Line: lineNo, Err: err})
+			diags = append(diags, Diagnostic{Path: path, Line: lineNo, Err: err})
 			continue
 		}
 		entries = append(entries, BreadcrumbEntry{Breadcrumb: b, Machine: machine})

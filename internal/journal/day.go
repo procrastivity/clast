@@ -9,13 +9,6 @@ import (
 	"github.com/procrastivity/clast/internal/config"
 )
 
-// dayLayout is the YYYY-MM-DD layout shared by Day values and the
-// sessions/ and breadcrumbs/ shard filenames (M8) — though a shard
-// filename sharing this format is never load-bearing; every Day this
-// package returns comes from timestamp-plus-cutoff math, never read back
-// off a path.
-const dayLayout = "2006-01-02"
-
 // DefaultCutoffString is the shipped default day_cutoff,
 // assets/config.default.yaml's "04:00" (MODEL M8).
 const DefaultCutoffString = "04:00"
@@ -94,18 +87,18 @@ func (c Cutoff) DayOf(t time.Time) Day {
 	if d.Before(boundary) {
 		d = d.AddDate(0, 0, -1)
 	}
-	return Day(d.Format(dayLayout))
+	return Day(d.Format(dayShardLayout))
 }
 
 // addDays shifts d by n calendar days (n may be negative), parsing and
 // re-formatting through UTC purely to do calendar arithmetic — d carries
 // no time-of-day or zone of its own.
 func (d Day) addDays(n int) (Day, error) {
-	t, err := time.ParseInLocation(dayLayout, string(d), time.UTC)
+	t, err := time.ParseInLocation(dayShardLayout, string(d), time.UTC)
 	if err != nil {
 		return "", fmt.Errorf("journal: %q is not a valid day bucket: %w", d, err)
 	}
-	return Day(t.AddDate(0, 0, n).Format(dayLayout)), nil
+	return Day(t.AddDate(0, 0, n).Format(dayShardLayout)), nil
 }
 
 // ParseDay parses a V5 day-valued argument — "YYYY-MM-DD", "today",
@@ -130,7 +123,7 @@ func ParseDay(arg string, cutoff Cutoff) (Day, error) {
 		}
 		return cutoff.DayOf(now()).addDays(-n)
 	default:
-		if _, err := time.Parse(dayLayout, arg); err != nil {
+		if _, err := time.Parse(dayShardLayout, arg); err != nil {
 			return "", fmt.Errorf(`journal: invalid day argument %q: want "YYYY-MM-DD", "today", "yesterday", or "-Nd"`, arg)
 		}
 		return Day(arg), nil
