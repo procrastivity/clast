@@ -1413,6 +1413,43 @@ func TestPlumbingCurate_FromDismissed_ReplacesDismissal_NoUndismissCeremony(t *t
 	}
 }
 
+// TestPlumbingCurate_FromCurated_ReCuratesAndClearsStaleness drives curate
+// over an already-curated, stale session: the fresh curation.json's
+// fingerprint matches the CURRENT transcript, so the session reads
+// not-stale immediately afterward (M7) — the other legal transition V14
+// draws besides curate-from-dismissed.
+func TestPlumbingCurate_FromCurated_ReCuratesAndClearsStaleness(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	current := journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 20, SHA256: "new"}
+	stale := journal.TranscriptStamp{Lines: 10, SHA256: "old"}
+	fx.CuratedStale("2026-09-11", key, current, stale,
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
+		"laptop", "old title")
+
+	path := writeEntryFile(t, wellFormedEntryDoc("refreshed"))
+	r := run(t, env, "plumbing", "curate", "claude-8f3a", "--file", path, "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("curate --file --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload curateResultPayload
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("curate --json stdout: %v; stdout=%q", err, r.stdout)
+	}
+	if payload.PriorState != "curated" {
+		t.Errorf("prior_state = %q, want %q", payload.PriorState, "curated")
+	}
+
+	curation, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key)
+	if err != nil || !ok {
+		t.Fatalf("ReadCuration: ok=%v err=%v", ok, err)
+	}
+	if curation.TranscriptAtCuration == nil || curation.TranscriptAtCuration.Lines != 20 || curation.TranscriptAtCuration.SHA256 != "new" {
+		t.Errorf("curation.TranscriptAtCuration = %+v, want the refreshed current fingerprint {20 new}", curation.TranscriptAtCuration)
+	}
+}
+
 // TestPlumbingCurate_InvalidFrontmatter_JSONEnvelope drives curate with a
 // document whose frontmatter doesn't parse: validation.entry-frontmatter,
 // exit 1, empty stdout.
@@ -1653,6 +1690,33 @@ func TestPlumbingUndismiss_RefusesNotDismissed_JSONEnvelope(t *testing.T) {
 	envelope := parseErrorEnvelope(t, r.stderr)
 	if envelope.Error.Code != "validation.not-dismissed" {
 		t.Errorf("error code = %q, want validation.not-dismissed", envelope.Error.Code)
+	}
+}
+
+// TestPlumbingUndismiss_RefusesCurated_JSONEnvelope drives undismiss
+// against a curated session — a second, distinct not-dismissed origin
+// state from the captured case above, since a curated session is also
+// never dismissed: validation.not-dismissed, exit 1, curation left
+// untouched.
+func TestPlumbingUndismiss_RefusesCurated_JSONEnvelope(t *testing.T) {
+	key := journal.SessionKey{Harness: "claude", NativeID: "8f3a"}
+	fx, env := stateVerbsFixture(t)
+	fx.Curated("2026-09-11", key, journal.TranscriptFingerprint{Lines: 5, SHA256: "x"},
+		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
+		"laptop", "a title")
+
+	r := run(t, env, "plumbing", "undismiss", "claude-8f3a", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("undismiss (curated): exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "validation.not-dismissed" {
+		t.Errorf("error code = %q, want validation.not-dismissed", envelope.Error.Code)
+	}
+	curation, ok, err := journal.ReadCuration(fx.Root(), "2026-09-11", key)
+	if err != nil || !ok || curation.State != journal.StateCurated {
+		t.Errorf("curation after refused undismiss: state=%q ok=%v err=%v, want unchanged curated", curation.State, ok, err)
 	}
 }
 
