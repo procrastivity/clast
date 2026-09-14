@@ -80,5 +80,11 @@
             echo "clast dev shell — run 'make check' to lint+test, 'make hooks' to install pre-commit." >&2
           '';
         };
-      });
+      }) // {
+      # Downstream flakes consume `pkgs.clast` through this overlay (the
+      # bash line exposed the same shape); keep it or their inputs break.
+      overlays.default = final: prev: {
+        clast = self.packages.${prev.system}.default;
+      };
+    };
 }
