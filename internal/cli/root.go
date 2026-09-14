@@ -12,15 +12,19 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	breadcrumbverb "github.com/procrastivity/clast/internal/verbs/breadcrumb"
 	briefverb "github.com/procrastivity/clast/internal/verbs/briefverb"
+	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
 	doctorverb "github.com/procrastivity/clast/internal/verbs/doctor"
 	initverb "github.com/procrastivity/clast/internal/verbs/initverb"
 	installverb "github.com/procrastivity/clast/internal/verbs/install"
 	manifestverb "github.com/procrastivity/clast/internal/verbs/manifest"
 	plumbingverb "github.com/procrastivity/clast/internal/verbs/plumbing"
+	projectsverb "github.com/procrastivity/clast/internal/verbs/projects"
+	registryacts "github.com/procrastivity/clast/internal/verbs/registryacts"
 	retroverb "github.com/procrastivity/clast/internal/verbs/retroverb"
 	uninstallverb "github.com/procrastivity/clast/internal/verbs/uninstall"
 	versionverb "github.com/procrastivity/clast/internal/verbs/version"
 	wakeverb "github.com/procrastivity/clast/internal/verbs/wakeverb"
+	whereamiverb "github.com/procrastivity/clast/internal/verbs/whereami"
 )
 
 // NewRootCommand builds the clast root command with both global flags
@@ -67,6 +71,12 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	root.AddCommand(retroverb.Command(streams))
 	root.AddCommand(initverb.Command(streams))
 	root.AddCommand(breadcrumbverb.Command(streams))
+	root.AddCommand(whereamiverb.AliasCommand(streams))
+	root.AddCommand(projectsverb.AliasCommand(streams))
+	root.AddCommand(clonesverb.AliasCommand(streams))
+	root.AddCommand(registryacts.LabelCommand(streams))
+	root.AddCommand(registryacts.AdoptCommand(streams))
+	root.AddCommand(registryacts.RelinkCommand(streams))
 	root.AddCommand(doctorverb.Command(streams, build, root))
 	root.AddCommand(installverb.Command(streams, build, root))
 	root.AddCommand(uninstallverb.Command(streams))

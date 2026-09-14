@@ -6,14 +6,20 @@
 package checks
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/procrastivity/clast/internal/buildinfo"
 	"github.com/procrastivity/clast/internal/harness"
 	"github.com/procrastivity/clast/internal/harness/registry"
+	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/manifest"
+	tierregistry "github.com/procrastivity/clast/internal/registry"
 )
 
 // Finding is one reported condition: a stable dotted machine code and the
@@ -84,6 +90,17 @@ const MissingHarnessSpliceCode = "advisory.missing-harness-splice"
 // settings.json is the only remedy. See spliceDriftFindings' SpliceCurrent
 // case.
 const OrphanedHarnessSpliceCode = "advisory.orphaned-harness-splice"
+
+// RegistryMovedCloneCode is the report-only offer for a current directory
+// whose remote belongs to a known project but whose git common-dir is not
+// registered on this machine. The message names the concrete relink
+// candidates when one exists and always names init as the alternative.
+const RegistryMovedCloneCode = "advisory.unknown-clone-remote-known"
+
+// RegistryAdoptionCode is the report-only offer for a registered, keyless
+// project whose recorded identity remote is now present in the current
+// clone.
+const RegistryAdoptionCode = "advisory.keyless-project-remote-known"
 
 // TargetState is one registered harness target's reported drift state —
 // the per-target fact doctor's --json and text output carry beside
@@ -372,3 +389,108 @@ func driftFinding(harnessName, dir string, state harness.State) Finding {
 		Message: fmt.Sprintf("found: %s — %s", harness.Risk(harnessName, dir, state), harness.ForceRemedy(harnessName, state)),
 	}
 }
+
+// RegistryFindings is the report-only registry check. A keyless project with
+// its recorded identity remote present gets an adoption offer. A known remote
+// on an unknown common-dir gets a relink-or-init offer, naming concrete local
+// clone IDs when available. Neither case writes anything; the user must make
+// the choice explicitly.
+func RegistryFindings(ctx context.Context, root, dir string) ([]Finding, error) {
+	common, err := tierregistry.CommonDir(ctx, dir)
+	if err != nil {
+		return nil, nil
+	}
+	machine, err := journal.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	view, _, err := tierregistry.Load(root)
+	if err != nil {
+		return nil, err
+	}
+	var current []tierregistry.ProjectView
+	for _, p := range view.Projects {
+		for _, c := range p.Clones {
+			if c.Machine == machine && c.GitCommonDir == common {
+				current = append(current, p)
+				break
+			}
+		}
+	}
+	remotes, err := tierregistry.Remotes(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(current) > 0 {
+		findings := make([]Finding, 0, len(current))
+		seen := make(map[string]bool)
+		for _, p := range current {
+			if p.Project.Remote != "" || seen[p.Project.ID] {
+				continue
+			}
+			seen[p.Project.ID] = true
+			name := p.Project.IdentityRemote
+			if name == "" {
+				name = "origin"
+			}
+			raw, ok := remotes[name]
+			if !ok {
+				continue
+			}
+			remote, e := tierregistry.NormalizeRemote(raw)
+			if e != nil {
+				continue
+			}
+			findings = append(findings, Finding{
+				Code: RegistryAdoptionCode,
+				Message: fmt.Sprintf("found: keyless project %q now has identity remote %q; choose `clast adopt` to record it (no automatic adoption)",
+					p.Project.Slug, remote),
+			})
+		}
+		return findings, nil
+	}
+
+	names := make([]string, 0, len(remotes))
+	for n := range remotes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	matchedRemotes := make(map[string]bool)
+	matchedProjects := make(map[string]bool)
+	var findings []Finding
+	for _, n := range names {
+		r, e := tierregistry.NormalizeRemote(remotes[n])
+		if e != nil || matchedRemotes[r] {
+			continue
+		}
+		matchedRemotes[r] = true
+		for _, p := range view.Projects {
+			if p.Project.Remote != r || matchedProjects[p.Project.ID] {
+				continue
+			}
+			matchedProjects[p.Project.ID] = true
+			ids := make([]string, 0)
+			for _, c := range p.Clones {
+				if c.Machine == machine {
+					ids = append(ids, c.ID)
+				}
+			}
+			sort.Strings(ids)
+			message := fmt.Sprintf("found: this clone's remote matches project %q but its git common-dir is unknown; choose `clast init` to register a new clone (no automatic choice)", p.Project.Slug)
+			if len(ids) > 0 {
+				locators := make([]string, len(ids))
+				for i, id := range ids {
+					locators[i] = fmt.Sprintf("`clast relink %s`", id)
+				}
+				message = fmt.Sprintf("found: this clone's remote matches project %q but its git common-dir is unknown; choose %s to keep an existing clone identity, or `clast init` to register a new clone (no automatic choice)",
+					p.Project.Slug, strings.Join(locators, " or "))
+			}
+			findings = append(findings, Finding{Code: RegistryMovedCloneCode, Message: message})
+		}
+	}
+	return findings, nil
+}
+
+// CurrentDir is kept small so doctor remains flat and report-only while the
+// check stays directly testable.
+func CurrentDir() (string, error) { return os.Getwd() }

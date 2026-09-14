@@ -70,3 +70,32 @@ func TestWalkVerbs_RefusesAnUnannotatedVerb(t *testing.T) {
 		t.Fatalf("walkVerbs accepted a verb with no surface kind; C3.2 requires a hard error")
 	}
 }
+
+func TestWalkVerbs_AliasPreservesDeclaration(t *testing.T) {
+	root := &cobra.Command{Use: "tool"}
+	group := &cobra.Command{Use: "plumbing"}
+	canonical := &cobra.Command{Use: "whereami", Short: "report", Run: func(*cobra.Command, []string) {}}
+	alias := &cobra.Command{Use: "whereami", Short: "report", Run: func(*cobra.Command, []string) {}}
+	for _, cmd := range []*cobra.Command{canonical, alias} {
+		surface.Annotate(cmd, surface.Plumbing)
+		SetOutputSchema(cmd, []byte(`{"type":"object"}`))
+	}
+	SetAliasOf(alias, "plumbing whereami")
+	group.AddCommand(canonical)
+	root.AddCommand(group)
+	root.AddCommand(alias)
+
+	verbs, err := walkVerbs(root)
+	if err != nil {
+		t.Fatalf("walkVerbs: %v", err)
+	}
+	if len(verbs) != 2 {
+		t.Fatalf("walkVerbs returned %d verbs, want canonical plus alias", len(verbs))
+	}
+	if verbs[1].AliasOf != "plumbing whereami" {
+		t.Fatalf("alias-of = %q, want canonical manifest name", verbs[1].AliasOf)
+	}
+	if verbs[0].Kind != verbs[1].Kind || verbs[0].Usage != verbs[1].Usage || verbs[0].Description != verbs[1].Description || string(verbs[0].OutputSchema) != string(verbs[1].OutputSchema) || len(verbs[0].Args) != len(verbs[1].Args) {
+		t.Fatalf("alias declaration differs from canonical: canonical=%+v alias=%+v", verbs[0], verbs[1])
+	}
+}

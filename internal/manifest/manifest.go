@@ -55,8 +55,9 @@ type Arg struct {
 // the manifest itself never filters (C3.2); that happens only on the
 // harness-projection side (internal/harness).
 type Verb struct {
-	Name string       `json:"name"`
-	Kind surface.Kind `json:"kind"`
+	Name    string       `json:"name"`
+	Kind    surface.Kind `json:"kind"`
+	AliasOf string       `json:"alias-of,omitempty"`
 
 	// Usage is the positional-argument portion of the verb's own cobra Use
 	// line, recorded verbatim: "<name>" for a verb declared as

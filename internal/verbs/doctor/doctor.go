@@ -16,7 +16,9 @@ import (
 	"github.com/procrastivity/clast/internal/checks"
 	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/cliflags"
+	"github.com/procrastivity/clast/internal/config"
 	"github.com/procrastivity/clast/internal/iostreams"
+	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/surface"
 )
 
@@ -40,6 +42,21 @@ func Command(streams *iostreams.Streams, build buildinfo.Info, root *cobra.Comma
 			findings, targets, err := checks.HarnessTargets(root, build)
 			if err != nil {
 				return err
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			journalRoot, err := journal.Root(cfg)
+			if err != nil {
+				return err
+			}
+			if dir, e := checks.CurrentDir(); e == nil {
+				fs, e := checks.RegistryFindings(cmd.Context(), journalRoot, dir)
+				if e != nil {
+					return e
+				}
+				findings = append(findings, fs...)
 			}
 
 			if flags.JSON {

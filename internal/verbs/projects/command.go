@@ -11,13 +11,21 @@ import (
 	"github.com/procrastivity/clast/internal/config"
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/manifest"
 	"github.com/procrastivity/clast/internal/surface"
 )
 
 // Command constructs the `clast plumbing projects` verb.
-func Command(streams *iostreams.Streams) *cobra.Command {
+func Command(streams *iostreams.Streams) *cobra.Command { return command(streams, "projects", "") }
+
+// AliasCommand constructs the top-level `clast projects` alias.
+func AliasCommand(streams *iostreams.Streams) *cobra.Command {
+	return command(streams, "projects", "projects")
+}
+
+func command(streams *iostreams.Streams, use, aliasOf string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "projects",
+		Use:   use,
 		Short: "list every project clast knows about",
 		Long: "list every registered project: slug, remote (\"(no remote)\" for a keyless project), " +
 			"and its clone count across every machine that has registered one. Read-only — register a " +
@@ -55,6 +63,9 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	// OutputSchema is deliberately left unfilled: V35 leaves the registry
 	// queries unfilled until a consumer exists (C3.7 — never speculatively).
 	surface.Annotate(cmd, surface.Plumbing)
+	if aliasOf != "" {
+		manifest.SetAliasOf(cmd, "plumbing "+aliasOf)
+	}
 	return cmd
 }
 

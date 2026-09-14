@@ -47,9 +47,17 @@ const outputSchema = `{
 }`
 
 // Command constructs the `clast plumbing whereami` verb.
-func Command(streams *iostreams.Streams) *cobra.Command {
+func Command(streams *iostreams.Streams) *cobra.Command { return command(streams, "whereami", "") }
+
+// AliasCommand builds the top-level spelling using the same implementation
+// and declarations as the plumbing command.
+func AliasCommand(streams *iostreams.Streams) *cobra.Command {
+	return command(streams, "whereami", "whereami")
+}
+
+func command(streams *iostreams.Streams, use, aliasOf string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "whereami",
+		Use:   use,
 		Short: "report the registered project/clone/worktree/branch for the cwd",
 		Long: "report, for the current directory: the project it belongs to (id, slug, remote), " +
 			"the clone (id, label, git-common-dir), the worktree name (empty for the main worktree, M17), " +
@@ -95,6 +103,9 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	}
 	manifest.SetOutputSchema(cmd, json.RawMessage(outputSchema))
 	surface.Annotate(cmd, surface.Plumbing)
+	if aliasOf != "" {
+		manifest.SetAliasOf(cmd, "plumbing "+aliasOf)
+	}
 	return cmd
 }
 

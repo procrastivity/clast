@@ -16,7 +16,10 @@ import (
 // internal/surface's own annotation-on-the-command approach: the
 // registration lives on the command itself, so this walk needs no parallel
 // registry.
-const outputSchemaAnnotation = "clast.output-schema"
+const (
+	outputSchemaAnnotation = "clast.output-schema"
+	aliasOfAnnotation      = "clast.alias-of"
+)
 
 // SetOutputSchema records schema as cmd's declared --json output shape. The
 // field exists in the manifest shape ready for the first verb that earns
@@ -26,6 +29,16 @@ func SetOutputSchema(cmd *cobra.Command, schema json.RawMessage) {
 		cmd.Annotations = map[string]string{}
 	}
 	cmd.Annotations[outputSchemaAnnotation] = string(schema)
+}
+
+// SetAliasOf records that this command is an alternate spelling of another
+// manifest verb. The command remains a real leaf so flags, usage and schema
+// are emitted and checked independently.
+func SetAliasOf(cmd *cobra.Command, name string) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[aliasOfAnnotation] = name
 }
 
 // walkVerbs collects every leaf, non-hidden command under root, regardless
@@ -71,6 +84,7 @@ func collect(root, cmd *cobra.Command, out *[]Verb) error {
 			Args:        walkArgs(child),
 			Description: child.Short,
 		}
+		v.AliasOf = child.Annotations[aliasOfAnnotation]
 		if schema, ok := child.Annotations[outputSchemaAnnotation]; ok && schema != "" {
 			v.OutputSchema = json.RawMessage(schema)
 		}
