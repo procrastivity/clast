@@ -13,11 +13,13 @@ repos:
     hooks:
       # testdata fixtures are byte-exact by design (a captured transcript's
       # fingerprint is asserted against them; one deliberately ends
-      # mid-line) — the fixers must not touch them.
+      # mid-line) — the fixers must not touch them. vendor/ is upstream's
+      # bytes verbatim (go mod vendor output); the fixers and Go hooks
+      # must not touch it either.
       - id: trailing-whitespace
-        exclude: '/testdata/'
+        exclude: '/testdata/|^vendor/'
       - id: end-of-file-fixer
-        exclude: '/testdata/'
+        exclude: '/testdata/|^vendor/'
       - id: check-yaml
       - id: check-merge-conflict
 
@@ -34,6 +36,7 @@ repos:
         entry: contrib/check-gofumpt
         language: system
         files: '\.go$'
+        exclude: '^vendor/'
 
       - id: golangci-lint
         name: golangci-lint run

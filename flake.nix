@@ -25,9 +25,11 @@
           pname = "clast";
           inherit version;
           src = ./.;
-          # Re-derive whenever go.mod changes: set pkgs.lib.fakeHash, run
-          # `nix build`, paste the printed hash.
-          vendorHash = "sha256-komX1AmHt2NoF1x6xsNa2RFkfVzOXfYEMPhT0zwMxjw=";
+          # Dependencies are vendored (vendor/ is committed), so there is
+          # no fixed-output fetch and no hash to re-pin when go.mod
+          # changes — run `go mod vendor` after a dependency change and
+          # commit the result instead.
+          vendorHash = null;
 
           env.CGO_ENABLED = 0;
 

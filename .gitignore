@@ -15,3 +15,9 @@
 .wip/
 
 .DS_Store
+
+# vendor/ is committed whole (flake vendorHash = null). The re-include
+# shields it from user-global ignore patterns — a global `*.com` rule
+# (Windows executables) would otherwise silently drop vendor/github.com
+# from commits.
+!vendor/**
