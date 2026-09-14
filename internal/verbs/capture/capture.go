@@ -3,8 +3,10 @@
 // source (M12), captures new sessions, re-captures grown or rewritten
 // ones per the source's storage model (M13), resolves project, clone,
 // and worktree facts (M17), writes session.json, and applies M3's
-// auto-dismissal itself. Unreadable sessions are stderr diagnostics,
-// never a failed run.
+// auto-dismissal itself. An unchanged session whose prior capture
+// resolved no project retries resolution and backfills session.json in
+// place once the clone is registered (M13/M15). Unreadable sessions are
+// stderr diagnostics, never a failed run.
 package capture
 
 import (
@@ -42,6 +44,10 @@ type Captured struct {
 	Shard         string
 	Recaptured    bool
 	AutoDismissed bool
+	// ProjectBackfilled marks a project backfill: session.json rewritten
+	// in place with newly resolved project/worktree facts, nothing
+	// re-copied (Recaptured stays false).
+	ProjectBackfilled bool
 }
 
 // Run performs one capture sweep. Diagnostics are accumulated, not
@@ -101,7 +107,14 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 			return nil, []source.Diagnostic{{Path: d.Path, Err: err}}, nil
 		}
 		if lines == prior.Session.Transcript.Lines && sum == prior.Session.Transcript.SHA256 {
-			return nil, nil, nil // unchanged — the silent common case (V13).
+			if prior.Session.Project != nil {
+				return nil, nil, nil // unchanged — the silent common case (V13).
+			}
+			// Unchanged transcript, but the prior capture resolved no
+			// project (captured before `clast init`, M15): retry
+			// resolution and backfill session.json in place if the clone
+			// is registered now.
+			return backfillProject(ctx, deps, src, d, prior, key)
 		}
 	}
 
@@ -178,6 +191,46 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 	}
 
 	return &Captured{Key: key, Shard: shard, Recaptured: recapture, AutoDismissed: autoDismissed}, diags, nil
+}
+
+// backfillProject retries project resolution for an unchanged session
+// whose prior capture resolved none, and rewrites session.json in place
+// when a project resolves now. Everything else in the prior document —
+// captured_at, the transcript fingerprint, counts — is preserved
+// verbatim, so a curated session cannot become stale (M7) and the next
+// sweep hits the silent early exit. Only session.json is written: the
+// transcript copy and curation documents are never touched, so a
+// standing dismissal or entry is unaffected. A still-unresolvable
+// session stays silent and is retried on every sweep.
+func backfillProject(ctx context.Context, deps Deps, src source.Source, d source.Discovered, prior journal.WalkItem, key journal.SessionKey) (*Captured, []source.Diagnostic, error) {
+	dir, diags, err := src.Correlate(ctx, d)
+	if err != nil {
+		diags = append(diags, source.Diagnostic{Path: d.Path, Err: err})
+		return nil, diags, nil
+	}
+	if dir == "" {
+		return nil, diags, nil // still no cwd evidence — stays projectless.
+	}
+	cc, err := registry.ResolveCurrentClone(ctx, deps.Root, dir)
+	if err != nil {
+		// Still unregistered, vanished, or not a git repo — the same
+		// projectless-not-uncaptured posture as the fresh-capture path.
+		return nil, diags, nil
+	}
+
+	session := prior.Session
+	session.Project = &journal.SessionProject{
+		ID:    cc.Project.ID,
+		Slug:  cc.Project.Slug,
+		Clone: cc.Clone.ID,
+		Label: cc.Clone.Label,
+		Path:  dir,
+	}
+	session.Worktree = cc.Worktree
+	if err := journal.WriteSession(deps.Root, prior.Shard, key, session); err != nil {
+		return nil, diags, err
+	}
+	return &Captured{Key: key, Shard: prior.Shard, ProjectBackfilled: true}, diags, nil
 }
 
 // applyAutoDismissal is M3 at capture time, both directions:
