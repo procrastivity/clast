@@ -228,6 +228,92 @@ func TestManifest_JSON_DeclaresContractAndDigest(t *testing.T) {
 	}
 }
 
+// TestRegistryAliasPairs_AreDeclarationAndBehaviorIdentical pins the V1
+// alias-pair rule at the built root: each top-level spelling is a real
+// manifest leaf with the same declaration as its plumbing member, while
+// alias-of records the relationship and the two spellings produce identical
+// CLI results.
+func TestRegistryAliasPairs_AreDeclarationAndBehaviorIdentical(t *testing.T) {
+	r := run(t, nil, "manifest", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("manifest --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var m struct {
+		Verbs []struct {
+			Name         string          `json:"name"`
+			Kind         string          `json:"kind"`
+			AliasOf      string          `json:"alias-of"`
+			Usage        string          `json:"usage"`
+			Args         json.RawMessage `json:"args"`
+			Description  string          `json:"description"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"verbs"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil {
+		t.Fatalf("manifest --json stdout is not one JSON value: %v", err)
+	}
+	byName := make(map[string]struct {
+		Kind         string
+		AliasOf      string
+		Usage        string
+		Args         json.RawMessage
+		Description  string
+		OutputSchema json.RawMessage
+	})
+	for _, verb := range m.Verbs {
+		byName[verb.Name] = struct {
+			Kind         string
+			AliasOf      string
+			Usage        string
+			Args         json.RawMessage
+			Description  string
+			OutputSchema json.RawMessage
+		}{verb.Kind, verb.AliasOf, verb.Usage, verb.Args, verb.Description, verb.OutputSchema}
+	}
+
+	pairs := []struct {
+		canonical string
+		alias     string
+	}{
+		{"plumbing whereami", "whereami"},
+		{"plumbing projects", "projects"},
+		{"plumbing clones", "clones"},
+	}
+	aliasDir := initGitRepo(t, "alias-widget")
+	addGitRemote(t, aliasDir, "origin", "git@github.com:acme/alias-widget.git")
+	aliasEnv := []string{"CLAST_JOURNAL_DIR=" + t.TempDir()}
+	if registered := runIn(t, aliasDir, aliasEnv, "init"); registered.exitCode != 0 {
+		t.Fatalf("init alias behavior fixture: exit=%d stderr=%q", registered.exitCode, registered.stderr)
+	}
+	for _, pair := range pairs {
+		canonical, ok := byName[pair.canonical]
+		if !ok {
+			t.Fatalf("manifest carries no canonical verb %q", pair.canonical)
+		}
+		alias, ok := byName[pair.alias]
+		if !ok {
+			t.Fatalf("manifest carries no alias verb %q", pair.alias)
+		}
+		if alias.AliasOf != pair.canonical {
+			t.Errorf("%s alias-of = %q, want %q", pair.alias, alias.AliasOf, pair.canonical)
+		}
+		if canonical.AliasOf != "" {
+			t.Errorf("%s unexpectedly carries alias-of %q", pair.canonical, canonical.AliasOf)
+		}
+		if canonical.Kind != alias.Kind || canonical.Usage != alias.Usage || canonical.Description != alias.Description || string(canonical.Args) != string(alias.Args) || string(canonical.OutputSchema) != string(alias.OutputSchema) {
+			t.Errorf("%s and %s declarations differ: canonical=%+v alias=%+v", pair.canonical, pair.alias, canonical, alias)
+		}
+
+		canonicalArgs := strings.Fields(pair.canonical)
+		aliasArgs := strings.Fields(pair.alias)
+		canonicalResult := runIn(t, aliasDir, aliasEnv, append(canonicalArgs, "--json")...)
+		aliasResult := runIn(t, aliasDir, aliasEnv, append(aliasArgs, "--json")...)
+		if canonicalResult.exitCode != aliasResult.exitCode || canonicalResult.stdout != aliasResult.stdout || canonicalResult.stderr != aliasResult.stderr {
+			t.Errorf("%s and %s behavior differs: canonical=%+v alias=%+v", pair.canonical, pair.alias, canonicalResult, aliasResult)
+		}
+	}
+}
+
 // TestManifest_DigestCommitsToTheDocument checks C3.4's substance, not just
 // its prefix: the emitted manifest_digest must be a sha256 over the exact
 // bytes the caller received, with the digest field held empty. It does the
@@ -2752,7 +2838,9 @@ func TestSeal_V34CodesEndToEnd(t *testing.T) {
 
 // TestRootHelp_DoesNotListPlumbingVerbs confirms bare `clast --help` lists
 // the `plumbing` namespace entry itself but none of the verbs registered
-// under it (V2: plumbing verbs are never porcelain).
+// under it (V2: plumbing verbs are never porcelain). The three registry
+// queries also have deliberate top-level aliases, so those names are
+// excluded from this structural assertion.
 func TestRootHelp_DoesNotListPlumbingVerbs(t *testing.T) {
 	r := run(t, nil, "--help")
 	if r.exitCode != 0 {
@@ -2762,11 +2850,7 @@ func TestRootHelp_DoesNotListPlumbingVerbs(t *testing.T) {
 		t.Errorf("stdout = %q, want it to list the plumbing namespace entry", r.stdout)
 	}
 	for _, verb := range []string{"whereami", "projects", "clones"} {
-		// "sessions" is deliberately not checked here: the root command's own
-		// Short description ("capture agent sessions...") already contains
-		// the word, which would make this a false positive rather than a
-		// real signal about the plumbing verb.
-		if strings.Contains(r.stdout, verb) {
+		if strings.Contains(r.stdout, "plumbing "+verb) {
 			t.Errorf("stdout = %q, want it NOT to list plumbing verb %q among the porcelain", r.stdout, verb)
 		}
 	}

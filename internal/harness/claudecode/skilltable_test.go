@@ -62,6 +62,9 @@ var wantPlumbingVerbs = []string{
 var nonPlumbingVerbs = []string{
 	"init",
 	"breadcrumb",
+	"label",
+	"adopt",
+	"relink",
 	"doctor",
 	"install",
 	"uninstall",
