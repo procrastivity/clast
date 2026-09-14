@@ -27,6 +27,8 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 		Long: "capture walks every implemented source, captures new sessions, re-captures grown or " +
 			"rewritten ones, resolves project/clone/worktree facts, writes session.json, and " +
 			"auto-dismisses no-op sessions (reason auto:no-op) when capture.auto_dismiss_noop is on. " +
+			"An unchanged session captured before its project was init'ed retries resolution and, " +
+			"once the clone is registered, backfills session.json in place (one `backfilled` line). " +
 			"One line per session captured; nothing at all when there is nothing to do (exit 0, " +
 			"empty stdout), so hook and cron paths stay quiet. Unreadable sessions are stderr " +
 			"diagnostics, never a failed run.\n\n" +
@@ -127,22 +129,24 @@ func autoDismissNoop(cfg config.Config) (bool, error) {
 
 // capturedJSON is one row of capture's --json payload.
 type capturedJSON struct {
-	Harness       string `json:"harness"`
-	SessionID     string `json:"session_id"`
-	Shard         string `json:"shard"`
-	Recaptured    bool   `json:"recaptured"`
-	AutoDismissed bool   `json:"auto_dismissed"`
+	Harness           string `json:"harness"`
+	SessionID         string `json:"session_id"`
+	Shard             string `json:"shard"`
+	Recaptured        bool   `json:"recaptured"`
+	AutoDismissed     bool   `json:"auto_dismissed"`
+	ProjectBackfilled bool   `json:"project_backfilled"`
 }
 
 func writeJSON(streams *iostreams.Streams, captured []Captured) error {
 	rows := make([]capturedJSON, len(captured))
 	for i, c := range captured {
 		rows[i] = capturedJSON{
-			Harness:       c.Key.Harness,
-			SessionID:     c.Key.NativeID,
-			Shard:         c.Shard,
-			Recaptured:    c.Recaptured,
-			AutoDismissed: c.AutoDismissed,
+			Harness:           c.Key.Harness,
+			SessionID:         c.Key.NativeID,
+			Shard:             c.Shard,
+			Recaptured:        c.Recaptured,
+			AutoDismissed:     c.AutoDismissed,
+			ProjectBackfilled: c.ProjectBackfilled,
 		}
 	}
 	payload := struct {
@@ -161,7 +165,10 @@ func writeJSON(streams *iostreams.Streams, captured []Captured) error {
 func writeHuman(streams *iostreams.Streams, captured []Captured) error {
 	for _, c := range captured {
 		verb := "captured"
-		if c.Recaptured {
+		switch {
+		case c.ProjectBackfilled:
+			verb = "backfilled"
+		case c.Recaptured:
 			verb = "recaptured"
 		}
 		line := fmt.Sprintf("%s %s", verb, c.Key.DirName())
