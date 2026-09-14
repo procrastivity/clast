@@ -1,6 +1,6 @@
 # clast
 
-> **Retired.** This branch (`bash-final`) keeps the last bash version of clast. We will not change this version again. The new clast is a Go binary on the [`main`](https://github.com/procrastivity/clast/tree/main) branch. Install the new clast with Nix or with the release binaries. Do not install the npm package `@procrastivity/clast`.
+> **Retired.** This branch (`bash-final`) keeps the last bash version of clast. We will not change this version again. The new clast is a Go binary on the [`main`](https://github.com/procrastivity/clast/tree/main) branch. Install the new clast with Nix or with the release binaries. Versions 0.0.8 and below of the npm package `@procrastivity/clast` are this bash version. Newer versions will be the Go binary.
 
 Capture, curate, and surface Claude Code session history across all your projects.
 
