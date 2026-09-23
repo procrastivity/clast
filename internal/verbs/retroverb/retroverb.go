@@ -26,6 +26,7 @@ package retroverb
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/procrastivity/clast/internal/clasterr"
@@ -99,7 +100,8 @@ func HasEntries(result retroplumbing.Result) bool {
 // group's Entries list), render the retro-summary prompt pair, resolve a
 // cache hit (unless refresh) or call client.Complete, and store the
 // result (fresh or refreshed) back into the cache under its own
-// fingerprint. Returns every summary keyed by its session's directory
+// fingerprint. Entries are summarized concurrently, at most
+// summarizeConcurrency at a time. Returns every summary keyed by its session's directory
 // name (journal.SessionKey.DirName, EntryRow.Item.Key.DirName()) —
 // Fold's own lookup key — alongside Stats for command.go's --verbose
 // line.
@@ -110,26 +112,82 @@ func HasEntries(result retroplumbing.Result) bool {
 // requires of its caller, enforced the same way: Summarize takes an
 // already-built *llm.Client rather than a config.Config.
 func Summarize(ctx context.Context, result retroplumbing.Result, client *llm.Client, cacheDir string, refresh bool) (map[string]string, Stats, error) {
-	summaries := map[string]string{}
-	var stats Stats
-
-	singleDay := result.WindowStart == result.Day
+	type job struct {
+		slug string
+		row  retroplumbing.EntryRow
+	}
+	var jobs []job
 	for _, g := range result.Groups {
 		for _, row := range g.Entries {
-			text, hit, err := summarizeEntry(ctx, g.Slug, singleDay, result.Day, row, client, cacheDir, refresh)
-			if err != nil {
-				return nil, stats, err
-			}
-			summaries[row.Item.Key.DirName()] = text
-			if hit {
-				stats.CacheHits++
-			} else {
-				stats.Requests++
-			}
+			jobs = append(jobs, job{slug: g.Slug, row: row})
 		}
+	}
+
+	// Entries are independent, so a cold window (a first --since run, or
+	// a template/model change) fans out over a small worker pool rather
+	// than paying for every endpoint round trip in series. The first
+	// failure cancels the rest and is the one reported; order of the
+	// returned map is irrelevant, since Fold walks result's own ordering.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		mu        sync.Mutex
+		summaries = map[string]string{}
+		stats     Stats
+		firstErr  error
+		wg        sync.WaitGroup
+	)
+	next := make(chan job)
+	workers := min(summarizeConcurrency, len(jobs))
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range next {
+				text, hit, err := summarizeEntry(ctx, j.slug, result.WindowStart == result.Day, result.Day, j.row, client, cacheDir, refresh)
+				mu.Lock()
+				switch {
+				case err != nil:
+					if firstErr == nil {
+						firstErr = err
+						cancel()
+					}
+				case hit:
+					summaries[j.row.Item.Key.DirName()] = text
+					stats.CacheHits++
+				default:
+					summaries[j.row.Item.Key.DirName()] = text
+					stats.Requests++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+dispatch:
+	for _, j := range jobs {
+		select {
+		case next <- j:
+		case <-ctx.Done():
+			break dispatch
+		}
+	}
+	close(next)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, stats, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, stats, err
 	}
 	return summaries, stats, nil
 }
+
+// summarizeConcurrency caps Summarize's in-flight endpoint requests: enough
+// to cut a cold window's wall time several-fold, few enough to stay polite
+// to a local or rate-limited endpoint.
+const summarizeConcurrency = 4
 
 // summarizeEntry is Summarize's own per-entry step: render, then either
 // serve a cache hit or call the endpoint and store the fresh result.
@@ -140,7 +198,21 @@ func summarizeEntry(ctx context.Context, groupSlug string, singleDay bool, topDa
 			fmt.Sprintf("retro: resolving the retro-summary prompt pair: %v", err))
 	}
 
-	fingerprint := Fingerprint(rendered, client.Model())
+	// The cache key is rendered with the project neutralized: a project
+	// backfill (plumbing capture resolving a session captured before its
+	// clone was registered) turns "(no project)" into a real slug without
+	// touching the entry, and must not re-summarize every such session.
+	// The model still sees the real project; --refresh rewrites a summary
+	// that should reflect it.
+	keyData := summaryPromptData(groupSlug, singleDay, topDay, row)
+	keyData["project"] = ""
+	keyRendered, err := prompt.Render(prompt.RetroSummary, keyData)
+	if err != nil {
+		return "", false, clasterr.New("retro.prompt-unavailable",
+			fmt.Sprintf("retro: resolving the retro-summary prompt pair: %v", err))
+	}
+
+	fingerprint := Fingerprint(keyRendered, client.Model())
 	if !refresh {
 		if cached, ok := cacheGet(cacheDir, fingerprint); ok {
 			return cached, true, nil
