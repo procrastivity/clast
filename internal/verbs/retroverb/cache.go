@@ -52,8 +52,8 @@ func CacheDir() (string, error) {
 // F5): fingerprinting the fully *rendered* pair — not the raw entry body
 // alone, and not the raw prompt templates alone — captures every fact §2
 // fills the templates from in one hash: the entry body itself, the
-// session's project/day/started_at/session_id (all baked into the filled
-// user prompt), AND the prompt templates' own content (both halves,
+// session's day/started_at/session_id (all baked into the filled user
+// prompt), AND the prompt templates' own content (both halves,
 // unfilled, are also baked in via the surrounding template text). model
 // joins as a third component (not folded into the rendered pair itself)
 // because it is a fact about the *call*, not the *prompt* — a config
@@ -67,6 +67,12 @@ func CacheDir() (string, error) {
 // stable run to run for the one thing V11 asks it to be stable for: an
 // unchanged curated session under an unchanged model, re-run later, is
 // not re-summarized.
+//
+// The one fact deliberately left out is the project: summarizeEntry
+// renders the pair it fingerprints with {{project}} blanked, so a
+// capture-time project backfill (a "(no project)" session later
+// resolved to its clone) keeps its cached summary instead of costing a
+// fresh request per backfilled session.
 func Fingerprint(rendered prompt.Rendered, model string) string {
 	h := sha256.New()
 	h.Write([]byte(rendered.System))

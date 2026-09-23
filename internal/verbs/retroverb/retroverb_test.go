@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,6 +257,85 @@ func TestSummarize_CorruptCacheFile_TreatedAsMiss(t *testing.T) {
 	}
 	if got := summaries["claude-sess-01"]; got != "- Shipped: fresh despite corruption" {
 		t.Errorf("summary after corruption = %q, want the freshly computed completion", got)
+	}
+}
+
+// TestSummarize_ProjectBackfill_StillCacheHit pins the backfill case: a
+// session first summarized in the no-project bucket, then resolved to a
+// real project by plumbing capture's backfill (entry untouched), must be
+// served from cache rather than re-summarized.
+func TestSummarize_ProjectBackfill_StillCacheHit(t *testing.T) {
+	stub := llmtest.New(t, "- Shipped: fixed the bug")
+	t.Setenv("CLAST_LLM_API_KEY", "sk-test-key")
+	client, err := llm.NewClient(cfgWith(stub.URL(), "gpt-test"))
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+
+	cacheDir := t.TempDir()
+	day := journal.Day("2026-09-11")
+	before := oneEntryResult(day, "unchanged body")
+	before.Groups[0].Slug = "-"
+
+	if _, stats, err := retroverb.Summarize(context.Background(), before, client, cacheDir, false); err != nil {
+		t.Fatalf("Summarize (before backfill): %v", err)
+	} else if stats.Requests != 1 {
+		t.Fatalf("before-backfill stats = %+v, want 1 request", stats)
+	}
+	if user := stub.Requests()[0].Messages[1].Content; !strings.Contains(user, "(no project)") {
+		t.Errorf("before-backfill prompt does not name (no project):\n%s", user)
+	}
+
+	stub.Fail(500, "must never be called after a project backfill")
+
+	after := oneEntryResult(day, "unchanged body")
+	summaries, stats, err := retroverb.Summarize(context.Background(), after, client, cacheDir, false)
+	if err != nil {
+		t.Fatalf("Summarize (after backfill): %v", err)
+	}
+	if stats.Requests != 0 || stats.CacheHits != 1 {
+		t.Errorf("after-backfill stats = %+v, want 0 requests, 1 hit", stats)
+	}
+	if got := summaries["claude-sess-01"]; got != "- Shipped: fixed the bug" {
+		t.Errorf("after-backfill summary = %q, want the cached completion", got)
+	}
+}
+
+// TestSummarize_ManyEntries_AllSummarized drives more entries than the
+// worker pool's width, so every worker runs more than once: every entry
+// must come back summarized, with one request each.
+func TestSummarize_ManyEntries_AllSummarized(t *testing.T) {
+	stub := llmtest.New(t, "- Shipped: something")
+	t.Setenv("CLAST_LLM_API_KEY", "sk-test-key")
+	client, err := llm.NewClient(cfgWith(stub.URL(), "gpt-test"))
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+
+	day := journal.Day("2026-09-11")
+	result := oneEntryResult(day, "body")
+	g := &result.Groups[0]
+	base := g.Entries[0]
+	g.Entries = nil
+	const n = 11
+	for i := range n {
+		row := base
+		id := fmt.Sprintf("sess-%02d", i)
+		row.Item.Key.NativeID = id
+		row.Item.Session.SessionID = id
+		row.Entry.Body = "body " + id
+		g.Entries = append(g.Entries, row)
+	}
+
+	summaries, stats, err := retroverb.Summarize(context.Background(), result, client, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(summaries) != n || stats.Requests != n || stats.CacheHits != 0 {
+		t.Errorf("got %d summaries, stats %+v; want %d summaries, %d requests", len(summaries), stats, n, n)
+	}
+	if reqs := stub.Requests(); len(reqs) != n {
+		t.Errorf("stub captured %d requests, want %d", len(reqs), n)
 	}
 }
 
