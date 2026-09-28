@@ -2,10 +2,13 @@ package analyzeverb
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/procrastivity/clast/internal/journal"
 )
 
 func TestHandler_ServesPage(t *testing.T) {
@@ -64,5 +67,53 @@ func TestHandler_PathAndMethod(t *testing.T) {
 		if rec.Code != tc.want {
 			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
 		}
+	}
+}
+
+func TestHandler_HeadHasHeadersNoBody(t *testing.T) {
+	h := NewHandler(func() (Page, error) { return fixturePage(), nil }, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
+}
+
+func TestHandler_GathersPerRequest(t *testing.T) {
+	calls := 0
+	h := NewHandler(func() (Page, error) {
+		calls++
+		p := fixturePage()
+		p.Day = journal.Day(fmt.Sprintf("2026-04-%02d", calls))
+		return p, nil
+	}, nil)
+
+	var bodies []string
+	for range 2 {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		bodies = append(bodies, rec.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("gather called %d times, want 2 (once per request)", calls)
+	}
+	if bodies[0] == bodies[1] {
+		t.Error("two requests returned the same page, want each to see a fresh gather")
+	}
+}
+
+func TestHandler_MethodNotAllowedSetsAllow(t *testing.T) {
+	h := NewHandler(func() (Page, error) { return fixturePage(), nil }, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if got := rec.Header().Get("Allow"); got != "GET, HEAD" {
+		t.Errorf("Allow = %q, want %q", got, "GET, HEAD")
 	}
 }
