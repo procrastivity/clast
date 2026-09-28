@@ -13,6 +13,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/retrocache"
 	"github.com/procrastivity/clast/internal/surface"
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
 )
@@ -92,7 +93,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				cacheDir, err := CacheDir()
+				cacheDir, err := retrocache.Dir()
 				if err != nil {
 					return clasterr.New("validation.config", fmt.Sprintf("resolving retro cache directory: %v", err))
 				}
