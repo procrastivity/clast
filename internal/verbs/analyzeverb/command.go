@@ -1,11 +1,14 @@
 package analyzeverb
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -54,9 +57,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			gather := func() (Page, error) { return Gather(dayArg, since) }
 
 			if out == "" {
-				// TODO(step-04): serve gather per request on addr.
-				return clasterr.New("analyze.serve-unavailable",
-					"analyze: serve mode is not implemented yet; use --out <file.html>")
+				return runServe(cmd.Context(), streams, flags, addr, gather)
 			}
 
 			page, err := gather()
@@ -102,12 +103,45 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 	return cmd
 }
 
+// runServe binds addr, prints the bound URL, and serves the page until
+// Ctrl-C, SIGTERM, or ctx is cancelled. Binding first means the printed
+// URL carries the real port even for the default port 0.
+func runServe(ctx context.Context, streams *iostreams.Streams, flags cliflags.Flags, addr string, gather func() (Page, error)) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return clasterr.New("analyze.listen-failed", fmt.Sprintf("analyze: listening on %s: %v", addr, err))
+	}
+	defer func() { _ = ln.Close() }()
+
+	url := "http://" + ln.Addr().String() + "/"
+	if flags.JSON {
+		b, err := json.Marshal(struct {
+			URL string `json:"url"`
+		}{url})
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(streams.Out, string(b))
+		if err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(streams.Out, url); err != nil {
+		return err
+	}
+
+	// The root command's context is not tied to signals, so stop on
+	// SIGINT/SIGTERM here; a stop is a clean exit.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, ln, NewHandler(gather, logfTo(streams.Err)))
+}
+
 // writePage renders page and writes it to path, via a temp file in the
 // same directory renamed into place, so a failed render or write never
 // leaves a truncated page behind.
 func writePage(path string, page Page) error {
-	var buf bytes.Buffer
-	if err := Render(&buf, page); err != nil {
+	body, err := renderPage(page)
+	if err != nil {
 		return err
 	}
 	fail := func(err error) error {
@@ -118,7 +152,7 @@ func writePage(path string, page Page) error {
 		return fail(err)
 	}
 	tmpPath := tmp.Name()
-	_, writeErr := tmp.Write(buf.Bytes())
+	_, writeErr := tmp.Write(body)
 	closeErr := tmp.Close()
 	if err := firstErr(writeErr, closeErr); err != nil {
 		_ = os.Remove(tmpPath)
