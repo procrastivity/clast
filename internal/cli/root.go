@@ -10,6 +10,7 @@ import (
 	"github.com/procrastivity/clast/internal/buildinfo"
 	"github.com/procrastivity/clast/internal/cliflags"
 	"github.com/procrastivity/clast/internal/iostreams"
+	analyzeverb "github.com/procrastivity/clast/internal/verbs/analyzeverb"
 	breadcrumbverb "github.com/procrastivity/clast/internal/verbs/breadcrumb"
 	briefverb "github.com/procrastivity/clast/internal/verbs/briefverb"
 	clonesverb "github.com/procrastivity/clast/internal/verbs/clones"
@@ -69,6 +70,7 @@ func NewRootCommand(streams *iostreams.Streams, build buildinfo.Info) *cobra.Com
 	root.AddCommand(wakeverb.Command(streams))
 	root.AddCommand(briefverb.Command(streams))
 	root.AddCommand(retroverb.Command(streams))
+	root.AddCommand(analyzeverb.Command(streams))
 	root.AddCommand(initverb.Command(streams))
 	root.AddCommand(breadcrumbverb.Command(streams))
 	root.AddCommand(whereamiverb.AliasCommand(streams))

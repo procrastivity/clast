@@ -106,6 +106,16 @@ func (c *Client) Model() string {
 	return c.model
 }
 
+// ConfiguredModel returns cfg's llm.model, "" when unset, without
+// requiring llm.base_url or CLAST_LLM_API_KEY: for a caller that only
+// reads what an earlier LLM call cached (analyze keys retro's summary
+// cache by model) and so must not need a callable endpoint. It resolves
+// the model exactly as NewClient does.
+func ConfiguredModel(cfg config.Config) (string, error) {
+	_, model, err := llmConfigValues(cfg)
+	return model, err
+}
+
 // llmConfigValues reads cfg's "llm" section and returns its base_url and
 // model strings, "" when the section, or a given key within it, is
 // absent — NewClient's presence check turns that into
