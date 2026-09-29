@@ -17,6 +17,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 
@@ -148,4 +149,106 @@ type TranscriptRenderer interface {
 	// `--max-turn-chars`) — never bytes, so a capped turn never ends
 	// mid-codepoint.
 	RenderTranscript(r io.Reader, maxChars int) ([]Turn, error)
+}
+
+// EventKind classifies one Event of a structured transcript read. The set
+// is deliberately small and source-agnostic: a harness's dozens of
+// bookkeeping record types collapse into KindMeta with a Label, so a
+// viewer never has to know any one harness's vocabulary.
+type EventKind string
+
+const (
+	// KindPrompt is the human speaking. Injected turns (task
+	// notifications, peer messages, local-command caveats) are KindMeta.
+	KindPrompt EventKind = "prompt"
+	// KindAssistant is assistant prose.
+	KindAssistant EventKind = "assistant"
+	// KindThinking is assistant reasoning; Redacted marks a block that
+	// carries no readable text (only a signature, or a redacted block).
+	KindThinking EventKind = "thinking"
+	// KindToolCall is one tool invocation with its paired result (Tool.
+	// Result), or nil when the run ended before a result was written.
+	KindToolCall EventKind = "tool_call"
+	// KindToolResult is an orphan: a result whose call is not in the
+	// stream (a truncated or forked copy). Paired results never appear
+	// as their own event.
+	KindToolResult EventKind = "tool_result"
+	// KindMeta is everything else: bookkeeping, system notices, injected
+	// context. Label says what; Text is a short readable payload or "".
+	KindMeta EventKind = "meta"
+)
+
+// Event is one item of a structured transcript, in stream order.
+type Event struct {
+	Kind EventKind
+	// Time is the record's own timestamp; zero when it carries none.
+	Time time.Time
+	// ID is the harness's entry id, when it has one.
+	ID string
+	// Text is the prose (prompt, assistant, thinking) or the meta payload.
+	Text string
+	// Images counts image blocks that Text cannot carry; a viewer shows a
+	// placeholder, since transcripts hold the pixels only as base64.
+	Images int
+	// Redacted marks a KindThinking event with no readable text.
+	Redacted bool
+	// Label names a KindMeta event's sub-kind ("system:turn_duration",
+	// "attachment:date", "mode"). Empty for every other kind.
+	Label string
+	// Tool is set for KindToolCall and KindToolResult.
+	Tool *ToolCall
+}
+
+// ToolCall is one tool invocation and, when it was written, its result.
+type ToolCall struct {
+	// ID is the pairing key (tool_use_id).
+	ID   string
+	Name string
+	// Input is the call's arguments as raw JSON, for the viewer to
+	// pretty-print; nil for an orphan result.
+	Input  json.RawMessage
+	Result *ToolResult
+}
+
+// ToolResult is a tool's output.
+type ToolResult struct {
+	Time    time.Time
+	Text    string
+	Images  int
+	IsError bool
+}
+
+// Subagent is one subagent transcript captured beside a session's own,
+// with the linkage back to the parent's tool call that spawned it.
+type Subagent struct {
+	// ID is the harness's subagent id.
+	ID string
+	// Path is the transcript's path relative to the session directory
+	// (slash-separated, as WriteArtifact placed it).
+	Path        string
+	AgentType   string
+	Description string
+	// ToolUseID matches ToolCall.ID of the parent's spawning call; ""
+	// when the sidecar metadata is missing.
+	ToolUseID string
+}
+
+// TranscriptReader is an OPTIONAL interface a Source may also implement:
+// a structured read of a captured transcript copy for the analyze
+// explorer's transcript view. It sits beside TranscriptRenderer, not in
+// place of it — the renderer is `show --transcript`'s deliberately thin,
+// capped prose; this keeps tool calls, thinking, and meta records that
+// the renderer drops. Same resolution rule: keyed on session.json's
+// transcript.format, see internal/source/registry.LookupTranscriptReader.
+type TranscriptReader interface {
+	// TranscriptFormats lists the transcript.format values this source
+	// can read structurally.
+	TranscriptFormats() []string
+	// ReadTranscript parses r (a transcript copy, streamed) into Events
+	// in stream order. Tolerant: an unparseable line is skipped. On a
+	// read failure it returns the events gathered so far with the error.
+	ReadTranscript(r io.Reader) ([]Event, error)
+	// ListSubagents lists the subagent transcripts captured under
+	// sessionDir, sorted by ID. A session without any is nil, nil.
+	ListSubagents(sessionDir string) ([]Subagent, error)
 }

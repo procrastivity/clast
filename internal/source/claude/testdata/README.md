@@ -22,3 +22,7 @@ data was copied). Layout mirrors
   duplicated to pin M14's dedup-by-entry-id, then the fork's own turn.
 - `subagents/` under a session-id directory — sidecar files recapture
   must copy (added with the capture step).
+- `readsession/` — a synthetic session directory for ReadTranscript and
+  ListSubagents: every event kind, a paired/unpaired/orphan tool result,
+  a garbage line, a duplicated uuid, an unknown record type, and two
+  subagents (one with `.meta.json`, one without).

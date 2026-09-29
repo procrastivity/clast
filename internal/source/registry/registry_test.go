@@ -53,3 +53,12 @@ func TestValidateTranscriptFormat_UnknownFormatRefused(t *testing.T) {
 		t.Errorf("error code = %q, want validation.unknown-transcript-format", ce.Code)
 	}
 }
+
+func TestLookupTranscriptReader(t *testing.T) {
+	if _, ok := LookupTranscriptReader("claude-jsonl"); !ok {
+		t.Error("claude-jsonl reader not found")
+	}
+	if _, ok := LookupTranscriptReader("nope"); ok {
+		t.Error("unknown format found a reader")
+	}
+}
