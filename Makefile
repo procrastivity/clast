@@ -12,7 +12,7 @@ LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DA
 # Every shell script the repo carries. The pre-commit hook checks only the
 # files a commit touches; this list is what `make lint`, and so CI's lint
 # job, checks in full.
-SHELLCHECK_FILES := .envrc contrib/check-commit-msg contrib/check-gofumpt
+SHELLCHECK_FILES := .envrc contrib/check-commit-msg contrib/check-gofumpt contrib/release scripts/install.sh
 
 .PHONY: fmt lint test check hooks build cross-compile changelog release-notes
 

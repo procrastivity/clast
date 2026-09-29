@@ -33,6 +33,12 @@ jobs:
       - name: cross-compile
         run: nix develop --command make cross-compile
 
+      # After cross-compile, which creates dist/. The installer is a
+      # published asset but stays out of SHA256SUMS: it is what verifies
+      # the binary, and `curl | sh` has run it before any check could.
+      - name: installer
+        run: cp scripts/install.sh dist/clast-install.sh
+
       - name: changelog
         run: |
           nix develop --command make changelog
@@ -55,5 +61,6 @@ jobs:
             --notes-file dist/RELEASE_NOTES.md \
             dist/clast-darwin-arm64 \
             dist/clast-linux-amd64 \
+            dist/clast-install.sh \
             dist/SHA256SUMS \
             dist/CHANGELOG.md
