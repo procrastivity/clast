@@ -171,6 +171,22 @@ func TestAnalyze_Serve_MatchesOutAndStopsOnSIGINT(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	base, stop := startAnalyzeServe(t, env)
+	got, status := httpGet(t, base)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", status)
+	}
+	if string(got) != string(want) {
+		t.Error("served page differs from the --out file for the same window")
+	}
+	stop()
+}
+
+// startAnalyzeServe runs `clast analyze` in serve mode on an ephemeral port
+// and returns the announced URL and a stop func that sends SIGINT and
+// requires a clean exit 0. The process is killed at cleanup regardless.
+func startAnalyzeServe(t *testing.T, env []string) (string, func()) {
+	t.Helper()
 	cmd := exec.Command(binPath, "analyze", analyzeDay, "--since", "-0d", "--addr", "127.0.0.1:0", "--json")
 	cmd.Env = hermeticEnv(t, env)
 	stdout, err := cmd.StdoutPipe()
@@ -200,33 +216,193 @@ func TestAnalyze_Serve_MatchesOutAndStopsOnSIGINT(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &announced); err != nil || !strings.HasPrefix(announced.URL, "http://127.0.0.1:") {
 		t.Fatalf("first stdout line = %q, want {\"url\":\"http://127.0.0.1:<port>/\"}", line)
 	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(announced.URL)
-	if err != nil {
-		t.Fatalf("GET %s: %v", announced.URL, err)
-	}
-	got, err := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET status = %d, want 200", resp.StatusCode)
-	}
-	if string(got) != string(want) {
-		t.Error("served page differs from the --out file for the same window")
-	}
-
-	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("analyze after SIGINT: %v, want clean exit 0", err)
+	stop := func() {
+		if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("analyze did not exit within 10s of SIGINT")
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("analyze after SIGINT: %v, want clean exit 0", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("analyze did not exit within 10s of SIGINT")
+		}
+	}
+	return announced.URL, stop
+}
+
+// httpGet fetches url and returns the body and status code.
+func httpGet(t *testing.T, url string) ([]byte, int) {
+	t.Helper()
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b, resp.StatusCode
+}
+
+// transcriptMarker sits in a later prompt, a tool result and a thinking
+// block of the seeded transcript, and in nothing the overview shows.
+const transcriptMarker = "ZQX-MARKER-7431"
+
+const (
+	transcriptSession = "7e57ab1e-0000-4000-8000-000000000001"
+	transcriptAgent   = "a0b1c2d3e4f5a6b7"
+)
+
+// seedTranscriptWindow builds a fake Claude config dir holding one session
+// with a subagent, then runs the real `clast plumbing capture` over it, so
+// the transcript reaches the journal by the path production uses. The
+// returned env has no LLM config: analyze is cache-only, so the overview
+// shows the session as not summarized.
+func seedTranscriptWindow(t *testing.T) []string {
+	t.Helper()
+	claudeDir := t.TempDir()
+	proj := filepath.Join(claudeDir, "projects", "-tmp-widget")
+	sub := filepath.Join(proj, transcriptSession, "subagents")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		`{"type":"mode","mode":"normal","sessionId":"` + transcriptSession + `"}`,
+		`{"type":"user","uuid":"u1","sessionId":"` + transcriptSession + `","cwd":"/tmp/widget","gitBranch":"main","timestamp":"2026-04-01T12:00:00Z","message":{"role":"user","content":"Fix the flaky widget test"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-04-01T12:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"pondering ` + transcriptMarker + `","signature":"sig"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-04-01T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"Looking at the test now."}]}}`,
+		`{"type":"assistant","uuid":"a3","timestamp":"2026-04-01T12:00:03Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"go test ./widget"}}]}}`,
+		`{"type":"user","uuid":"u2","timestamp":"2026-04-01T12:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"FAIL widget ` + transcriptMarker + `"}]}}`,
+		`{"type":"system","subtype":"turn_duration","uuid":"m1","timestamp":"2026-04-01T12:00:05Z","durationMs":4200,"content":"4.2s"}`,
+		`{"type":"assistant","uuid":"a4","timestamp":"2026-04-01T12:00:06Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"description":"dig into the flake","prompt":"find it"}}]}}`,
+		`{"type":"user","uuid":"u3","timestamp":"2026-04-01T12:00:07Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_agent","content":"the clock is the culprit"}]}}`,
+		`{"type":"user","uuid":"u4","timestamp":"2026-04-01T12:00:08Z","message":{"role":"user","content":"Thanks, now ship it ` + transcriptMarker + `"}}`,
+		`{"type":"assistant","uuid":"a5","timestamp":"2026-04-01T12:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"Shipped."}]}}`,
+	}
+	agentLines := []string{
+		`{"type":"user","uuid":"su1","timestamp":"2026-04-01T12:00:06.5Z","message":{"role":"user","content":"find it"}}`,
+		`{"type":"assistant","uuid":"sa1","timestamp":"2026-04-01T12:00:06.8Z","message":{"role":"assistant","content":[{"type":"text","text":"Subagent found the wall clock."}]}}`,
+	}
+	writes := map[string]string{
+		filepath.Join(proj, transcriptSession+".jsonl"):           strings.Join(lines, "\n") + "\n",
+		filepath.Join(sub, "agent-"+transcriptAgent+".jsonl"):     strings.Join(agentLines, "\n") + "\n",
+		filepath.Join(sub, "agent-"+transcriptAgent+".meta.json"): `{"agentType":"Explore","description":"dig into the flake","toolUseId":"toolu_agent","spawnDepth":1}`,
+	}
+	for path, content := range writes {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + t.TempDir(), "XDG_CONFIG_HOME=" + t.TempDir(), "XDG_CACHE_HOME=" + t.TempDir(),
+		"CLAUDE_CONFIG_DIR=" + claudeDir, "CLAST_LLM_API_KEY=",
+	}
+	if r := run(t, env, "plumbing", "capture"); r.exitCode != 0 {
+		t.Fatalf("plumbing capture: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	return env
+}
+
+func TestAnalyze_Serve_TranscriptPagesEndToEnd(t *testing.T) {
+	env := seedTranscriptWindow(t)
+	base, stop := startAnalyzeServe(t, env)
+	defer stop()
+
+	overview, status := httpGet(t, base)
+	if status != http.StatusOK {
+		t.Fatalf("GET / status = %d, want 200", status)
+	}
+	link := `href="/t/` + transcriptSession + `"`
+	if !strings.Contains(string(overview), link) {
+		t.Fatalf("overview lacks the transcript link %s; page:\n%s", link, overview)
+	}
+
+	page, status := httpGet(t, base+"t/"+transcriptSession)
+	if status != http.StatusOK {
+		t.Fatalf("GET transcript status = %d, want 200", status)
+	}
+	html := string(page)
+	for _, want := range []string{
+		"Fix the flaky widget test", // first prompt
+		"Looking at the test now.",  // assistant text
+		"Shipped.",
+		"pondering " + transcriptMarker, // thinking, inside its details
+		"FAIL widget " + transcriptMarker,
+		"go test ./widget",
+		"turn_duration",
+		`href="/t/` + transcriptSession + `/agents/` + transcriptAgent + `"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("transcript page lacks %q", want)
+		}
+	}
+	if !strings.Contains(html, `<details class="tool"`) || strings.Contains(html, `<details class="tool" open`) ||
+		!strings.Contains(html, `<details class="think">`) || strings.Contains(html, `<details class="think" open`) {
+		t.Error("tool calls and thinking must render as closed <details>")
+	}
+	if !strings.Contains(html, `<input type="checkbox" id="showmeta">`) || strings.Contains(html, `id="showmeta" checked`) {
+		t.Error("meta records must be hidden until the show-meta toggle is checked")
+	}
+
+	agentPage, status := httpGet(t, base+"t/"+transcriptSession+"/agents/"+transcriptAgent)
+	if status != http.StatusOK {
+		t.Fatalf("GET subagent status = %d, want 200", status)
+	}
+	for _, want := range []string{
+		"Subagent found the wall clock.",
+		"Subagent",
+		`href="/t/` + transcriptSession + `#call-toolu_agent"`, // back-link to the spawning call
+	} {
+		if !strings.Contains(string(agentPage), want) {
+			t.Errorf("subagent page lacks %q", want)
+		}
+	}
+
+	for _, path := range []string{"t/no-such-session", "t/" + transcriptSession + "/agents/no-such-agent"} {
+		if _, status := httpGet(t, base+path); status != http.StatusNotFound {
+			t.Errorf("GET /%s status = %d, want 404", path, status)
+		}
+	}
+}
+
+// The overview carries no transcript text: a marker that lives only in the
+// transcript is absent from "/" and from the --out file, present in the
+// transcript page, and "/" still equals the --out file byte for byte.
+func TestAnalyze_Overview_CarriesNoTranscriptContent(t *testing.T) {
+	env := seedTranscriptWindow(t)
+	out := filepath.Join(t.TempDir(), "explorer.html")
+	if r := run(t, env, "analyze", analyzeDay, "--since", "-0d", "--out", out); r.exitCode != 0 {
+		t.Fatalf("analyze --out: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	file, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, stop := startAnalyzeServe(t, env)
+	defer stop()
+	served, _ := httpGet(t, base)
+	transcript, status := httpGet(t, base+"t/"+transcriptSession)
+	if status != http.StatusOK {
+		t.Fatalf("GET transcript status = %d, want 200", status)
+	}
+
+	if string(served) != string(file) {
+		t.Error("served overview differs from the --out file for a window that includes a transcript")
+	}
+	for name, page := range map[string][]byte{"served overview": served, "--out file": file} {
+		for _, leak := range []string{transcriptMarker, "FAIL widget", "Looking at the test now.", "Subagent found"} {
+			if strings.Contains(string(page), leak) {
+				t.Errorf("%s contains transcript content %q", name, leak)
+			}
+		}
+	}
+	if !strings.Contains(string(transcript), transcriptMarker) {
+		t.Errorf("transcript page lacks the marker %q", transcriptMarker)
 	}
 }
