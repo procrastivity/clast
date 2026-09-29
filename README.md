@@ -57,7 +57,10 @@ make hooks        # pre-commit, both stages
 
 Version stamps come from release tags (`git describe --match 'v[0-9]*'`);
 pushing an annotated `vX.Y.Z` tag is the only human release action.
-CHANGELOG.md is generated per release, never committed.
+`contrib/release --minor` (or `--major`, `--patch`, `vX.Y.Z`) gates,
+tags with the generated notes, and pushes. See
+[docs/release.md](docs/release.md). CHANGELOG.md is generated per
+release, never committed.
 
 ## Design of record
 

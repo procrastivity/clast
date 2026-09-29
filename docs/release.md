@@ -21,6 +21,34 @@ these steps in order:
 6. It creates the GitHub release. The body is `RELEASE_NOTES.md`. The
    step names every asset explicitly and never globs `dist/` (C6.4).
 
+## Cutting a release
+
+`contrib/release` makes the tag push repeatable (toolsmith T33). Run it
+from a clean `main` in the dev shell:
+
+```sh
+contrib/release --minor      # or --major, --patch, or an explicit vX.Y.Z
+```
+
+The driver does these steps:
+
+1. It checks that the tools are on `PATH` and that the tree is clean.
+2. It reads the latest release tag with `git describe --tags --match
+   'v[0-9]*' --abbrev=0` and computes the next tag. It stops when that
+   tag exists or when there are no commits since the last tag.
+3. It runs `make check`, the local twin of the release gate.
+4. It runs `make release-notes TAG=<tag>` and stops when
+   `dist/RELEASE_NOTES.md` is empty.
+5. It creates the annotated tag with the notes as its message. It uses
+   `--cleanup=whitespace`, because the default cleanup deletes the
+   `## [x.y.z]` lines.
+6. It pushes the branch, then only the new tag. It never force-pushes.
+
+The tag push starts release.yml, which regenerates the release body from
+the same `make release-notes`. To do a release by hand, run `make check`
+and `make release-notes TAG=vX.Y.Z`, then `git tag -a --cleanup=whitespace
+-F dist/RELEASE_NOTES.md vX.Y.Z` and push the tag.
+
 ## Published assets
 
 Each release publishes exactly these assets:
@@ -105,4 +133,7 @@ facts follow:
   which has no `clast-install.sh`. The curl command above returns 404.
 
 So the first release of this history must use a tag above `v0.0.8`, for
-example `v0.1.0`. The `v0.0.x` names already exist.
+example `v0.1.0`. The `v0.0.x` names already exist. With no release tag
+on `main`, `contrib/release` counts from `v0.0.0`, so use `--minor` or
+an explicit `v0.1.0`. `--patch` computes `v0.0.1`, which exists, and the
+driver stops before it runs the gate.
