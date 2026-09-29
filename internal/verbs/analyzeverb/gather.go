@@ -60,7 +60,7 @@ func Gather(dayArg, since string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	return buildPage(result, cutoff, cachedSummary(cacheDir, model)), nil
+	return buildPage(result, root, cutoff, cachedSummary(cacheDir, model)), nil
 }
 
 // cachedSummary looks an entry's summary up in the retro cache under
@@ -77,9 +77,10 @@ func cachedSummary(cacheDir, model string) func(retrocache.Entry) (string, bool)
 }
 
 // buildPage maps a retro Result onto the Page model. summary looks up
-// the cached retro summary for one entry. Times are converted to local
+// the cached retro summary for one entry; root is the journal root the
+// sessions' directories hang off. Times are converted to local
 // time here: the template formats in the zone a time carries.
-func buildPage(result retroplumbing.Result, cutoff journal.Cutoff, summary func(retrocache.Entry) (string, bool)) Page {
+func buildPage(result retroplumbing.Result, root string, cutoff journal.Cutoff, summary func(retrocache.Entry) (string, bool)) Page {
 	page := Page{WindowStart: result.WindowStart, Day: result.Day}
 
 	type dayBuild struct {
@@ -117,7 +118,7 @@ func buildPage(result retroplumbing.Result, cutoff journal.Cutoff, summary func(
 		// Sessions arrive oldest first, so each day's slice stays ordered.
 		byDay := map[journal.Day]*Project{}
 		for _, r := range g.Sessions {
-			s := sessionFor(r, name)
+			s := sessionFor(r, name, root)
 			if eb, ok := bodies[r.Item.Key.DirName()]; ok {
 				s.Title, s.Tags, s.Entry, s.HasEntry = eb.title, eb.tags, eb.body, true
 				s.Summary, s.HasSummary = summary(retrocache.Entry{
@@ -175,7 +176,7 @@ type entryBody struct {
 
 // sessionFor maps one retro session row onto a Session, before its entry
 // and summary are attached.
-func sessionFor(r retroplumbing.SessionRow, project string) Session {
+func sessionFor(r retroplumbing.SessionRow, project, root string) Session {
 	sess := r.Item.Session
 	s := Session{
 		ID:              sess.SessionID,
@@ -189,6 +190,7 @@ func sessionFor(r retroplumbing.SessionRow, project string) Session {
 		AssistantMsgs:   sess.Counts.Assistant,
 		TranscriptLines: sess.Transcript.Lines,
 		Title:           r.Title,
+		dir:             journal.SessionDir(root, r.Item.Shard, r.Item.Key),
 	}
 	if s.State == journal.StateDismissed && r.Item.Curation.Reason != nil {
 		s.Reason = *r.Item.Curation.Reason

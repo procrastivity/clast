@@ -83,6 +83,9 @@ type TranscriptPage struct {
 	// Subagents is the session's subagent transcripts; empty on a
 	// subagent page.
 	Subagents []source.Subagent
+	// Warning, when set, is shown as a banner: the read stopped early and
+	// Events holds only what was read.
+	Warning string
 }
 
 // TranscriptItem is one displayed unit of a transcript: an event, or a

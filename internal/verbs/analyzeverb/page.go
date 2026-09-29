@@ -78,6 +78,10 @@ type Session struct {
 	// on a cache miss. analyze never calls the LLM to fill one.
 	Summary    string
 	HasSummary bool
+
+	// dir is the session's journal directory, for the transcript view.
+	// Unexported so no template or rendered page can reach a path.
+	dir string
 }
 
 // CrumbGroup is one project's breadcrumbs on one day.
@@ -180,6 +184,13 @@ func (c Crumb) Time() string { return c.At.Format("15:04") }
 // Curated reports whether the session is curated — the only state with
 // an entry draft and a retro summary to compare.
 func (s Session) Curated() bool { return s.State == journal.StateCurated }
+
+// HasTranscript reports whether the session captured any transcript
+// lines, so there is a transcript page worth linking.
+func (s Session) HasTranscript() bool { return s.TranscriptLines > 0 }
+
+// TranscriptURL is the session's transcript page.
+func (s Session) TranscriptURL() string { return TranscriptURL(s.ID) }
 
 // Short is the session id's first eight characters.
 func (s Session) Short() string {

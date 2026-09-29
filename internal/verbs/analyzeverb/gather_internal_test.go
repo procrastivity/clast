@@ -90,7 +90,7 @@ func TestBuildPage_MapsResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := buildPage(result, cutoff, cachedSummary(dir, "m1"))
+	page := buildPage(result, "/j", cutoff, cachedSummary(dir, "m1"))
 
 	if len(page.Days) != 2 || page.Days[0].Day != "2026-09-21" || page.Days[1].Day != "2026-09-22" {
 		t.Fatalf("days = %+v", page.Days)
@@ -131,7 +131,7 @@ func TestBuildPage_MapsResult(t *testing.T) {
 	}
 
 	// A different model keys differently: the same cache misses.
-	if other := buildPage(result, cutoff, cachedSummary(dir, "m2")); other.Days[0].Projects[0].Sessions[0].HasSummary {
+	if other := buildPage(result, "/j", cutoff, cachedSummary(dir, "m2")); other.Days[0].Projects[0].Sessions[0].HasSummary {
 		t.Error("summary served under a different model")
 	}
 
@@ -157,7 +157,7 @@ func TestBuildPage_BreadcrumbOnlyDay(t *testing.T) {
 			{Breadcrumb: journal.Breadcrumb{At: at, Slug: &proj, Text: "solo"}},
 		}}},
 	}
-	page := buildPage(result, cutoff, func(retrocache.Entry) (string, bool) { return "", false })
+	page := buildPage(result, "/j", cutoff, func(retrocache.Entry) (string, bool) { return "", false })
 	if len(page.Days) != 1 || len(page.Days[0].Projects) != 0 || page.Days[0].CrumbCount() != 1 {
 		t.Fatalf("page = %+v", page)
 	}

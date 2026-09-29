@@ -74,6 +74,8 @@ pre.error { background: var(--error-soft); }
 .metarun div { overflow-wrap: anywhere; }
 .metarun .at { margin-right: 6px; }
 .empty { color: var(--muted); font-style: italic; }
+.notice { border: 1px dashed var(--error); background: var(--error-soft);
+  border-radius: 8px; padding: 8px 12px; margin: 0 0 16px; }
 </style>
 </head>
 <body>
@@ -100,6 +102,9 @@ pre.error { background: var(--error-soft); }
 <li><a href="{{$.AgentURL .}}">{{or .Description .ID}}</a>{{with .AgentType}} <span class="type">· {{.}}</span>{{end}}</li>
 {{- end}}
 </ul>
+{{- end}}
+{{- if .Warning}}
+<div class="notice">{{.Warning}}</div>
 {{- end}}
 <label class="toggle" for="showmeta">show meta records</label>
 {{- range .Items}}
