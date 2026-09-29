@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · transcript</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1f2430; --muted: #6b7280;
+  --line: #e4e2dc; --accent: #2f6f5e; --accent-soft: #e7f0ec;
+  --chip: #eceae4; --code: #f0efe9; --error: #b3261e; --error-soft: #fbeae8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d; --panel: #1e2128; --ink: #e5e4df; --muted: #9aa0ab;
+    --line: #2c3038; --accent: #6fbfa6; --accent-soft: #223730;
+    --chip: #2a2e36; --code: #262a32; --error: #f2b8b5; --error-soft: #3a2422;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+main { max-width: 900px; margin: 0 auto; padding: 28px clamp(16px, 4vw, 32px) 60px; }
+a { color: var(--accent); }
+.crumb { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+h1 { margin: 0 0 10px; font-size: 22px; line-height: 1.3; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--accent); margin: 24px 0 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 2px 10px;
+  font-size: 12px; color: var(--muted); }
+.chip b { color: var(--ink); font-weight: 600; }
+.subagents { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 4px 16px; list-style: none; margin: 0 0 16px; }
+.subagents li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.subagents li:last-child { border-bottom: 0; }
+.subagents .type { color: var(--muted); font-size: 12px; }
+#showmeta { position: absolute; opacity: 0; pointer-events: none; }
+.toggle { display: inline-block; font-size: 12px; color: var(--muted); cursor: pointer;
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-bottom: 12px; }
+#showmeta:focus-visible ~ main .toggle { outline: 2px solid var(--accent); }
+#showmeta:checked ~ main .toggle { background: var(--accent-soft); color: var(--accent); }
+.turn { border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px;
+  margin: 12px 0; background: var(--panel); }
+.turn.prompt { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.turn.assistant { border-left: 4px solid var(--line); }
+.turn .who { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); display: flex; justify-content: space-between; }
+.turn .at, .at { font-variant-numeric: tabular-nums; }
+.turn p, .turn ul { margin: 6px 0; }
+.turn ul { padding-left: 20px; }
+.turn code { background: var(--code); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+.turn h3, .turn h4, .turn h5 { margin: 12px 0 4px; font-size: 15px; }
+details.think, details.tool { margin: 4px 0 4px 16px; font-size: 13px; }
+details > summary { cursor: pointer; color: var(--muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+details.tool > summary b { color: var(--ink); font-weight: 600; }
+details.tool > summary .sub { margin-left: 8px; }
+details.tool.error > summary { color: var(--error); }
+details.think .body { border-left: 2px solid var(--line); padding-left: 12px; color: var(--muted); }
+.redacted { margin: 4px 0 4px 16px; font-size: 12px; color: var(--muted); font-style: italic; }
+.tool .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 8px 0 2px; }
+.tool .label.error { color: var(--error); font-weight: 600; }
+pre { background: var(--code); border-radius: 8px; padding: 8px 12px; margin: 0;
+  font-size: 12px; line-height: 1.45; overflow-x: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; }
+pre.error { background: var(--error-soft); }
+.note { font-size: 12px; color: var(--muted); font-style: italic; margin: 2px 0 0; }
+.metarun { display: none; margin: 4px 0 4px 16px; font-size: 11px; color: var(--muted); }
+#showmeta:checked ~ main .metarun { display: block; }
+.metarun div { overflow-wrap: anywhere; }
+.metarun .at { margin-right: 6px; }
+.empty { color: var(--muted); font-style: italic; }
+.notice { border: 1px dashed var(--error); background: var(--error-soft);
+  border-radius: 8px; padding: 8px 12px; margin: 0 0 16px; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="showmeta">
+<main>
+<div class="crumb"><a href="{{.OverviewURL}}">← Overview</a>
+{{- if .IsAgent}} · <a href="{{.ParentURL}}">← Parent transcript</a>{{end}}
+ · {{.Session.DayLabel}} · {{.Session.Project}}</div>
+<h1>{{if .IsAgent}}Subagent · {{end}}{{.Title}}</h1>
+<div class="chips">
+{{- if .IsAgent}}
+{{- with .Agent.AgentType}}<span class="chip">type <b>{{.}}</b></span>{{end}}
+<span class="chip">session <b>{{.Session.Label}}</b></span>
+{{- else}}
+<span class="chip">started <b>{{.Session.Started}}</b></span>
+{{- if .Session.Branch}}<span class="chip">branch <b>{{.Session.Branch}}</b></span>{{end}}
+{{- end}}
+<span class="chip"><b>{{len .Events}}</b> events</span>
+</div>
+{{- if .Subagents}}
+<h2>Subagents</h2>
+<ul class="subagents">
+{{- range .Subagents}}
+<li><a href="{{$.AgentURL .}}">{{or .Description .ID}}</a>{{with .AgentType}} <span class="type">· {{.}}</span>{{end}}</li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if .Warning}}
+<div class="notice">{{.Warning}}</div>
+{{- end}}
+<label class="toggle" for="showmeta">show meta records</label>
+{{- range .Items}}
+{{- if eq .Kind "prompt"}}
+<section class="turn prompt"><div class="who"><span>Prompt</span><span class="at">{{.Time}}</span></div>
+{{.HTML}}
+{{- if .Event.Images}}<p class="note">[{{.Event.Images}} image(s)]</p>{{end}}</section>
+{{- else if eq .Kind "assistant"}}
+<section class="turn assistant"><div class="who"><span>Assistant</span><span class="at">{{.Time}}</span></div>
+{{.HTML}}</section>
+{{- else if eq .Kind "thinking"}}
+<details class="think"><summary>thinking{{with .Time}} · <span class="at">{{.}}</span>{{end}}</summary>
+<div class="body">{{.HTML}}</div></details>
+{{- else if eq .Kind "redacted"}}
+<div class="redacted">thinking (redacted){{if gt .Count 1}} ×{{.Count}}{{end}}</div>
+{{- else if eq .Kind "tool"}}
+<details class="tool{{if .IsError}} error{{end}}"{{with .Anchor}} id="{{.}}"{{end}}>
+<summary><b>{{.ToolName}}</b> {{.Digest}}{{if .Orphan}} (call not in transcript){{end}}
+{{- if .IsError}} · error{{end}}
+{{- if .Sub}} <a class="sub" href="{{.SubURL}}">→ subagent{{with .Sub.AgentType}} ({{.}}){{end}}</a>{{end}}</summary>
+{{- if not .Orphan}}
+{{- with .Input}}
+<div class="label">input</div>
+<pre>{{.Text}}</pre>
+{{- if .Truncated}}<p class="note">{{.Note}}</p>{{end}}
+{{- end}}
+{{- end}}
+{{- if .HasResult}}
+<div class="label{{if .IsError}} error{{end}}">{{if .IsError}}error result{{else}}result{{end}}{{with .ResultTime}} · {{.}}{{end}}</div>
+{{- $err := .IsError}}
+{{- with .Result}}
+{{- if .Text}}<pre{{if $err}} class="error"{{end}}>{{.Text}}</pre>{{end}}
+{{- if .Truncated}}<p class="note">{{.Note}}</p>{{end}}
+{{- end}}
+{{- if .ResultImages}}<p class="note">[{{.ResultImages}} image(s)]</p>{{end}}
+{{- else}}
+<p class="note">no result recorded</p>
+{{- end}}
+</details>
+{{- else if eq .Kind "meta"}}
+<div class="metarun">
+{{- range .Metas}}
+<div><span class="at">{{.Time}}</span>{{.Label}}{{with .Text}}: {{.}}{{end}}</div>
+{{- end}}
+</div>
+{{- end}}
+{{- end}}
+</main>
+</body>
+</html>

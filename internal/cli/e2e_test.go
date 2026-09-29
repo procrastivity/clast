@@ -2675,8 +2675,11 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 	)
 
+	// --since all: the default -14d window resolves against the real
+	// time.Now(), so the fixed 2026-09-11 fixtures fell out of it once
+	// the calendar passed 2026-09-25.
 	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
-	r := run(t, env, "plumbing", "sessions", "--stale", "--json")
+	r := run(t, env, "plumbing", "sessions", "--stale", "--since", "all", "--json")
 	if r.exitCode != 0 {
 		t.Fatalf("plumbing sessions --stale: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
 	}

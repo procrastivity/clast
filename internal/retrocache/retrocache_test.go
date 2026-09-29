@@ -1,36 +1,37 @@
-package retroverb
+package retrocache
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/procrastivity/clast/internal/prompt"
 )
 
-func TestCacheDir_XDGSet_UsesIt(t *testing.T) {
+func TestDir_XDGSet_UsesIt(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/xdg-cache")
-	dir, err := CacheDir()
+	dir, err := Dir()
 	if err != nil {
-		t.Fatalf("CacheDir: %v", err)
+		t.Fatalf("Dir: %v", err)
 	}
 	want := filepath.Join("/xdg-cache", "clast", "retro")
 	if dir != want {
-		t.Errorf("CacheDir = %q, want %q", dir, want)
+		t.Errorf("Dir = %q, want %q", dir, want)
 	}
 }
 
-func TestCacheDir_XDGUnset_FallsBackToDotCache(t *testing.T) {
+func TestDir_XDGUnset_FallsBackToDotCache(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	dir, err := CacheDir()
+	dir, err := Dir()
 	if err != nil {
-		t.Fatalf("CacheDir: %v", err)
+		t.Fatalf("Dir: %v", err)
 	}
 	want := filepath.Join(home, ".cache", "clast", "retro")
 	if dir != want {
-		t.Errorf("CacheDir = %q, want %q (~/.cache fallback)", dir, want)
+		t.Errorf("Dir = %q, want %q (~/.cache fallback)", dir, want)
 	}
 }
 
@@ -90,35 +91,108 @@ func TestFingerprint_ModelChangeChangesFingerprint(t *testing.T) {
 	}
 }
 
-func TestCacheGetPut_RoundTrip(t *testing.T) {
+func TestGetPut_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	if _, ok := cacheGet(dir, "missing"); ok {
-		t.Error("cacheGet on an empty dir = hit, want miss")
+	if _, ok := Get(dir, "missing"); ok {
+		t.Error("Get on an empty dir = hit, want miss")
 	}
-	if err := cachePut(dir, "fp1", "the summary text"); err != nil {
-		t.Fatalf("cachePut: %v", err)
+	if err := Put(dir, "fp1", "the summary text"); err != nil {
+		t.Fatalf("Put: %v", err)
 	}
-	got, ok := cacheGet(dir, "fp1")
+	got, ok := Get(dir, "fp1")
 	if !ok || got != "the summary text" {
-		t.Errorf("cacheGet after cachePut = (%q, %v), want (%q, true)", got, ok, "the summary text")
+		t.Errorf("Get after Put = (%q, %v), want (%q, true)", got, ok, "the summary text")
 	}
 }
 
-func TestCacheGet_CorruptFile_TreatedAsMiss(t *testing.T) {
+func TestGet_CorruptFile_TreatedAsMiss(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fp2.json"), []byte("not json at all"), 0o644); err != nil {
 		t.Fatalf("seeding corrupt cache file: %v", err)
 	}
-	if _, ok := cacheGet(dir, "fp2"); ok {
-		t.Error("cacheGet on a corrupt file = hit, want miss")
+	if _, ok := Get(dir, "fp2"); ok {
+		t.Error("Get on a corrupt file = hit, want miss")
 	}
 }
 
-func TestCacheGet_UnreadableDir_TreatedAsMiss(t *testing.T) {
+func TestGet_UnreadableDir_TreatedAsMiss(t *testing.T) {
 	// A cache directory that doesn't exist at all (never written to) is
 	// exactly the "cold cache" case every first run hits — must be a
 	// plain miss, never an error.
-	if _, ok := cacheGet(filepath.Join(t.TempDir(), "does-not-exist"), "fp3"); ok {
-		t.Error("cacheGet on a missing directory = hit, want miss")
+	if _, ok := Get(filepath.Join(t.TempDir(), "does-not-exist"), "fp3"); ok {
+		t.Error("Get on a missing directory = hit, want miss")
+	}
+}
+
+func fixtureEntry() Entry {
+	return Entry{
+		Project:   "clast",
+		Day:       "2026-09-22",
+		StartedAt: time.Date(2026, 9, 22, 14, 3, 0, 0, time.UTC),
+		SessionID: "abc-123",
+		Body:      "did a thing\n\nand another",
+	}
+}
+
+// TestEntryKey_IgnoresProject pins the backfill rule: the same entry
+// under a different project — "(no project)" later resolved to a clone —
+// keys the same, so its cached summary survives the backfill.
+func TestEntryKey_IgnoresProject(t *testing.T) {
+	a, b := fixtureEntry(), fixtureEntry()
+	b.Project = "(no project)"
+	ka, err := EntryKey(a, "m1")
+	if err != nil {
+		t.Fatalf("EntryKey: %v", err)
+	}
+	kb, err := EntryKey(b, "m1")
+	if err != nil {
+		t.Fatalf("EntryKey: %v", err)
+	}
+	if ka != kb {
+		t.Errorf("EntryKey differs across projects: %q vs %q, want equal", ka, kb)
+	}
+}
+
+// TestEntryKey_IsFingerprintOfBlankedPair pins EntryKey to the recipe
+// retro used before the extraction: Fingerprint over the pair rendered
+// from PromptData with {{project}} blanked. A drift here would orphan
+// every summary already on disk.
+func TestEntryKey_IsFingerprintOfBlankedPair(t *testing.T) {
+	e := fixtureEntry()
+	data := e.PromptData()
+	data["project"] = ""
+	rendered, err := prompt.Render(prompt.RetroSummary, data)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got, err := EntryKey(e, "m1")
+	if err != nil {
+		t.Fatalf("EntryKey: %v", err)
+	}
+	if want := Fingerprint(rendered, "m1"); got != want {
+		t.Errorf("EntryKey = %q, want %q", got, want)
+	}
+}
+
+func TestEntryKey_BodyAndModelChangeKey(t *testing.T) {
+	base, err := EntryKey(fixtureEntry(), "m1")
+	if err != nil {
+		t.Fatalf("EntryKey: %v", err)
+	}
+	body := fixtureEntry()
+	body.Body = "a re-curated body"
+	if k, _ := EntryKey(body, "m1"); k == base {
+		t.Error("EntryKey unchanged after a body edit, want a new key")
+	}
+	if k, _ := EntryKey(fixtureEntry(), "m2"); k == base {
+		t.Error("EntryKey unchanged after a model change, want a new key")
+	}
+}
+
+func TestPromptData_FormatsStartedAtUTC(t *testing.T) {
+	e := fixtureEntry()
+	e.StartedAt = time.Date(2026, 9, 22, 9, 3, 0, 0, time.FixedZone("CDT", -5*3600))
+	if got, want := e.PromptData()["started_at"], "2026-09-22T14:03:00Z"; got != want {
+		t.Errorf("started_at = %q, want %q", got, want)
 	}
 }

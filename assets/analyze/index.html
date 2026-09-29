@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Explorer · {{.WindowStart}} → {{.Day}}</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1f2430; --muted: #6b7280;
+  --line: #e4e2dc; --accent: #2f6f5e; --accent-soft: #e7f0ec;
+  --dismissed: #a8a29e; --chip: #eceae4; --code: #f0efe9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d; --panel: #1e2128; --ink: #e5e4df; --muted: #9aa0ab;
+    --line: #2c3038; --accent: #6fbfa6; --accent-soft: #223730;
+    --dismissed: #6b7280; --chip: #2a2e36; --code: #262a32;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+.layout { display: flex; min-height: 100vh; }
+nav {
+  width: 300px; flex-shrink: 0; border-right: 1px solid var(--line);
+  padding: 20px 14px; overflow-y: auto; height: 100vh; position: sticky; top: 0;
+}
+nav h1 { font-size: 15px; margin: 0 6px 2px; }
+nav .sub { font-size: 12px; color: var(--muted); margin: 0 6px 16px; }
+nav .day { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin: 16px 6px 6px; }
+nav .proj { font-size: 12px; font-weight: 600; margin: 8px 6px 2px; }
+nav a {
+  display: block; color: var(--ink); text-decoration: none;
+  padding: 6px 8px; border-radius: 7px; font-size: 13px; line-height: 1.35;
+}
+nav a:hover { background: var(--chip); }
+nav a.active { background: var(--accent-soft); color: var(--accent); }
+nav a .meta { display: block; font-size: 11px; color: var(--muted); }
+nav a.dim, nav a.dim .meta { color: var(--dismissed); }
+main { flex: 1; padding: 28px clamp(16px, 4vw, 48px); max-width: 1200px; min-width: 0; }
+/* One view shows at a time: the #fragment's target, else the overview. */
+.view { display: none; }
+.view:target { display: block; }
+main:not(:has(.view:target)) #overview { display: block; }
+.crumb { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+h2.title { margin: 0 0 10px; font-size: 22px; line-height: 1.3; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 2px 10px;
+  font-size: 12px; color: var(--muted); }
+.chip b { color: var(--ink); font-weight: 600; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } nav { width: 230px; } }
+@media (max-width: 640px) {
+  .layout { flex-direction: column; }
+  nav { width: 100%; height: auto; position: static; border-right: 0;
+    border-bottom: 1px solid var(--line); }
+  main { padding: 20px 16px; }
+}
+.card { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+.cols .card { margin-bottom: 0; }
+.card header { display: flex; justify-content: space-between; align-items: baseline;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 12px; }
+.card header h3 { margin: 0; font-size: 13px; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--accent); }
+.card header .count { font-size: 12px; color: var(--muted); }
+.card h4, .card h5 { margin: 14px 0 4px; font-size: 14px; }
+.card p, .card ul { margin: 6px 0; }
+.card ul { padding-left: 20px; }
+.card li { margin: 3px 0; }
+.card code { background: var(--code); border-radius: 4px; padding: 1px 5px;
+  font-size: 13px; }
+.card a { color: var(--accent); }
+.crumbs ul { list-style: none; padding-left: 0; }
+.crumbs li { display: flex; gap: 10px; }
+.crumbs .at { color: var(--muted); font-size: 12px; flex-shrink: 0; padding-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.crumbs .machine { color: var(--muted); font-size: 12px; }
+.empty { color: var(--muted); font-style: italic; }
+.needs-server { font-size: 12px; color: var(--muted); align-self: center; }
+a.chip { text-decoration: none; color: var(--accent); }
+.notice { background: var(--panel); border: 1px dashed var(--line);
+  border-radius: 12px; padding: 24px; color: var(--muted); }
+.overview { border-collapse: collapse; width: 100%; }
+.overview td, .overview th { padding: 5px 12px 5px 0; text-align: left;
+  font-size: 13px; border-bottom: 1px solid var(--line); }
+.overview th { color: var(--muted); font-weight: 600; }
+.overview td a { color: inherit; text-decoration: none; }
+.overview tr:hover td { background: var(--chip); }
+.overview .dim, .overview .dim a { color: var(--dismissed); }
+.overview .num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+<h1>Session Explorer</h1>
+<div class="sub">{{len .Sessions}} sessions · {{.WindowStart}} → {{.Day}}</div>
+<a href="#overview">Overview</a>
+{{- range .Days}}
+<div class="day">{{.Label}}</div>
+{{- if .Breadcrumbs}}
+<a href="#crumbs-{{.Day}}">Breadcrumbs<span class="meta">{{.CrumbCount}} breadcrumb(s)</span></a>
+{{- end}}
+{{- range .Projects}}
+<div class="proj">{{.Name}}</div>
+{{- range .Sessions}}
+<a href="#s-{{.ID}}"{{if not .Curated}} class="dim"{{end}}>{{.Label}}<span class="meta">{{.NavMeta}}</span></a>
+{{- end}}
+{{- end}}
+{{- end}}
+</nav>
+<main>
+<section class="view" id="overview">
+<h2 class="title">Overview</h2>
+{{- with .Stats}}
+<div class="chips">
+<span class="chip"><b>{{.Curated}}</b> curated</span>
+<span class="chip"><b>{{.Uncurated}}</b> not curated</span>
+<span class="chip">avg entry <b>{{.AvgEntryWords}}</b> words</span>
+<span class="chip">avg retro <b>{{.AvgSummaryWords}}</b> words</span>
+<span class="chip"><b>{{.Unsummarized}}</b> not summarized</span>
+<span class="chip"><b>{{.Breadcrumbs}}</b> breadcrumbs</span>
+</div>
+{{- end}}
+<table class="overview">
+<thead><tr><th>day</th><th>project</th><th>title</th><th>entry w</th><th>retro w</th><th>msgs u/a</th></tr></thead>
+<tbody>
+{{- range .Sessions}}
+<tr{{if not .Curated}} class="dim"{{end}}><td>{{.Day}}</td><td>{{.Project}}</td><td><a href="#s-{{.ID}}">{{or .Title .State}}</a></td><td class="num">{{if .HasEntry}}{{.EntryWords}}{{else}}—{{end}}</td><td class="num">{{if .HasSummary}}{{.SummaryWords}}{{else}}—{{end}}</td><td class="num">{{.UserMsgs}}/{{.AssistantMsgs}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</section>
+{{- range .Days}}
+{{- if .Breadcrumbs}}
+<section class="view" id="crumbs-{{.Day}}">
+<div class="crumb">{{.Label}}</div>
+<h2 class="title">Breadcrumbs</h2>
+{{- range .Breadcrumbs}}
+<div class="card crumbs">
+<header><h3>{{.Name}}</h3><span class="count">{{len .Crumbs}}</span></header>
+<ul>
+{{- range .Crumbs}}
+<li><span class="at">{{.Time}}</span><span>{{.Text}}{{if .Machine}} <span class="machine">· {{.Machine}}</span>{{end}}</span></li>
+{{- end}}
+</ul>
+</div>
+{{- end}}
+</section>
+{{- end}}
+{{- end}}
+{{- range .Sessions}}
+<section class="view" id="s-{{.ID}}">
+<div class="crumb">{{.DayLabel}} · {{.ID}}</div>
+<h2 class="title">{{or .Title "(untitled session)"}}</h2>
+<div class="chips">
+<span class="chip"><b>{{.Project}}</b></span>
+{{- if .Branch}}
+<span class="chip">{{.Branch}}</span>
+{{- end}}
+<span class="chip">{{.Started}} · {{.Minutes}} min</span>
+<span class="chip"><b>{{.UserMsgs}}</b> user / <b>{{.AssistantMsgs}}</b> assistant msgs</span>
+<span class="chip">{{.TranscriptLines}} transcript lines</span>
+{{- range .Tags}}
+<span class="chip">#{{.}}</span>
+{{- end}}
+{{- if .HasTranscript}}
+<a class="chip" href="{{.TranscriptURL}}">transcript →</a>
+<span class="needs-server">transcripts open only while <code>clast analyze</code> is serving</span>
+{{- end}}
+</div>
+{{- if .Curated}}
+<div class="cols">
+<div class="card">
+<header><h3>Retro summary</h3>{{if .HasSummary}}<span class="count">{{.SummaryWords}} words · {{.SummaryChars}} chars</span>{{end}}</header>
+{{- if .HasSummary}}
+{{.SummaryHTML}}
+{{- else if .HasEntry}}
+<p class="empty">not summarized — run <code>clast retro {{.Day}}</code></p>
+{{- else}}
+<p class="empty">no entry body to summarize</p>
+{{- end}}
+</div>
+<div class="card">
+<header><h3>Entry draft</h3>{{if .HasEntry}}<span class="count">{{.EntryWords}} words · {{.EntryChars}} chars</span>{{end}}</header>
+{{- if .HasEntry}}
+{{.EntryHTML}}
+{{- else}}
+<p class="empty">no entry body</p>
+{{- end}}
+</div>
+</div>
+{{- else if eq .State "dismissed"}}
+<div class="notice">Dismissed ({{or .Reason "no reason recorded"}}). No entry was drafted and no retro summary exists.</div>
+{{- else}}
+<div class="notice">Not curated yet ({{.State}}). No entry was drafted and no retro summary exists.</div>
+{{- end}}
+</section>
+{{- end}}
+</main>
+</div>
+<script>
+// Highlight the nav link for the view on screen, and start each view at
+// its top. The views themselves switch on :target, without script.
+function sync() {
+  const hash = location.hash || '#overview';
+  for (const a of document.querySelectorAll('nav a')) {
+    a.classList.toggle('active', a.getAttribute('href') === hash);
+  }
+  window.scrollTo(0, 0);
+}
+// A served page can open transcripts; a saved file cannot.
+if (location.protocol !== 'file:') {
+  for (const el of document.querySelectorAll('.needs-server')) el.remove();
+}
+window.addEventListener('hashchange', sync);
+sync();
+</script>
+</body>
+</html>

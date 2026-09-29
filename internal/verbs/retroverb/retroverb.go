@@ -8,7 +8,8 @@
 // mirroring brief.llm-request-failed), and — new here — the flow's own
 // *Non-normative (verb form)* cache paragraph: a content-fingerprinted
 // summary cache under $XDG_CACHE_HOME/clast/retro/ (V7's private-state
-// carve-out), implemented in cache.go and wired in from command.go.
+// carve-out), implemented in internal/retrocache and wired in from
+// command.go.
 //
 // This file holds flows/retro.md §2 (summarize each entry, against the
 // cache) and §3 (fold summaries into the document) — kept separate from
@@ -27,12 +28,12 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
 	"github.com/procrastivity/clast/internal/prompt"
+	"github.com/procrastivity/clast/internal/retrocache"
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
 )
 
@@ -192,29 +193,22 @@ const summarizeConcurrency = 4
 // summarizeEntry is Summarize's own per-entry step: render, then either
 // serve a cache hit or call the endpoint and store the fresh result.
 func summarizeEntry(ctx context.Context, groupSlug string, singleDay bool, topDay journal.Day, row retroplumbing.EntryRow, client *llm.Client, cacheDir string, refresh bool) (text string, cacheHit bool, err error) {
-	rendered, err := prompt.Render(prompt.RetroSummary, summaryPromptData(groupSlug, singleDay, topDay, row))
+	e := summaryEntry(groupSlug, singleDay, topDay, row)
+	rendered, err := prompt.Render(prompt.RetroSummary, e.PromptData())
 	if err != nil {
 		return "", false, clasterr.New("retro.prompt-unavailable",
 			fmt.Sprintf("retro: resolving the retro-summary prompt pair: %v", err))
 	}
 
-	// The cache key is rendered with the project neutralized: a project
-	// backfill (plumbing capture resolving a session captured before its
-	// clone was registered) turns "(no project)" into a real slug without
-	// touching the entry, and must not re-summarize every such session.
-	// The model still sees the real project; --refresh rewrites a summary
-	// that should reflect it.
-	keyData := summaryPromptData(groupSlug, singleDay, topDay, row)
-	keyData["project"] = ""
-	keyRendered, err := prompt.Render(prompt.RetroSummary, keyData)
+	// The key leaves the project out (retrocache.EntryKey's doc): a
+	// project backfill must not re-summarize every backfilled session.
+	fingerprint, err := retrocache.EntryKey(e, client.Model())
 	if err != nil {
 		return "", false, clasterr.New("retro.prompt-unavailable",
 			fmt.Sprintf("retro: resolving the retro-summary prompt pair: %v", err))
 	}
-
-	fingerprint := Fingerprint(keyRendered, client.Model())
 	if !refresh {
-		if cached, ok := cacheGet(cacheDir, fingerprint); ok {
+		if cached, ok := retrocache.Get(cacheDir, fingerprint); ok {
 			return cached, true, nil
 		}
 	}
@@ -227,31 +221,32 @@ func summarizeEntry(ctx context.Context, groupSlug string, singleDay bool, topDa
 
 	// Best-effort: a cache write failure (an unwritable $XDG_CACHE_HOME,
 	// a permissions problem) costs nothing but a repeat LLM call next
-	// run — never this run's own correctness (cache.go's cachePut doc).
-	_ = cachePut(cacheDir, fingerprint, text)
+	// run — never this run's own correctness (retrocache.Put's doc).
+	_ = retrocache.Put(cacheDir, fingerprint, text)
 
 	return text, false, nil
 }
 
-// summaryPromptData maps one EntryRow onto prompt.RetroSummary's
-// user-template placeholders (assets/prompts/retro-summary-user.md):
-// {{project}}, {{started_at}}, {{day}}, {{session_id}}, {{body}} —
-// flows/retro.md §2's own list ("the project, the session's started_at,
-// the top-level day (when the window is a single day), the session id,
-// and the entry body").
+// summaryEntry maps one EntryRow onto the facts the retro-summary prompt
+// is rendered from (retrocache.Entry) — flows/retro.md §2's own list
+// ("the project, the session's started_at, the top-level day (when the
+// window is a single day), the session id, and the entry body").
 //
 // Two porcelain-owned findings fill gaps §2 leaves open:
-//   - {{project}} renders unprojectedLabel ("(no project)") for the
+//   - the project renders unprojectedLabel ("(no project)") for the
 //     no-project bucket rather than retro's internal "-" sentinel or a
 //     bare empty string — the same readable convention plumbing retro's
 //     own writeHuman heading already uses for a human reader; here it
 //     also reaches the model's own input.
-//   - {{day}} is the top-level window day only when the window is a
+//   - the day is the top-level window day only when the window is a
 //     single day (§2's own stated case); when --since widened the window
 //     across several days, §2 names no fallback, so this falls back to
 //     the entry's own row.Day (the calendar day its session actually
 //     falls on) — always a real, single day, never the ambiguous range.
-func summaryPromptData(groupSlug string, singleDay bool, topDay journal.Day, row retroplumbing.EntryRow) map[string]string {
+//     In a single-day window the two are the same day, so the day is
+//     always row.Day in effect; analyze relies on that to key entries
+//     without knowing retro's window.
+func summaryEntry(groupSlug string, singleDay bool, topDay journal.Day, row retroplumbing.EntryRow) retrocache.Entry {
 	project := groupSlug
 	if groupSlug == unprojectedSlug {
 		project = unprojectedLabel
@@ -262,12 +257,12 @@ func summaryPromptData(groupSlug string, singleDay bool, topDay journal.Day, row
 		day = topDay
 	}
 
-	return map[string]string{
-		"project":    project,
-		"started_at": row.Item.Session.StartedAt.UTC().Format(time.RFC3339),
-		"day":        string(day),
-		"session_id": row.Item.Session.SessionID,
-		"body":       row.Entry.Body,
+	return retrocache.Entry{
+		Project:   project,
+		Day:       day,
+		StartedAt: row.Item.Session.StartedAt,
+		SessionID: row.Item.Session.SessionID,
+		Body:      row.Entry.Body,
 	}
 }
 

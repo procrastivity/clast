@@ -1,0 +1,22 @@
+{"type":"mode","mode":"normal","sessionId":"s1"}
+{"type":"user","uuid":"u1","timestamp":"2026-09-11T09:00:00.5Z","message":{"role":"user","content":"please list the files"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-09-11T09:00:01Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-09-11T09:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"need ls","signature":"sig"}]}}
+{"type":"assistant","uuid":"a3","timestamp":"2026-09-11T09:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"Listing now."}]}}
+{"type":"assistant","uuid":"a4","timestamp":"2026-09-11T09:00:04Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ls","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"assistant","uuid":"a5","timestamp":"2026-09-11T09:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"description":"look around"}}]}}
+{"type":"assistant","uuid":"a6","timestamp":"2026-09-11T09:00:06Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_lost","name":"Read","input":{"file_path":"/x"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-09-11T09:00:07Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ls","content":"a.txt\nb.txt"}]}}
+{"type":"user","uuid":"u3","timestamp":"2026-09-11T09:00:08Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_agent","is_error":true,"content":[{"type":"text","text":"first"},{"type":"image","source":{}},{"type":"text","text":"second"}]}]}}
+{"type":"user","uuid":"u4","timestamp":"2026-09-11T09:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_gone","content":"stray"}]}}
+{"not json at all
+{"type":"user","uuid":"u5","timestamp":"2026-09-11T09:00:10Z","message":{"role":"user","content":[{"type":"text","text":"see this"},{"type":"image","source":{}}]}}
+{"type":"user","uuid":"u6","isMeta":true,"timestamp":"2026-09-11T09:00:11Z","message":{"role":"user","content":"<local-command-caveat>ignore</local-command-caveat>"}}
+{"type":"user","uuid":"u7","origin":{"kind":"task-notification"},"timestamp":"2026-09-11T09:00:12Z","message":{"role":"user","content":"task done"}}
+{"type":"user","uuid":"u1","timestamp":"2026-09-11T09:00:00.5Z","message":{"role":"user","content":"please list the files"}}
+{"type":"system","subtype":"turn_duration","uuid":"y1","durationMs":1500,"timestamp":"2026-09-11T09:00:13Z"}
+{"type":"system","subtype":"local_command","uuid":"y2","content":"<command-name>/mode</command-name>","timestamp":"2026-09-11T09:00:14Z"}
+{"type":"attachment","uuid":"t1","timestamp":"2026-09-11T09:00:15Z","attachment":{"type":"queued_command","prompt":"typed while busy"}}
+{"type":"attachment","uuid":"t2","timestamp":"2026-09-11T09:00:16Z","attachment":{"type":"date"}}
+{"type":"brand-new-record","sessionId":"s1"}
+{"type":"assistant","uuid":"a7","timestamp":"2026-09-11T09:00:17Z","message":{"role":"assistant","content":"plain string reply"}}

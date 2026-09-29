@@ -91,3 +91,22 @@ func ValidateTranscriptFormat(format string) (source.TranscriptRenderer, error) 
 	}
 	return r, nil
 }
+
+// LookupTranscriptReader finds the structured reader among All whose
+// TranscriptFormats (source.TranscriptReader, an OPTIONAL interface)
+// declares format — the same rule as LookupTranscriptRenderer. It reports
+// false when no registered source covers format.
+func LookupTranscriptReader(format string) (source.TranscriptReader, bool) {
+	for _, s := range All {
+		r, ok := s.(source.TranscriptReader)
+		if !ok {
+			continue
+		}
+		for _, f := range r.TranscriptFormats() {
+			if f == format {
+				return r, true
+			}
+		}
+	}
+	return nil, false
+}

@@ -70,6 +70,7 @@ var nonPlumbingVerbs = []string{
 	"uninstall",
 	"version",
 	"manifest",
+	"analyze",
 }
 
 // TestPlumbingVerbTable_EveryNamespaceVerbPresent pins the table against
