@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"strings"
 	"time"
@@ -196,6 +197,13 @@ type chatResponse struct {
 // enough for a verb to report a clear failure without this package
 // guessing at a clasterr code a later verb Matter hasn't chosen yet.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	var emit Observer
+	if o := observerFrom(ctx); o != nil {
+		emit = serialize(o)
+		emit(Event{Phase: PhaseStart})
+		ctx = httptrace.WithClientTrace(ctx, traceFor(emit))
+	}
+
 	endpoint := c.baseURL + chatCompletionsPath
 
 	reqBody, err := json.Marshal(chatRequest{
@@ -239,5 +247,8 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		return "", fmt.Errorf("llm: %s returned no choices", endpoint)
 	}
 
+	if emit != nil {
+		emit(Event{Phase: PhaseDone})
+	}
 	return parsed.Choices[0].Message.Content, nil
 }
