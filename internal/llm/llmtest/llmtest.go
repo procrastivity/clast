@@ -16,8 +16,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Message is one OpenAI chat-format message, as sent or received over the
@@ -38,6 +40,10 @@ type CapturedRequest struct {
 	Model         string
 	Messages      []Message
 	Authorization string
+
+	// Stream is the request's "stream" field: whether the client asked
+	// for an SSE reply.
+	Stream bool
 }
 
 // Server is a running OpenAI-compatible /chat/completions stub. Point a
@@ -59,6 +65,21 @@ type Server struct {
 	rawSet    bool
 	rawStatus int
 	rawBody   string
+
+	// streamChunks, when streamSet, is answered to a stream:true request
+	// as one SSE content delta per chunk, then [DONE].
+	streamSet    bool
+	streamChunks []string
+
+	// streamLines, when streamRawSet, is answered to a stream:true
+	// request verbatim, one line each.
+	streamRawSet bool
+	streamLines  []string
+
+	// delayFirst is slept before the response headers; delayBetween is
+	// slept between SSE writes.
+	delayFirst   time.Duration
+	delayBetween time.Duration
 }
 
 // New starts a stub that answers every /chat/completions request with a
@@ -84,6 +105,59 @@ func (s *Server) SetResponse(content string) {
 	defer s.mu.Unlock()
 	s.canned = content
 	s.rawSet = false
+	s.clearStreamLocked()
+}
+
+// clearStreamLocked drops any stream mode. The caller holds s.mu.
+func (s *Server) clearStreamLocked() {
+	s.streamSet = false
+	s.streamChunks = nil
+	s.streamRawSet = false
+	s.streamLines = nil
+}
+
+// SetStream makes the stub answer a request with "stream": true as SSE:
+// one content delta per chunk, each flushed, then "data: [DONE]". A
+// request without stream:true gets the normal JSON reply with the chunks
+// joined. It replaces any earlier stream mode and any Fail/RespondRaw
+// override. With no SetStream or SetStreamRaw call, a stream:true request
+// still gets plain JSON (a server that ignores stream).
+func (s *Server) SetStream(chunks []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearStreamLocked()
+	s.rawSet = false
+	s.streamSet = true
+	s.streamChunks = append([]string(nil), chunks...)
+}
+
+// SetStreamRaw makes the stub answer a request with "stream": true with
+// Content-Type text/event-stream and each line written verbatim plus a
+// newline, flushed after each. The caller supplies the blank lines that
+// end events. Use it for keepalive comments, error
+// events, reasoning deltas, or a missing [DONE]. A request without
+// stream:true gets the normal canned JSON reply. It replaces any earlier
+// stream mode and any Fail/RespondRaw override.
+func (s *Server) SetStreamRaw(lines []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearStreamLocked()
+	s.rawSet = false
+	s.streamRawSet = true
+	s.streamLines = append([]string(nil), lines...)
+}
+
+// SetDelay makes the stub sleep beforeFirstByte before it writes the
+// response headers, and betweenChunks between SSE writes. betweenChunks
+// applies between every raw line, blank lines included. beforeFirstByte
+// applies to JSON and Fail/RespondRaw replies too, not only SSE. Both stop
+// early when the client goes away. SetResponse, Fail and RespondRaw do not
+// clear the delays.
+func (s *Server) SetDelay(beforeFirstByte, betweenChunks time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delayFirst = beforeFirstByte
+	s.delayBetween = betweenChunks
 }
 
 // Fail switches the stub to answer every subsequent request with
@@ -101,6 +175,7 @@ func (s *Server) RespondRaw(statusCode int, body string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rawSet = true
+	s.clearStreamLocked()
 	s.rawStatus = statusCode
 	s.rawBody = body
 }
@@ -119,6 +194,7 @@ func (s *Server) Requests() []CapturedRequest {
 type wireRequest struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
+	Stream   bool      `json:"stream"`
 }
 
 // wireChoice/wireResponse mirror the response shape internal/llm.Client
@@ -153,13 +229,48 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		Model:         req.Model,
 		Messages:      req.Messages,
 		Authorization: r.Header.Get("Authorization"),
+		Stream:        req.Stream,
 	})
 	rawSet, rawStatus, rawBody := s.rawSet, s.rawStatus, s.rawBody
 	canned := s.canned
+	streamSet, streamChunks := s.streamSet, s.streamChunks
+	streamRawSet, streamLines := s.streamRawSet, s.streamLines
+	delayFirst, delayBetween := s.delayFirst, s.delayBetween
 	s.mu.Unlock()
 
 	if r.URL.Path != "/chat/completions" {
 		http.NotFound(w, r)
+		return
+	}
+
+	if !sleepCtx(r, delayFirst) {
+		return
+	}
+
+	if req.Stream && (streamSet || streamRawSet) {
+		var lines []string
+		if streamSet {
+			for _, c := range streamChunks {
+				quoted, _ := json.Marshal(c)
+				lines = append(lines, `data: {"choices":[{"delta":{"content":`+string(quoted)+`}}]}`+"\n")
+			}
+			lines = append(lines, "data: [DONE]\n")
+		} else {
+			lines = streamLines
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		for i, line := range lines {
+			if i > 0 && !sleepCtx(r, delayBetween) {
+				return
+			}
+			if _, err := io.WriteString(w, line+"\n"); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
 		return
 	}
 
@@ -169,7 +280,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if streamSet {
+		canned = strings.Join(streamChunks, "")
+	}
 	resp := wireResponse{Choices: []wireChoice{{Message: Message{Role: "assistant", Content: canned}}}}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// sleepCtx sleeps for d, returning false when the request context ends
+// first. A non-positive d returns true at once.
+func sleepCtx(r *http.Request, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-r.Context().Done():
+		return false
+	}
 }

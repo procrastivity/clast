@@ -2,17 +2,22 @@
 // wake/brief/retro verb forms speak to the configured LLM endpoint
 // (SURFACE V12): one call shape — a system/user prompt pair in, the
 // assistant's reply text out. No provider abstraction (V12 rejected a
-// second provider until one actually exists), no streaming, no retries,
-// no options struct beyond what the three verbs need.
+// second provider until one actually exists), no retries, no options
+// struct beyond what the three verbs need. By default the reply is read as
+// server-sent events (SSE) with a JSON fallback, and a context Observer
+// (WithObserver) reports the call's phases to a verb.
 package llm
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"strings"
 	"time"
@@ -28,13 +33,23 @@ const APIKeyEnvVar = "CLAST_LLM_API_KEY"
 // configKey is the tool-config section V31 carries the endpoint under.
 const configKey = "llm"
 
-// DefaultTimeout bounds one Complete call end-to-end (connect through
-// response body fully read). 30s: generous enough for a real completion
-// (retro's summaries and wake's drafts are short generations, not
-// long-form), short enough that a verb never hangs a terminal
-// indefinitely on a stalled endpoint. Recorded as a wip finding per the
-// step brief — no SURFACE clause fixes this number.
-const DefaultTimeout = 30 * time.Second
+// FirstByteTimeout bounds the wait from sending the request to receiving
+// the response headers. 30s: a model may think a while before it answers,
+// but an endpoint silent for this long is down or unreachable.
+const FirstByteTimeout = 30 * time.Second
+
+// IdleTimeout bounds the silence between two reads of the response body.
+// A long stream is never cut while data keeps arriving; a stream that goes
+// quiet for this long fails as stalled.
+const IdleTimeout = 30 * time.Second
+
+// MaxDuration bounds one Complete call end-to-end (connect through
+// response body fully read), a backstop against a stream that trickles
+// forever.
+const MaxDuration = 5 * time.Minute
+
+// errStalled is the per-call cancel cause the idle timer sets.
+var errStalled = errors.New("stalled")
 
 // chatCompletionsPath is the one endpoint path V12 names, joined onto
 // llm.base_url.
@@ -47,7 +62,12 @@ type Client struct {
 	baseURL string
 	model   string
 	apiKey  string
+	stream  bool
 	http    *http.Client
+
+	firstByte time.Duration
+	idle      time.Duration
+	max       time.Duration
 }
 
 // NewClient resolves llm.base_url and llm.model from cfg (SURFACE V31)
@@ -83,19 +103,56 @@ func NewClient(cfg config.Config) (*Client, error) {
 			fmt.Sprintf("llm endpoint not configured: set %s in config.yaml", strings.Join(missing, " and ")))
 	}
 
+	stream, err := streamEnabled(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	apiKey := os.Getenv(APIKeyEnvVar)
 	if apiKey == "" {
 		return nil, clasterr.New("validation.llm-api-key-missing",
 			fmt.Sprintf("%s is not set", APIKeyEnvVar))
 	}
 
-	return &Client{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		model:   model,
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: DefaultTimeout},
-	}, nil
+	c := &Client{
+		baseURL:   strings.TrimSuffix(baseURL, "/"),
+		model:     model,
+		apiKey:    apiKey,
+		stream:    stream,
+		firstByte: FirstByteTimeout,
+		idle:      IdleTimeout,
+		max:       MaxDuration,
+	}
+	c.buildHTTP()
+	return c, nil
 }
+
+// buildHTTP (re)creates the http client with a transport whose
+// ResponseHeaderTimeout is the first-byte limit. There is no
+// http.Client.Timeout: it would cut a long stream mid-body.
+func (c *Client) buildHTTP() {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = c.firstByte
+	c.http = &http.Client{Transport: tr}
+}
+
+// idleReader wraps a response body and resets timer on every Read that
+// returns data.
+type idleReader struct {
+	rc    io.ReadCloser
+	timer *time.Timer
+	idle  time.Duration
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	n, err := r.rc.Read(p)
+	if n > 0 {
+		r.timer.Reset(r.idle)
+	}
+	return n, err
+}
+
+func (r *idleReader) Close() error { return r.rc.Close() }
 
 // Model returns the resolved llm.model this Client was constructed with
 // (SURFACE V31) — exported for a caller that needs the model string itself
@@ -125,21 +182,10 @@ func ConfiguredModel(cfg config.Config) (string, error) {
 // yaml.v3-decode-shape handling (nested mappings decode as either
 // map[string]any or config.Config depending on caller, both accepted).
 func llmConfigValues(cfg config.Config) (baseURL, model string, err error) {
-	raw, present := cfg[configKey]
-	if !present || raw == nil {
-		return "", "", nil
+	section, err := llmSection(cfg)
+	if err != nil || section == nil {
+		return "", "", err
 	}
-
-	var section map[string]any
-	switch m := raw.(type) {
-	case map[string]any:
-		section = m
-	case config.Config:
-		section = m
-	default:
-		return "", "", fmt.Errorf("llm: config key %q must be a mapping, got %T", configKey, raw)
-	}
-
 	baseURL, err = stringField(section, "base_url")
 	if err != nil {
 		return "", "", err
@@ -149,6 +195,40 @@ func llmConfigValues(cfg config.Config) (baseURL, model string, err error) {
 		return "", "", err
 	}
 	return baseURL, model, nil
+}
+
+// llmSection returns cfg's "llm" mapping, nil when absent.
+func llmSection(cfg config.Config) (map[string]any, error) {
+	raw, present := cfg[configKey]
+	if !present || raw == nil {
+		return nil, nil
+	}
+	switch m := raw.(type) {
+	case map[string]any:
+		return m, nil
+	case config.Config:
+		return m, nil
+	default:
+		return nil, fmt.Errorf("llm: config key %q must be a mapping, got %T", configKey, raw)
+	}
+}
+
+// streamEnabled reads llm.stream: absent or null means true (send
+// "stream": true and read SSE); a non-bool is a plain error.
+func streamEnabled(cfg config.Config) (bool, error) {
+	section, err := llmSection(cfg)
+	if err != nil || section == nil {
+		return true, err
+	}
+	v, present := section["stream"]
+	if !present || v == nil {
+		return true, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("llm: config key %q must be a bool, got %T", configKey+".stream", v)
+	}
+	return b, nil
 }
 
 func stringField(section map[string]any, key string) (string, error) {
@@ -175,6 +255,7 @@ type message struct {
 type chatRequest struct {
 	Model    string    `json:"model"`
 	Messages []message `json:"messages"`
+	Stream   bool      `json:"stream,omitempty"`
 }
 
 // chatResponse is the slice of the OpenAI-compatible response this
@@ -195,8 +276,55 @@ type chatResponse struct {
 // naming the endpoint and, for non-2xx, the status and response body —
 // enough for a verb to report a clear failure without this package
 // guessing at a clasterr code a later verb Matter hasn't chosen yet.
+//
+// By default the request carries "stream": true and a text/event-stream
+// reply is read as SSE (see readStream); an endpoint that answers with
+// plain JSON anyway, or llm.stream: false, takes the JSON path.
+//
+// Three limits apply instead of one whole-request timeout: FirstByteTimeout
+// (request sent to headers), IdleTimeout (silence between body reads) and
+// MaxDuration (the whole call). A parent context cancel passes the
+// parent's error through (wrapped), so errors.Is(err, context.Canceled) holds.
+//
+// An Observer runs inside the read loop, so the time it takes counts
+// toward IdleTimeout: a slow Observer can make a healthy stream stall.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	parent := ctx
+	var emit Observer
+	if o := observerFrom(ctx); o != nil {
+		emit = serialize(o)
+		emit(Event{Phase: PhaseStart})
+		ctx = httptrace.WithClientTrace(ctx, traceFor(emit))
+	}
+
 	endpoint := c.baseURL + chatCompletionsPath
+
+	totalCtx, cancelTotal := context.WithTimeout(ctx, c.max)
+	defer cancelTotal()
+	callCtx, cancel := context.WithCancelCause(totalCtx)
+	defer cancel(nil)
+	ctx = callCtx
+
+	// classify maps a failure to the idle or total-cap error when that
+	// limit ended the call; a parent cancel and every other error pass
+	// through (nil return). Only a cancellation-shaped err qualifies, so a
+	// malformed-stream error is never relabeled because a timer fired just
+	// after it.
+	classify := func(err error) error {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errStalled) {
+			return nil
+		}
+		if parent.Err() != nil {
+			return nil
+		}
+		if errors.Is(context.Cause(callCtx), errStalled) {
+			return fmt.Errorf("llm: %s stalled: no data for %s", endpoint, c.idle)
+		}
+		if totalCtx.Err() != nil {
+			return fmt.Errorf("llm: %s exceeded %s", endpoint, c.max)
+		}
+		return nil
+	}
 
 	reqBody, err := json.Marshal(chatRequest{
 		Model: c.model,
@@ -204,6 +332,7 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
+		Stream: c.stream,
 	})
 	if err != nil {
 		return "", fmt.Errorf("llm: encoding request to %s: %w", endpoint, err)
@@ -218,16 +347,45 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if cerr := classify(err); cerr != nil {
+			return "", cerr
+		}
 		return "", fmt.Errorf("llm: calling %s: %w", endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// The idle timer starts once the headers are in, and every Read that
+	// returns data resets it. Stopped on every return path.
+	idleTimer := time.AfterFunc(c.idle, func() { cancel(errStalled) })
+	defer idleTimer.Stop()
+	body := &idleReader{rc: resp.Body, timer: idleTimer, idle: c.idle}
+
+	ok2xx := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if ok2xx {
+		if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil && mt == "text/event-stream" {
+			content, err := readStream(body, endpoint, emit)
+			if err != nil {
+				if cerr := classify(err); cerr != nil {
+					return "", cerr
+				}
+				return "", err
+			}
+			if emit != nil {
+				emit(Event{Phase: PhaseDone})
+			}
+			return content, nil
+		}
+	}
+
+	respBody, err := io.ReadAll(body)
 	if err != nil {
+		if cerr := classify(err); cerr != nil {
+			return "", cerr
+		}
 		return "", fmt.Errorf("llm: reading response from %s: %w", endpoint, err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !ok2xx {
 		return "", fmt.Errorf("llm: %s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(respBody)))
 	}
 
@@ -239,5 +397,8 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		return "", fmt.Errorf("llm: %s returned no choices", endpoint)
 	}
 
+	if emit != nil {
+		emit(Event{Phase: PhaseDone})
+	}
 	return parsed.Choices[0].Message.Content, nil
 }

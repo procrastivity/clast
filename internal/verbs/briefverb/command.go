@@ -14,6 +14,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/query"
 	"github.com/procrastivity/clast/internal/surface"
 	briefplumbing "github.com/procrastivity/clast/internal/verbs/brief"
@@ -119,8 +120,19 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 				return err
 			}
 
+			// Status line and call phases while Synthesize waits. Built only
+			// here, past the empty stop and a good client, so an empty brief
+			// never creates one; a nil reporter (progress off) makes every
+			// call below a no-op.
+			rep := progress.New(streams, flags)
+			defer rep.Stop()
+			rep.Status("synthesizing brief · " + result.ProjectSlug)
+
 			// flows/brief.md §3 — synthesize the working brief.
-			text, err := Synthesize(ctx, result, client)
+			text, err := Synthesize(llm.WithObserver(ctx, rep.Observer()), result, client)
+			// Clear before any output or error return, so neither lands on
+			// a half-drawn status line.
+			rep.Clear()
 			if err != nil {
 				return err
 			}
