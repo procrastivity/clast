@@ -15,8 +15,8 @@ const (
 	PhaseConnected                // httptrace GotConn
 	PhaseRequestSent              // httptrace WroteRequest with a nil error
 	PhaseFirstByte                // httptrace GotFirstResponseByte
-	PhaseThinking                 // one streamed reasoning chunk (step-03 emits it)
-	PhaseDelta                    // one streamed content chunk (step-03 emits it)
+	PhaseThinking                 // one streamed reasoning chunk (SSE only)
+	PhaseDelta                    // one streamed content chunk (SSE only)
 	PhaseDone                     // reply fully read and parsed
 )
 

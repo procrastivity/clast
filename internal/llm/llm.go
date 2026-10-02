@@ -2,8 +2,10 @@
 // wake/brief/retro verb forms speak to the configured LLM endpoint
 // (SURFACE V12): one call shape — a system/user prompt pair in, the
 // assistant's reply text out. No provider abstraction (V12 rejected a
-// second provider until one actually exists), no streaming, no retries,
-// no options struct beyond what the three verbs need.
+// second provider until one actually exists), no retries, no options
+// struct beyond what the three verbs need. By default the reply is read as
+// server-sent events (SSE) with a JSON fallback, and a context Observer
+// (WithObserver) reports the call's phases to a verb.
 package llm
 
 import (
@@ -281,8 +283,11 @@ type chatResponse struct {
 //
 // Three limits apply instead of one whole-request timeout: FirstByteTimeout
 // (request sent to headers), IdleTimeout (silence between body reads) and
-// MaxDuration (the whole call). A parent context cancel returns the
-// parent's error unchanged.
+// MaxDuration (the whole call). A parent context cancel passes the
+// parent's error through (wrapped), so errors.Is(err, context.Canceled) holds.
+//
+// An Observer runs inside the read loop, so the time it takes counts
+// toward IdleTimeout: a slow Observer can make a healthy stream stall.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	parent := ctx
 	var emit Observer
