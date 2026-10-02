@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptrace"
 	"os"
@@ -48,6 +49,7 @@ type Client struct {
 	baseURL string
 	model   string
 	apiKey  string
+	stream  bool
 	http    *http.Client
 }
 
@@ -84,6 +86,11 @@ func NewClient(cfg config.Config) (*Client, error) {
 			fmt.Sprintf("llm endpoint not configured: set %s in config.yaml", strings.Join(missing, " and ")))
 	}
 
+	stream, err := streamEnabled(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	apiKey := os.Getenv(APIKeyEnvVar)
 	if apiKey == "" {
 		return nil, clasterr.New("validation.llm-api-key-missing",
@@ -94,6 +101,7 @@ func NewClient(cfg config.Config) (*Client, error) {
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		model:   model,
 		apiKey:  apiKey,
+		stream:  stream,
 		http:    &http.Client{Timeout: DefaultTimeout},
 	}, nil
 }
@@ -126,21 +134,10 @@ func ConfiguredModel(cfg config.Config) (string, error) {
 // yaml.v3-decode-shape handling (nested mappings decode as either
 // map[string]any or config.Config depending on caller, both accepted).
 func llmConfigValues(cfg config.Config) (baseURL, model string, err error) {
-	raw, present := cfg[configKey]
-	if !present || raw == nil {
-		return "", "", nil
+	section, err := llmSection(cfg)
+	if err != nil || section == nil {
+		return "", "", err
 	}
-
-	var section map[string]any
-	switch m := raw.(type) {
-	case map[string]any:
-		section = m
-	case config.Config:
-		section = m
-	default:
-		return "", "", fmt.Errorf("llm: config key %q must be a mapping, got %T", configKey, raw)
-	}
-
 	baseURL, err = stringField(section, "base_url")
 	if err != nil {
 		return "", "", err
@@ -150,6 +147,40 @@ func llmConfigValues(cfg config.Config) (baseURL, model string, err error) {
 		return "", "", err
 	}
 	return baseURL, model, nil
+}
+
+// llmSection returns cfg's "llm" mapping, nil when absent.
+func llmSection(cfg config.Config) (map[string]any, error) {
+	raw, present := cfg[configKey]
+	if !present || raw == nil {
+		return nil, nil
+	}
+	switch m := raw.(type) {
+	case map[string]any:
+		return m, nil
+	case config.Config:
+		return m, nil
+	default:
+		return nil, fmt.Errorf("llm: config key %q must be a mapping, got %T", configKey, raw)
+	}
+}
+
+// streamEnabled reads llm.stream: absent or null means true (send
+// "stream": true and read SSE); a non-bool is a plain error.
+func streamEnabled(cfg config.Config) (bool, error) {
+	section, err := llmSection(cfg)
+	if err != nil || section == nil {
+		return true, err
+	}
+	v, present := section["stream"]
+	if !present || v == nil {
+		return true, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("llm: config key %q must be a bool, got %T", configKey+".stream", v)
+	}
+	return b, nil
 }
 
 func stringField(section map[string]any, key string) (string, error) {
@@ -176,6 +207,7 @@ type message struct {
 type chatRequest struct {
 	Model    string    `json:"model"`
 	Messages []message `json:"messages"`
+	Stream   bool      `json:"stream,omitempty"`
 }
 
 // chatResponse is the slice of the OpenAI-compatible response this
@@ -196,6 +228,10 @@ type chatResponse struct {
 // naming the endpoint and, for non-2xx, the status and response body —
 // enough for a verb to report a clear failure without this package
 // guessing at a clasterr code a later verb Matter hasn't chosen yet.
+//
+// By default the request carries "stream": true and a text/event-stream
+// reply is read as SSE (see readStream); an endpoint that answers with
+// plain JSON anyway, or llm.stream: false, takes the JSON path.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	var emit Observer
 	if o := observerFrom(ctx); o != nil {
@@ -212,6 +248,7 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
+		Stream: c.stream,
 	})
 	if err != nil {
 		return "", fmt.Errorf("llm: encoding request to %s: %w", endpoint, err)
@@ -230,12 +267,26 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	ok2xx := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if ok2xx {
+		if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil && mt == "text/event-stream" {
+			content, err := readStream(resp.Body, endpoint, emit)
+			if err != nil {
+				return "", err
+			}
+			if emit != nil {
+				emit(Event{Phase: PhaseDone})
+			}
+			return content, nil
+		}
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("llm: reading response from %s: %w", endpoint, err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !ok2xx {
 		return "", fmt.Errorf("llm: %s returned %s: %s", endpoint, resp.Status, strings.TrimSpace(string(respBody)))
 	}
 
