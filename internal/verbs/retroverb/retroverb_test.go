@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/procrastivity/clast/internal/clasterr"
+	"github.com/procrastivity/clast/internal/cliflags"
 	"github.com/procrastivity/clast/internal/config"
 	"github.com/procrastivity/clast/internal/entry"
+	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
 	"github.com/procrastivity/clast/internal/llm/llmtest"
+	"github.com/procrastivity/clast/internal/progress"
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
 	"github.com/procrastivity/clast/internal/verbs/retroverb"
 )
@@ -336,6 +339,62 @@ func TestSummarize_ManyEntries_AllSummarized(t *testing.T) {
 	}
 	if reqs := stub.Requests(); len(reqs) != n {
 		t.Errorf("stub captured %d requests, want %d", len(reqs), n)
+	}
+}
+
+// TestSummarize_NoReporter_Succeeds covers the nil-reporter path, which is
+// the e2e path: a context with no reporter must summarize as before.
+func TestSummarize_NoReporter_Succeeds(t *testing.T) {
+	stub := llmtest.New(t, "- Shipped: something")
+	t.Setenv("CLAST_LLM_API_KEY", "sk-test-key")
+	client, err := llm.NewClient(cfgWith(stub.URL(), "gpt-test"))
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+
+	result := oneEntryResult(journal.Day("2026-09-11"), "body")
+	summaries, stats, err := retroverb.Summarize(context.Background(), result, client, t.TempDir(), false)
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if len(summaries) != 1 || stats.Requests != 1 {
+		t.Errorf("got %d summaries, stats %+v; want 1 summary, 1 request", len(summaries), stats)
+	}
+}
+
+// TestSummarize_WithReporter_Succeeds runs Summarize with a live reporter
+// (stderr on /dev/null, a character device) over a cold run and a cached
+// run, under -race, to cover the reporter calls from the worker goroutines.
+func TestSummarize_WithReporter_Succeeds(t *testing.T) {
+	stub := llmtest.New(t, "- Shipped: something")
+	t.Setenv("CLAST_LLM_API_KEY", "sk-test-key")
+	t.Setenv("TERM", "xterm")
+	client, err := llm.NewClient(cfgWith(stub.URL(), "gpt-test"))
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer func() { _ = null.Close() }()
+	rep := progress.New(&iostreams.Streams{Err: null}, cliflags.Flags{})
+	if rep == nil {
+		t.Skip("/dev/null is not a character device here")
+	}
+	defer rep.Stop()
+	ctx := progress.WithReporter(context.Background(), rep)
+
+	result := oneEntryResult(journal.Day("2026-09-11"), "body")
+	cacheDir := t.TempDir()
+	for i, wantHits := range []int{0, 1} {
+		_, stats, err := retroverb.Summarize(ctx, result, client, cacheDir, false)
+		if err != nil {
+			t.Fatalf("Summarize (run %d): %v", i, err)
+		}
+		if stats.CacheHits != wantHits {
+			t.Errorf("run %d stats = %+v, want %d cache hit(s)", i, stats, wantHits)
+		}
 	}
 }
 
