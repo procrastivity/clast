@@ -13,6 +13,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/verbs/curate"
 	"github.com/procrastivity/clast/internal/verbs/dismiss"
 	wakeplumbing "github.com/procrastivity/clast/internal/verbs/wake"
@@ -62,6 +63,10 @@ func RunInteractive(ctx context.Context, streams *iostreams.Streams, root string
 	scanner := bufio.NewScanner(streams.In)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
+	// Status line and call phases while each draft runs; a nil reporter
+	// (progress off) makes every call below a no-op.
+	rep := progress.FromContext(ctx)
+
 	for i, row := range rows {
 		label := unprojectedLabel
 		if row.Item.Session.Project != nil {
@@ -72,7 +77,12 @@ func RunInteractive(ctx context.Context, streams *iostreams.Streams, root string
 			return summary, err
 		}
 
-		raw, err := Draft(ctx, root, cutoff, yesterday, row.Item, client)
+		rep.Status("drafting · " + label)
+		raw, err := Draft(llm.WithObserver(ctx, rep.Observer()), root, cutoff, yesterday, row.Item, client)
+		// Clear before any stderr write (the diagnostic below, or the draft
+		// and menu in disposition), so none lands on a half-drawn status
+		// line.
+		rep.Clear()
 		if err != nil {
 			if _, werr := fmt.Fprintf(streams.Err, "  draft generation failed: %v — skipping\n", err); werr != nil {
 				return summary, werr
@@ -151,7 +161,16 @@ func disposition(ctx context.Context, streams *iostreams.Streams, scanner *bufio
 				summary.Skipped++
 				return false, nil
 			}
-			revised, err := DraftWithFeedback(ctx, root, cutoff, yesterday, item, client, feedback)
+			label := unprojectedLabel
+			if item.Session.Project != nil {
+				label = item.Session.Project.Slug
+			}
+			rep := progress.FromContext(ctx)
+			rep.Status("redrafting · " + label)
+			revised, err := DraftWithFeedback(llm.WithObserver(ctx, rep.Observer()), root, cutoff, yesterday, item, client, feedback)
+			// Clear before the diagnostic below or the next loop
+			// iteration's draft reprint writes to stderr.
+			rep.Clear()
 			if err != nil {
 				if _, werr := fmt.Fprintf(streams.Err, "  draft generation failed: %v — skipping\n", err); werr != nil {
 					return false, werr
