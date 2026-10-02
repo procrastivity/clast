@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -30,13 +31,23 @@ const APIKeyEnvVar = "CLAST_LLM_API_KEY"
 // configKey is the tool-config section V31 carries the endpoint under.
 const configKey = "llm"
 
-// DefaultTimeout bounds one Complete call end-to-end (connect through
-// response body fully read). 30s: generous enough for a real completion
-// (retro's summaries and wake's drafts are short generations, not
-// long-form), short enough that a verb never hangs a terminal
-// indefinitely on a stalled endpoint. Recorded as a wip finding per the
-// step brief — no SURFACE clause fixes this number.
-const DefaultTimeout = 30 * time.Second
+// FirstByteTimeout bounds the wait from sending the request to receiving
+// the response headers. 30s: a model may think a while before it answers,
+// but an endpoint silent for this long is down or unreachable.
+const FirstByteTimeout = 30 * time.Second
+
+// IdleTimeout bounds the silence between two reads of the response body.
+// A long stream is never cut while data keeps arriving; a stream that goes
+// quiet for this long fails as stalled.
+const IdleTimeout = 30 * time.Second
+
+// MaxDuration bounds one Complete call end-to-end (connect through
+// response body fully read), a backstop against a stream that trickles
+// forever.
+const MaxDuration = 5 * time.Minute
+
+// errStalled is the per-call cancel cause the idle timer sets.
+var errStalled = errors.New("stalled")
 
 // chatCompletionsPath is the one endpoint path V12 names, joined onto
 // llm.base_url.
@@ -51,6 +62,10 @@ type Client struct {
 	apiKey  string
 	stream  bool
 	http    *http.Client
+
+	firstByte time.Duration
+	idle      time.Duration
+	max       time.Duration
 }
 
 // NewClient resolves llm.base_url and llm.model from cfg (SURFACE V31)
@@ -97,14 +112,45 @@ func NewClient(cfg config.Config) (*Client, error) {
 			fmt.Sprintf("%s is not set", APIKeyEnvVar))
 	}
 
-	return &Client{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		model:   model,
-		apiKey:  apiKey,
-		stream:  stream,
-		http:    &http.Client{Timeout: DefaultTimeout},
-	}, nil
+	c := &Client{
+		baseURL:   strings.TrimSuffix(baseURL, "/"),
+		model:     model,
+		apiKey:    apiKey,
+		stream:    stream,
+		firstByte: FirstByteTimeout,
+		idle:      IdleTimeout,
+		max:       MaxDuration,
+	}
+	c.buildHTTP()
+	return c, nil
 }
+
+// buildHTTP (re)creates the http client with a transport whose
+// ResponseHeaderTimeout is the first-byte limit. There is no
+// http.Client.Timeout: it would cut a long stream mid-body.
+func (c *Client) buildHTTP() {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = c.firstByte
+	c.http = &http.Client{Transport: tr}
+}
+
+// idleReader wraps a response body and resets timer on every Read that
+// returns data.
+type idleReader struct {
+	rc    io.ReadCloser
+	timer *time.Timer
+	idle  time.Duration
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	n, err := r.rc.Read(p)
+	if n > 0 {
+		r.timer.Reset(r.idle)
+	}
+	return n, err
+}
+
+func (r *idleReader) Close() error { return r.rc.Close() }
 
 // Model returns the resolved llm.model this Client was constructed with
 // (SURFACE V31) — exported for a caller that needs the model string itself
@@ -232,7 +278,13 @@ type chatResponse struct {
 // By default the request carries "stream": true and a text/event-stream
 // reply is read as SSE (see readStream); an endpoint that answers with
 // plain JSON anyway, or llm.stream: false, takes the JSON path.
+//
+// Three limits apply instead of one whole-request timeout: FirstByteTimeout
+// (request sent to headers), IdleTimeout (silence between body reads) and
+// MaxDuration (the whole call). A parent context cancel returns the
+// parent's error unchanged.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	parent := ctx
 	var emit Observer
 	if o := observerFrom(ctx); o != nil {
 		emit = serialize(o)
@@ -241,6 +293,33 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 	}
 
 	endpoint := c.baseURL + chatCompletionsPath
+
+	totalCtx, cancelTotal := context.WithTimeout(ctx, c.max)
+	defer cancelTotal()
+	callCtx, cancel := context.WithCancelCause(totalCtx)
+	defer cancel(nil)
+	ctx = callCtx
+
+	// classify maps a failure to the idle or total-cap error when that
+	// limit ended the call; a parent cancel and every other error pass
+	// through (nil return). Only a cancellation-shaped err qualifies, so a
+	// malformed-stream error is never relabeled because a timer fired just
+	// after it.
+	classify := func(err error) error {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errStalled) {
+			return nil
+		}
+		if parent.Err() != nil {
+			return nil
+		}
+		if errors.Is(context.Cause(callCtx), errStalled) {
+			return fmt.Errorf("llm: %s stalled: no data for %s", endpoint, c.idle)
+		}
+		if totalCtx.Err() != nil {
+			return fmt.Errorf("llm: %s exceeded %s", endpoint, c.max)
+		}
+		return nil
+	}
 
 	reqBody, err := json.Marshal(chatRequest{
 		Model: c.model,
@@ -263,15 +342,27 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if cerr := classify(err); cerr != nil {
+			return "", cerr
+		}
 		return "", fmt.Errorf("llm: calling %s: %w", endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// The idle timer starts once the headers are in, and every Read that
+	// returns data resets it. Stopped on every return path.
+	idleTimer := time.AfterFunc(c.idle, func() { cancel(errStalled) })
+	defer idleTimer.Stop()
+	body := &idleReader{rc: resp.Body, timer: idleTimer, idle: c.idle}
+
 	ok2xx := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if ok2xx {
 		if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil && mt == "text/event-stream" {
-			content, err := readStream(resp.Body, endpoint, emit)
+			content, err := readStream(body, endpoint, emit)
 			if err != nil {
+				if cerr := classify(err); cerr != nil {
+					return "", cerr
+				}
 				return "", err
 			}
 			if emit != nil {
@@ -281,8 +372,11 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		}
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(body)
 	if err != nil {
+		if cerr := classify(err); cerr != nil {
+			return "", cerr
+		}
 		return "", fmt.Errorf("llm: reading response from %s: %w", endpoint, err)
 	}
 
