@@ -13,6 +13,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/retrocache"
 	"github.com/procrastivity/clast/internal/surface"
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
@@ -98,7 +99,12 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 					return clasterr.New("validation.config", fmt.Sprintf("resolving retro cache directory: %v", err))
 				}
 
-				summaries, stats, err = Summarize(ctx, result, client, cacheDir, refresh)
+				// Counter on stderr while the summaries run; nil (a no-op)
+				// when stderr is not a terminal or --json is set.
+				rep := progress.New(streams, flags)
+				defer rep.Stop()
+
+				summaries, stats, err = Summarize(progress.WithReporter(ctx, rep), result, client, cacheDir, refresh)
 				if err != nil {
 					return err
 				}

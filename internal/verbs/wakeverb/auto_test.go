@@ -3,16 +3,19 @@ package wakeverb_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/procrastivity/clast/internal/cliflags"
 	"github.com/procrastivity/clast/internal/entry"
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/journal/journaltest"
 	"github.com/procrastivity/clast/internal/llm"
 	"github.com/procrastivity/clast/internal/llm/llmtest"
+	"github.com/procrastivity/clast/internal/progress"
 	wakeplumbing "github.com/procrastivity/clast/internal/verbs/wake"
 	"github.com/procrastivity/clast/internal/verbs/wakeverb"
 )
@@ -242,6 +245,52 @@ func TestRunAuto_DraftFailure_PrintsDiagnosticAndCountsSeparately(t *testing.T) 
 	item := findItem(t, fx.Root(), key)
 	if item.State() != journal.StateCaptured {
 		t.Errorf("session state = %q, want untouched captured", item.State())
+	}
+}
+
+// TestRunAuto_WithReporter_DiagnosticStillPrints runs RunAuto with a live
+// reporter (a character device standing in for the terminal, under -race
+// for the observer's calls from the HTTP goroutines) over a failing draft:
+// the run, the summary, and the stderr diagnostic on the separate Err
+// stream must match the reporter-off case.
+func TestRunAuto_WithReporter_DiagnosticStillPrints(t *testing.T) {
+	fx := journaltest.New(t)
+	key := journal.SessionKey{Harness: "claude", NativeID: "draft-fail-rep"}
+	started := time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC)
+	fx.Captured("2026-09-11", key, journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"}, started).
+		WithTranscript("2026-09-11", key, []byte(`{"type":"user","uuid":"u1","message":{"content":"hi"}}`+"\n"))
+
+	stub := llmtest.New(t, "unused")
+	stub.Fail(500, `{"error":"boom"}`)
+	client := mustClient(t, stub.URL())
+	t.Setenv("TERM", "xterm")
+
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer func() { _ = null.Close() }()
+	rep := progress.New(&iostreams.Streams{Err: null}, cliflags.Flags{})
+	if rep == nil {
+		t.Skip("/dev/null is not a character device here")
+	}
+	defer rep.Stop()
+	ctx := progress.WithReporter(context.Background(), rep)
+
+	rows, err := wakeplumbingRun(t, fx.Root())
+	if err != nil {
+		t.Fatalf("wake.Run: %v", err)
+	}
+	streams, errBuf := autoStreams()
+	summary, err := wakeverb.RunAuto(ctx, streams, fx.Root(), mustCutoff(t), journal.Day("2026-09-10"), rows, client, 60)
+	if err != nil {
+		t.Fatalf("RunAuto: %v", err)
+	}
+	if summary.SkippedDraftFailed != 1 {
+		t.Fatalf("summary = %+v, want 1 draft-failed skip", summary)
+	}
+	if !strings.Contains(errBuf.String(), "draft generation failed") {
+		t.Errorf("stderr = %q, want the draft-generation-failed diagnostic", errBuf.String())
 	}
 }
 

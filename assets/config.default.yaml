@@ -13,3 +13,4 @@ wake:
 llm:
   base_url: ""             # OpenAI-compatible endpoint (V12)
   model: ""
+  stream: true             # set false for endpoints that break on SSE

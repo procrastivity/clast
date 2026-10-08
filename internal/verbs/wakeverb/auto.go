@@ -9,6 +9,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/verbs/curate"
 	wakeplumbing "github.com/procrastivity/clast/internal/verbs/wake"
 )
@@ -43,8 +44,20 @@ func RunAuto(ctx context.Context, streams *iostreams.Streams, root string, cutof
 	var summary Summary
 	summary.Considered = len(rows)
 
-	for _, row := range rows {
-		raw, err := Draft(ctx, root, cutoff, yesterday, row.Item, client)
+	// Status line and call phases while each draft runs; a nil reporter
+	// (progress off) makes every call below a no-op.
+	rep := progress.FromContext(ctx)
+
+	for i, row := range rows {
+		project := unprojectedLabel
+		if row.Item.Session.Project != nil {
+			project = row.Item.Session.Project.Slug
+		}
+		rep.Status(fmt.Sprintf("drafting %d/%d · %s", i+1, len(rows), project))
+		raw, err := Draft(llm.WithObserver(ctx, rep.Observer()), root, cutoff, yesterday, row.Item, client)
+		// Clear before any stderr write, so the diagnostic below never
+		// lands on a half-drawn status line.
+		rep.Clear()
 		if err != nil {
 			// A draft that fails to generate is skipped, not retried —
 			// there is no reviewer to ask in Auto mode (the flow's own

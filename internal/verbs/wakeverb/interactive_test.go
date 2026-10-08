@@ -7,15 +7,20 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/procrastivity/clast/internal/cliflags"
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/journal/journaltest"
 	"github.com/procrastivity/clast/internal/llm/llmtest"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/verbs/wakeverb"
 )
 
@@ -27,6 +32,9 @@ import (
 // exactly that: a first draft, then a distinguishable regenerated one.
 type sequencedStub struct {
 	responses []string
+	// failFrom, when > 0, answers every request from that zero-based index
+	// on with a 500.
+	failFrom int
 
 	srv  *httptest.Server
 	mu   sync.Mutex
@@ -76,7 +84,12 @@ func (s *sequencedStub) handle(w http.ResponseWriter, r *http.Request) {
 	if idx < len(s.responses) {
 		resp = s.responses[idx]
 	}
+	failing := s.failFrom > 0 && idx >= s.failFrom
 	s.mu.Unlock()
+	if failing {
+		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+		return
+	}
 
 	var out struct {
 		Choices []struct {
@@ -484,4 +497,63 @@ func TestRunInteractive_Promotion_FoldsSectionIntoEntry(t *testing.T) {
 		t.Errorf("entry body = %q, want the promoted Decision section", e.Body)
 	}
 	_ = key
+}
+
+// TestRunInteractive_WithReporter_OutputUnchanged runs the Edit flow, and
+// an Edit whose regeneration fails, with a live reporter (a character
+// device standing in for the terminal, under -race for the observer's calls
+// from the HTTP goroutines): the draft, menu, and diagnostic bytes on the
+// separate Err stream must match the reporter-off run exactly.
+func TestRunInteractive_WithReporter_OutputUnchanged(t *testing.T) {
+	t.Setenv("TERM", "xterm")
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer func() { _ = null.Close() }()
+	rep := progress.New(&iostreams.Streams{Err: null}, cliflags.Flags{})
+	if rep == nil {
+		t.Skip("/dev/null is not a character device here")
+	}
+	defer rep.Stop()
+
+	stubPort := regexp.MustCompile(`127\.0\.0\.1:\d+`)
+	run := func(ctx context.Context, failRedraft bool) (string, wakeverb.Summary) {
+		started := time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC)
+		root, _ := oneSessionFixture(t, "int-rep", started)
+		rows, err := wakeplumbingRun(t, root)
+		if err != nil {
+			t.Fatalf("wake.Run: %v", err)
+		}
+		stub := newSequencedStub(t, interactiveDraft, editedWakeDraft)
+		if failRedraft {
+			stub.failFrom = 1
+		}
+		client := mustClient(t, stub.URL())
+		errBuf := &bytes.Buffer{}
+		streams := &iostreams.Streams{In: strings.NewReader("2\nshorter\n4\n"), Out: &bytes.Buffer{}, Err: errBuf}
+		summary, err := wakeverb.RunInteractive(ctx, streams, root, mustCutoff(t), journal.Day("2026-09-10"), rows, client, "framework")
+		if err != nil {
+			t.Fatalf("RunInteractive: %v", err)
+		}
+		// Each run has its own stub server; mask the port in diagnostics.
+		return stubPort.ReplaceAllString(errBuf.String(), "127.0.0.1:PORT"), summary
+	}
+
+	for _, failRedraft := range []bool{false, true} {
+		want, wantSum := run(context.Background(), failRedraft)
+		got, gotSum := run(progress.WithReporter(context.Background(), rep), failRedraft)
+		if got != want {
+			t.Errorf("failRedraft=%v: stderr with reporter differs:\n got: %q\nwant: %q", failRedraft, got, want)
+		}
+		if !reflect.DeepEqual(gotSum, wantSum) {
+			t.Errorf("failRedraft=%v: summary = %+v, want %+v", failRedraft, gotSum, wantSum)
+		}
+		if failRedraft && !strings.Contains(got, "draft generation failed") {
+			t.Errorf("stderr = %q, want the draft-generation-failed diagnostic", got)
+		}
+		if strings.Contains(got, "\x1b[K") || strings.Contains(got, "drafting ·") {
+			t.Errorf("stderr = %q, want no status text in the verb's own stream", got)
+		}
+	}
 }

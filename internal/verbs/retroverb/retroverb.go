@@ -32,6 +32,7 @@ import (
 	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/prompt"
 	"github.com/procrastivity/clast/internal/retrocache"
 	retroplumbing "github.com/procrastivity/clast/internal/verbs/retro"
@@ -132,6 +133,14 @@ func Summarize(ctx context.Context, result retroplumbing.Result, client *llm.Cli
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// The status line shows a done/total counter only: four workers run at
+	// once, so attaching the reporter's phase observer would mix their
+	// phases. A nil reporter (progress off) makes every call a no-op.
+	rep := progress.FromContext(ctx)
+	defer rep.Clear()
+	total := len(jobs)
+	rep.Status(statusLabel(0, total, 0))
+
 	var (
 		mu        sync.Mutex
 		summaries = map[string]string{}
@@ -161,6 +170,9 @@ func Summarize(ctx context.Context, result retroplumbing.Result, client *llm.Cli
 					summaries[j.row.Item.Key.DirName()] = text
 					stats.Requests++
 				}
+				if err == nil {
+					rep.Status(statusLabel(stats.CacheHits+stats.Requests, total, stats.CacheHits))
+				}
 				mu.Unlock()
 			}
 		}()
@@ -183,6 +195,16 @@ dispatch:
 		return nil, stats, err
 	}
 	return summaries, stats, nil
+}
+
+// statusLabel renders Summarize's status line text. The cached part is
+// omitted while no job has been served from the cache.
+func statusLabel(done, total, cached int) string {
+	label := fmt.Sprintf("summarizing %d/%d", done, total)
+	if cached > 0 {
+		label += fmt.Sprintf(" · %d cached", cached)
+	}
+	return label
 }
 
 // summarizeConcurrency caps Summarize's in-flight endpoint requests: enough

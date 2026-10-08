@@ -13,6 +13,7 @@ import (
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/llm"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/query"
 	"github.com/procrastivity/clast/internal/surface"
 	wakeplumbing "github.com/procrastivity/clast/internal/verbs/wake"
@@ -110,6 +111,13 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Status line on stderr while drafts run; nil (a no-op) when
+			// stderr is not a terminal or --json is set. Put in ctx before
+			// the mode branch so RunAuto and RunInteractive both read it.
+			rep := progress.New(streams, flags)
+			defer rep.Stop()
+			ctx = progress.WithReporter(ctx, rep)
 
 			var summary Summary
 			if auto {
