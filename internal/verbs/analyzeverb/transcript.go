@@ -430,7 +430,10 @@ func GatherTranscript(sessionDir string, sess Session, agentID string) (Transcri
 		return page, unavailable("listing subagents: %v", err)
 	}
 
-	path := filepath.Join(sessionDir, "transcript.jsonl")
+	path, err := journal.TranscriptPathByDir(sessionDir, rec.Transcript.ArtifactName())
+	if err != nil {
+		return page, unavailable("%v", err)
+	}
 	if agentID == "" {
 		page.Subagents = subs
 	} else {

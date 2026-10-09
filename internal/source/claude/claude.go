@@ -70,13 +70,33 @@ func (s *Source) Name() string { return Name }
 // Model implements source.Source: claude is file-tail (M13).
 func (s *Source) Model() source.StorageModel { return source.FileTail }
 
+// Present implements source.Presence: claude's storage is the projects/
+// tree Discover enumerates, so "present" means exactly that root exists
+// and is readable — the same directory read Discover's first step makes,
+// keeping the absent-vs-present verdict identical between the two. The
+// error is returned unwrapped: os.PathError already names the probed
+// root and the reason, which is what capture.source-unavailable prints
+// verbatim.
+func (s *Source) Present(_ context.Context) error {
+	root, err := s.root()
+	if err != nil {
+		return err
+	}
+	if _, err := os.ReadDir(filepath.Join(root, "projects")); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Discover enumerates every session transcript under
 // <configDir>/projects/<cwd-slug>/<uuid>.jsonl. The native id is the
 // file's base name — Claude Code names the file by its session uuid, and
 // the id is also on every entry as sessionId, but discovery must not
 // depend on parsing (M12 separates the duties), so the filename is the
 // enumeration-time id. A missing projects/ directory means the harness
-// has no sessions here: nil, nil, nil. Subagent sidecars live under a
+// has no sessions here: nil, nil, nil; a projects/ directory that
+// exists but cannot be read is a source-level error, matching Present's
+// verdict on the same root. Subagent sidecars live under a
 // <uuid>/ directory, not as loose .jsonl files, so they never enumerate
 // as sessions.
 func (s *Source) Discover(_ context.Context) ([]source.Discovered, []source.Diagnostic, error) {
@@ -90,7 +110,13 @@ func (s *Source) Discover(_ context.Context) ([]source.Discovered, []source.Diag
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, []source.Diagnostic{{Path: projectsDir, Err: err}}, nil
+		// The root exists but cannot be enumerated: a source-level
+		// failure, not a per-item skip — the uniform rule is Discover
+		// error = could not enumerate at all, Diagnostic = items
+		// skipped. Returned unwrapped like Present's probe: os.PathError
+		// already names the root and the reason, which is what the
+		// sweep's "capture: <source>: <err>" line prints verbatim.
+		return nil, nil, err
 	}
 
 	var found []source.Discovered

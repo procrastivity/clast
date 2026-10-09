@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/procrastivity/clast/internal/harness/claudecode"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/journal/journaltest"
 	"github.com/procrastivity/clast/internal/llm/llmtest"
@@ -2059,6 +2060,324 @@ func TestBreadcrumb_UnregisteredCwd_RefusalEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(envelope.Error.Message, "--global") || !strings.Contains(envelope.Error.Message, "clast init") {
 		t.Errorf("message = %q, want it to name both --global and `clast init`", envelope.Error.Message)
+	}
+}
+
+// --- plumbing: `clast plumbing capture` (SURFACE V13) ---
+
+// captureEnv returns the env capture's e2e cases share: a private
+// journal root, an empty config home, and claudeHome as the harness's
+// own CLAUDE_CONFIG_DIR seam (hermeticEnv does not default it — without
+// it a test would read the host's real ~/.claude).
+func captureEnv(t *testing.T, claudeHome string) []string {
+	t.Helper()
+	return []string{
+		"CLAST_JOURNAL_DIR=" + t.TempDir(),
+		"XDG_CONFIG_HOME=" + t.TempDir(),
+		"CLAUDE_CONFIG_DIR=" + claudeHome,
+	}
+}
+
+// writeClaudeHome builds a minimal claude config dir holding one
+// session — enough for discovery; capture's own package tests pin the
+// fact extraction.
+func writeClaudeHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	slug := filepath.Join(home, "projects", "-tmp-demo")
+	if err := os.MkdirAll(slug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entry := `{"type":"user","uuid":"u1","sessionId":"s1","cwd":"/tmp/demo","timestamp":"2026-09-01T10:00:00.000Z","message":{"role":"user","content":"hi"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(slug, "aaaaaaaa-1111-4111-8111-111111111111.jsonl"), []byte(entry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// unreadableClaudeHome builds a claude config dir whose projects/ root
+// exists but cannot be enumerated — it is a regular file, so ReadDir
+// fails with a non-NotExist error. Distinct from the absent case (no
+// projects/ at all), which stays quiet.
+func unreadableClaudeHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "projects"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// TestPlumbingCapture_SweepDisclosesSourceFailure drives a bare sweep
+// against unreadable storage: the source-level failure is disclosed on
+// stderr and in --json's "unavailable" rows, and the run still exits 0 —
+// a source outage is never a failed run (V13).
+func TestPlumbingCapture_SweepDisclosesSourceFailure(t *testing.T) {
+	env := captureEnv(t, unreadableClaudeHome(t))
+
+	r := run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing capture: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q, want no captured rows", r.stdout)
+	}
+	if !strings.HasPrefix(r.stderr, "capture: claude: ") || !strings.Contains(r.stderr, "projects") {
+		t.Errorf("stderr = %q, want one \"capture: claude: <err>\" line naming the unreadable root", r.stderr)
+	}
+
+	r = run(t, env, "plumbing", "capture", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing capture --json: exit=%d, want 0; stderr=%q", r.exitCode, r.stderr)
+	}
+	var payload struct {
+		Captured    []json.RawMessage `json:"captured"`
+		Unavailable []struct {
+			Source string `json:"source"`
+			Error  string `json:"error"`
+		} `json:"unavailable"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &payload); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(payload.Captured) != 0 {
+		t.Errorf("captured = %s, want empty", payload.Captured)
+	}
+	if len(payload.Unavailable) != 1 || payload.Unavailable[0].Source != "claude" ||
+		!strings.Contains(payload.Unavailable[0].Error, "projects") {
+		t.Errorf("unavailable = %+v, want one claude row naming the failure", payload.Unavailable)
+	}
+}
+
+// TestPlumbingCapture_ExplicitUnavailable pins the absent-vs-unreadable
+// distinction on the explicit path: both are capture.source-unavailable
+// exit 1 naming the source and the probed root, while a bare sweep over
+// the same absent storage stays quiet.
+func TestPlumbingCapture_ExplicitUnavailable(t *testing.T) {
+	// Absent: a config dir with no projects/ root at all.
+	env := captureEnv(t, t.TempDir())
+
+	r := run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || r.stdout != "" || r.stderr != "" {
+		t.Fatalf("bare sweep on absent storage: exit=%d stdout=%q stderr=%q, want quiet 0", r.exitCode, r.stdout, r.stderr)
+	}
+	r = run(t, env, "plumbing", "capture", "--harness", "claude", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("explicit capture on absent storage: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	envelope := parseErrorEnvelope(t, r.stderr)
+	if envelope.Error.Code != "capture.source-unavailable" {
+		t.Errorf("error code = %q, want capture.source-unavailable", envelope.Error.Code)
+	}
+	if !strings.Contains(envelope.Error.Message, `"claude"`) || !strings.Contains(envelope.Error.Message, "projects") {
+		t.Errorf("message %q should name the source and the probed root", envelope.Error.Message)
+	}
+
+	// Unreadable: projects/ exists but cannot be enumerated.
+	env = captureEnv(t, unreadableClaudeHome(t))
+	r = run(t, env, "plumbing", "capture", "--harness", "claude", "--json")
+	if r.exitCode != 1 {
+		t.Fatalf("explicit capture on unreadable storage: exit=%d, want 1; stderr=%q", r.exitCode, r.stderr)
+	}
+	if code := parseErrorEnvelope(t, r.stderr).Error.Code; code != "capture.source-unavailable" {
+		t.Errorf("error code = %q, want capture.source-unavailable", code)
+	}
+}
+
+// TestPlumbingCapture_StoreWriteFailureIsInternal drives a sweep whose
+// discovery succeeds but whose first store write fails — journal.json
+// poisoned as a symlink to itself fails EnsureRoot's marker Stat with a
+// non-NotExist error — and confirms the fatal seam is classified
+// internal.*, exit 4, never the chassis's catch-all usage exit.
+func TestPlumbingCapture_StoreWriteFailureIsInternal(t *testing.T) {
+	journalDir := t.TempDir()
+	if err := os.Symlink("journal.json", filepath.Join(journalDir, "journal.json")); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir,
+		"XDG_CONFIG_HOME=" + t.TempDir(),
+		"CLAUDE_CONFIG_DIR=" + writeClaudeHome(t),
+	}
+
+	r := run(t, env, "plumbing", "capture", "--json")
+	if r.exitCode != 4 {
+		t.Fatalf("plumbing capture with a poisoned store root: exit=%d, want 4 (internal); stderr=%q", r.exitCode, r.stderr)
+	}
+	if code := parseErrorEnvelope(t, r.stderr).Error.Code; code != "internal.capture" {
+		t.Errorf("error code = %q, want internal.capture", code)
+	}
+}
+
+// TestPlumbingCapture_SecondSweepIsQuiet drives the no-op sweep through
+// the binary: a second bare capture over unchanged transcripts is
+// silent on both streams and leaves the auto-dismissed session's
+// curation.json untouched — the quietness hook and cron paths depend on
+// (V13). The second run is fed bytes on stdin besides: capture never
+// reads it, so the sweep stays non-interactive under a hooked-up stdin.
+func TestPlumbingCapture_SecondSweepIsQuiet(t *testing.T) {
+	journalDir := t.TempDir()
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir,
+		"XDG_CONFIG_HOME=" + t.TempDir(),
+		"CLAUDE_CONFIG_DIR=" + writeClaudeHome(t),
+	}
+
+	r := run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 ||
+		r.stdout != "captured claude-aaaaaaaa-1111-4111-8111-111111111111 · dismissed auto:no-op\n" {
+		t.Fatalf("first sweep: exit=%d stdout=%q, want the one captured auto-dismissed line; stderr=%q",
+			r.exitCode, r.stdout, r.stderr)
+	}
+	// The fixture's single user line is not substantive: curation.json
+	// landed as the auto:no-op dismissal. Its bytes must survive a
+	// no-op sweep.
+	matches, err := filepath.Glob(filepath.Join(journalDir, "sessions", "*",
+		"claude-aaaaaaaa-1111-4111-8111-111111111111", "curation.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("auto-dismissed curation.json: matches=%v err=%v", matches, err)
+	}
+	before, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r = runWithStdin(t, env, "bytes capture must never read\n", "plumbing", "capture")
+	if r.exitCode != 0 || r.stdout != "" || r.stderr != "" {
+		t.Fatalf("second sweep: exit=%d stdout=%q stderr=%q, want quiet 0", r.exitCode, r.stdout, r.stderr)
+	}
+	after, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("no-op sweep rewrote curation.json: %s -> %s", before, after)
+	}
+}
+
+// TestPlumbingCapture_ExcludedSourceKeepsReaders pins reader
+// independence end to end: with capture.exclude: [claude] configured
+// the sweep skips the source quietly, while every reader surface —
+// sessions, show --transcript, analyze --out — still serves the
+// previously captured artifacts. Exclusion is a sweep-input decision
+// only; nothing in the read path consults it.
+func TestPlumbingCapture_ExcludedSourceKeepsReaders(t *testing.T) {
+	journalDir := t.TempDir()
+	configHome := t.TempDir()
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir,
+		"XDG_CONFIG_HOME=" + configHome,
+		"CLAUDE_CONFIG_DIR=" + writeClaudeHome(t),
+	}
+	const nativeID = "aaaaaaaa-1111-4111-8111-111111111111"
+
+	r := run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || !strings.Contains(r.stdout, "captured claude-"+nativeID) {
+		t.Fatalf("first sweep: exit=%d stdout=%q; stderr=%q", r.exitCode, r.stdout, r.stderr)
+	}
+
+	if err := os.MkdirAll(filepath.Join(configHome, "clast"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configHome, "clast", "config.yaml"),
+		[]byte("capture:\n  exclude: [claude]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The excluded sweep skips quietly: no rows, no disclosures, exit 0.
+	r = run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || r.stdout != "" || r.stderr != "" {
+		t.Fatalf("excluded sweep: exit=%d stdout=%q stderr=%q, want quiet 0", r.exitCode, r.stdout, r.stderr)
+	}
+
+	// sessions still lists the captured session.
+	r = run(t, env, "plumbing", "sessions", "--since", "all", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing sessions under exclusion: exit=%d; stderr=%q", r.exitCode, r.stderr)
+	}
+	var sessions struct {
+		Sessions []struct {
+			SessionID string `json:"session_id"`
+			State     string `json:"state"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &sessions); err != nil {
+		t.Fatalf("sessions --json stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].SessionID != nativeID {
+		t.Fatalf("sessions = %+v, want the one captured claude session", sessions.Sessions)
+	}
+	if sessions.Sessions[0].State != "dismissed" {
+		t.Errorf("state = %q, want dismissed (auto:no-op) — exclusion must not disturb curation",
+			sessions.Sessions[0].State)
+	}
+
+	// show --transcript still renders through the format-keyed registry
+	// lookup — no availability check sits in the read path.
+	r = run(t, env, "plumbing", "show", "claude-"+nativeID, "--transcript", "--json")
+	if r.exitCode != 0 {
+		t.Fatalf("plumbing show --transcript under exclusion: exit=%d; stderr=%q", r.exitCode, r.stderr)
+	}
+	var transcript struct {
+		Turns []struct {
+			Text string `json:"text"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &transcript); err != nil {
+		t.Fatalf("show --transcript stdout is not one JSON value: %v; stdout=%q", err, r.stdout)
+	}
+	if len(transcript.Turns) != 1 || transcript.Turns[0].Text != "hi" {
+		t.Fatalf("turns = %+v, want the fixture's one rendered turn", transcript.Turns)
+	}
+
+	// analyze --out still renders the window containing the session.
+	// (2026-09-01T10:00Z lands on 2026-09-01 under any 04:00-style cutoff
+	// — the timestamp's own zone, not the host's, derives the day.)
+	out := filepath.Join(t.TempDir(), "explorer.html")
+	r = run(t, env, "analyze", "2026-09-01", "--since", "-0d", "--out", out)
+	if r.exitCode != 0 {
+		t.Fatalf("analyze --out under exclusion: exit=%d; stderr=%q", r.exitCode, r.stderr)
+	}
+	page, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), "s-"+nativeID) {
+		t.Errorf("analyze page does not carry the excluded source's session %q", nativeID)
+	}
+}
+
+// TestSessionStartShim_DiscardsAndExitsZero runs the V33 SessionStart
+// shim's exact bytes through sh with the built binary on PATH: whether
+// the sweep has work or nothing at all, the hook prints nothing and
+// reports success — clast can never fail or pollute a session start.
+// The shim backgrounds capture, so the assertions cover the shim's own
+// contract only; the captured session landing in the journal is the
+// sweep tests' business.
+func TestSessionStartShim_DiscardsAndExitsZero(t *testing.T) {
+	for _, claudeHome := range []string{t.TempDir(), writeClaudeHome(t)} {
+		// A minimal, fully controlled env: PATH names the built binary's
+		// directory exactly (no host PATH first — `command -v clast`
+		// must find this build), and every seam capture can read points
+		// at a temp dir.
+		env := []string{
+			"PATH=" + filepath.Dir(binPath),
+			"HOME=" + t.TempDir(),
+			"CLAST_JOURNAL_DIR=" + t.TempDir(),
+			"XDG_CONFIG_HOME=" + t.TempDir(),
+			"CLAUDE_CONFIG_DIR=" + claudeHome,
+		}
+		cmd := exec.Command("sh", "-c", claudecode.ShimCommand)
+		cmd.Env = env
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("SessionStart shim (claudeHome=%s): %v; stderr=%q", claudeHome, err, stderr.String())
+		}
+		if stdout.String() != "" || stderr.String() != "" {
+			t.Errorf("shim emitted output (claudeHome=%s): stdout=%q stderr=%q",
+				claudeHome, stdout.String(), stderr.String())
+		}
 	}
 }
 
@@ -5273,7 +5592,10 @@ func wakeSessionWithTranscript(t *testing.T, root, shard string, key journal.Ses
 	}); err != nil {
 		t.Fatalf("wakeSessionWithTranscript: WriteSession(%s): %v", key.DirName(), err)
 	}
-	path := journal.TranscriptPath(root, shard, key)
+	path, err := journal.TranscriptPath(root, shard, key, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}

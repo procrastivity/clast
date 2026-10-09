@@ -2,8 +2,10 @@ package claude
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/procrastivity/clast/internal/source"
@@ -67,6 +69,26 @@ func TestDiscoverMissingRootIsEmpty(t *testing.T) {
 	}
 }
 
+func TestDiscoverUnreadableRootIsError(t *testing.T) {
+	// projects/ exists but is a regular file: the storage root cannot be
+	// enumerated — a real Discover error (source-level failure), not the
+	// quiet-absent nil,nil,nil and never a downgraded per-item diag.
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "projects"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, diags, err := NewAt(home).Discover(context.Background())
+	if err == nil {
+		t.Fatal("unreadable projects/ root: Discover returned nil error")
+	}
+	if len(found) != 0 || len(diags) != 0 {
+		t.Errorf("found=%v diags=%v, want both empty on a source-level failure", found, diags)
+	}
+	if !strings.Contains(err.Error(), "projects") {
+		t.Errorf("error %q should name the root it could not enumerate", err)
+	}
+}
+
 func TestCorrelateReadsCWDFromTranscript(t *testing.T) {
 	dir, diags, err := fixtureSource().Correlate(context.Background(), discoveredByID(t, simpleID))
 	if err != nil || len(diags) != 0 {
@@ -120,5 +142,24 @@ func TestScanTranscriptFacts(t *testing.T) {
 				t.Errorf("timestamps: started=%v last=%v", f.StartedAt, f.LastActiveAt)
 			}
 		})
+	}
+}
+
+// TestPresentFollowsStorageRoot pins the source.Presence probe: present
+// iff <configDir>/projects exists and is readable — the same root
+// Discover enumerates. The error names the probed root verbatim (what
+// capture.source-unavailable prints).
+func TestPresentFollowsStorageRoot(t *testing.T) {
+	if err := fixtureSource().Present(context.Background()); err != nil {
+		t.Errorf("Present on fixture home: %v", err)
+	}
+
+	// An empty config dir — no projects/ — is absent.
+	err := NewAt(t.TempDir()).Present(context.Background())
+	if err == nil {
+		t.Fatal("Present on empty config dir returned nil")
+	}
+	if !strings.Contains(err.Error(), "projects") {
+		t.Errorf("Present error %q does not name the probed root", err)
 	}
 }

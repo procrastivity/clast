@@ -1,0 +1,124 @@
+{
+  "v": 17,
+  "id": "T-01a050ef-71e8-74bc-9b63-c0ad20e3a068",
+  "env": {
+    "initial": {
+      "trees": [
+        {
+          "uri": "file:///tmp/claude-1000/-home-dev-Code-terminal-multiplexers/0e7b572a-a744-475d-a93c-143b218b3a0f/scratchpad/ampb1/work1",
+          "displayName": "work1"
+        }
+      ],
+      "platform": {
+        "os": "linux",
+        "client": "CLI Execute Mode",
+        "osVersion": "6.8.0-136-generic",
+        "clientType": "cli",
+        "webBrowser": false,
+        "clientVersion": "0.0.1788048110-g570348",
+        "installationID": "11111111-2222-4333-8444-555555555555",
+        "cpuArchitecture": "x64",
+        "deviceFingerprint": "SCRUBBED"
+      },
+      "workingDirectory": "file:///tmp/claude-1000/-home-dev-Code-terminal-multiplexers/0e7b572a-a744-475d-a93c-143b218b3a0f/scratchpad/ampb1/work1"
+    }
+  },
+  "meta": {
+    "features": [],
+    "executorType": "local-client",
+    "lastKnownAgentState": {
+      "state": "streaming",
+      "messageID": "M-034Fvy5UIYxdHR9JWBinIC",
+      "updatedAt": "2026-08-30T04:31:25.810Z"
+    },
+    "deleted": false,
+    "createdOnServer": false,
+    "lastUserMessageAt": "2026-08-30T04:31:22.402Z",
+    "workspaceID": null,
+    "projectID": null,
+    "visibility": "private",
+    "sharedGroupIDs": [],
+    "agentMode": "medium",
+    "usesDtw": true,
+    "usesThreadActors": true
+  },
+  "title": "probe-b1-fixture",
+  "created": 1788064264680,
+  "messages": [
+    {
+      "meta": {
+        "sentAt": 1788064267876
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "text": "Reply with exactly one word: OK",
+          "type": "text"
+        }
+      ],
+      "messageId": 1,
+      "userState": {
+        "timeZone": "UTC",
+        "currentlyVisibleFiles": []
+      },
+      "protocolMessageID": "M-034FvxhfHJ53Et5UiYqg7a",
+      "protocolMessageVersion": 0
+    },
+    {
+      "meta": {
+        "openAIResponsePhase": "final_answer"
+      },
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "gpt-5.6-sol",
+        "features": [],
+        "timestamp": "2026-08-30T04:31:11.391Z",
+        "inputTokens": 0,
+        "outputTokens": 5,
+        "maxInputTokens": 272000,
+        "totalInputTokens": 17677,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 17677
+      },
+      "readAt": null,
+      "content": [
+        {
+          "text": "OK",
+          "type": "text",
+          "finalTime": 1788064271156,
+          "startTime": 1788064271038,
+          "blockState": "complete"
+        }
+      ],
+      "messageId": 2,
+      "protocolMessageID": "M-034FvxirYkoX7dfe8OGf3r",
+      "protocolMessageVersion": 1
+    },
+    {
+      "meta": {
+        "sentAt": 1788064282402
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "text": "Reply with exactly one word: YES",
+          "type": "text"
+        }
+      ],
+      "messageId": 3,
+      "protocolMessageID": "M-034Fvy4UyxvyrTvHlrsdwZ",
+      "protocolMessageVersion": 0
+    }
+  ],
+  "agentMode": "medium",
+  "creatorUserID": "SCRUBBED",
+  "pinned": false,
+  "multiplayerExpiresAt": null,
+  "updatedAt": "2026-08-30T04:31:25.810Z"
+}

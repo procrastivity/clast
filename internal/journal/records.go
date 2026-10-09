@@ -41,6 +41,23 @@ type TranscriptFingerprint struct {
 	Format string `json:"format"`
 	Lines  int    `json:"lines"`
 	SHA256 string `json:"sha256"`
+	// Artifact is the transcript copy's slash-separated path relative to
+	// the session directory, recorded when it differs from the default
+	// name paths.go owns — amp stores a single JSON document (MODEL
+	// amendment: transcript.artifact metadata). Readers resolve it
+	// through ArtifactName, never re-derive it.
+	Artifact string `json:"artifact,omitempty"`
+}
+
+// ArtifactName resolves the transcript copy's name inside the session
+// directory — the recorded artifact, or the default name paths.go owns
+// when the field is empty (pre-amendment documents and file-tail
+// sources both leave it unset).
+func (t TranscriptFingerprint) ArtifactName() string {
+	if t.Artifact != "" {
+		return t.Artifact
+	}
+	return defaultTranscriptArtifact
 }
 
 // Session is session.json, capture-owned (MODEL §4). Project is a pointer
@@ -48,20 +65,29 @@ type TranscriptFingerprint struct {
 // judgment call: MODEL §4's example always shows one, but nothing in §3-6
 // requires it — capture, a later Matter, decides when it is nil).
 type Session struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Harness       string                `json:"harness"`
-	SessionID     string                `json:"session_id"`
-	Machine       string                `json:"machine"`
-	Project       *SessionProject       `json:"project,omitempty"`
-	Worktree      string                `json:"worktree"`
-	Branch        string                `json:"branch"`
-	StartedAt     time.Time             `json:"started_at"`
-	LastActiveAt  time.Time             `json:"last_active_at"`
-	CapturedAt    time.Time             `json:"captured_at"`
-	SourcePath    string                `json:"source_path"`
-	Counts        SessionCounts         `json:"counts"`
-	Substantive   bool                  `json:"substantive"`
-	Transcript    TranscriptFingerprint `json:"transcript"`
+	SchemaVersion int             `json:"schema_version"`
+	Harness       string          `json:"harness"`
+	SessionID     string          `json:"session_id"`
+	Machine       string          `json:"machine"`
+	Project       *SessionProject `json:"project,omitempty"`
+	Worktree      string          `json:"worktree"`
+	Branch        string          `json:"branch"`
+	StartedAt     time.Time       `json:"started_at"`
+	LastActiveAt  time.Time       `json:"last_active_at"`
+	CapturedAt    time.Time       `json:"captured_at"`
+	SourcePath    string          `json:"source_path"`
+	Counts        SessionCounts   `json:"counts"`
+	Substantive   bool            `json:"substantive"`
+	// Incomplete records that the committed transcript was flagged by
+	// the source's own completeness check at capture time — a faithful
+	// but provably partial read of the recorded revision (a mid-turn
+	// prefix, a raced read past the retry bound). Disclosure, not
+	// error: the snapshot is real and stays committed, and the flag
+	// keeps the shortfall in the record itself instead of a one-time
+	// capture diagnostic. Additive (omitempty): absent means clean or
+	// pre-dates the field.
+	Incomplete bool                  `json:"incomplete,omitempty"`
+	Transcript TranscriptFingerprint `json:"transcript"`
 }
 
 // WriteSession writes session.json for key under shard, creating the
