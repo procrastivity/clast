@@ -105,7 +105,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			"--day <day>, --since <duration|all> (default: the since config key, V31). Human output is " +
 			"one line per session: locator, day, project/label, state (+stale), title when curated — " +
 			"no byte promise. --json emits the full session fact set plus state/stale/title.\n\n" +
-			"Sources: claude. Planned before 1.0: pi, devin.",
+			"Sources: claude, amp. Planned before 1.0: pi, devin.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cliflags.FromContext(cmd.Context())

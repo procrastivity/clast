@@ -1,0 +1,214 @@
+{
+  "v": 29,
+  "id": "T-01a050f5-e597-7057-a9bf-c6fdaa0fd5c0",
+  "env": {
+    "initial": {
+      "trees": [
+        {
+          "uri": "file:///home/dev/Code/terminal-multiplexers",
+          "repository": {
+            "ref": "refs/heads/main",
+            "sha": "SCRUBBED-SHA",
+            "url": "https://github.com/simensen/terminal-multiplexers",
+            "type": "git"
+          },
+          "displayName": "terminal-multiplexers"
+        }
+      ],
+      "platform": {
+        "os": "linux",
+        "client": "CLI Execute Mode",
+        "osVersion": "6.8.0-136-generic",
+        "clientType": "cli",
+        "webBrowser": false,
+        "clientVersion": "0.0.1788048110-g570348",
+        "installationID": "SCRUBBED-INSTALLATION-ID",
+        "cpuArchitecture": "x64",
+        "deviceFingerprint": "SCRUBBED-FINGERPRINT"
+      },
+      "workingDirectory": "file:///home/dev/Code/terminal-multiplexers"
+    }
+  },
+  "meta": {
+    "features": [],
+    "executorType": "local-client",
+    "lastKnownAgentState": {
+      "state": "idle",
+      "messageID": "M-034FwAlyTphL6KrwOsikF4",
+      "updatedAt": "2026-08-30T04:39:45.446Z"
+    },
+    "deleted": false,
+    "createdOnServer": false,
+    "lastUserMessageAt": "2026-08-30T04:39:42.653Z",
+    "workspaceID": null,
+    "projectID": null,
+    "visibility": "private",
+    "sharedGroupIDs": [],
+    "agentMode": "low",
+    "usesDtw": true,
+    "usesThreadActors": true
+  },
+  "title": "MODEA-LOW response",
+  "created": 1788064687511,
+  "messages": [
+    {
+      "meta": {
+        "sentAt": 1788064690211
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "text": "Reply with exactly MODEA-LOW",
+          "type": "text"
+        }
+      ],
+      "messageId": 1,
+      "userState": {
+        "timeZone": "UTC",
+        "currentlyVisibleFiles": []
+      },
+      "protocolMessageID": "M-034Fw8PhDscFTMEAfCgfUu",
+      "protocolMessageVersion": 0
+    },
+    {
+      "meta": {
+        "openAIResponsePhase": "final_answer"
+      },
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "gpt-5.6-terra",
+        "features": [],
+        "timestamp": "2026-08-30T04:38:13.007Z",
+        "inputTokens": 0,
+        "outputTokens": 8,
+        "maxInputTokens": 272000,
+        "totalInputTokens": 17390,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 17390
+      },
+      "readAt": null,
+      "content": [
+        {
+          "text": "MODEA-LOW",
+          "type": "text",
+          "finalTime": 1788064692763,
+          "startTime": 1788064692611,
+          "blockState": "complete"
+        }
+      ],
+      "messageId": 2,
+      "protocolMessageID": "M-034Fw8QZiNRCs17CMKa8uo",
+      "protocolMessageVersion": 1
+    },
+    {
+      "meta": {
+        "sentAt": 1788064728030
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "text": "Reply with exactly MODEB-HIGH",
+          "type": "text"
+        }
+      ],
+      "messageId": 3,
+      "protocolMessageID": "M-034Fw9N7sEQNGbTCGAfHZi",
+      "protocolMessageVersion": 0
+    },
+    {
+      "meta": {
+        "openAIResponsePhase": "final_answer"
+      },
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "gpt-5.6-terra",
+        "features": [],
+        "timestamp": "2026-08-30T04:38:50.465Z",
+        "inputTokens": 0,
+        "outputTokens": 8,
+        "maxInputTokens": 272000,
+        "totalInputTokens": 18541,
+        "cacheReadInputTokens": 16896,
+        "cacheCreationInputTokens": 1645
+      },
+      "readAt": null,
+      "content": [
+        {
+          "text": "MODEB-HIGH",
+          "type": "text",
+          "finalTime": 1788064730195,
+          "startTime": 1788064729999,
+          "blockState": "complete"
+        }
+      ],
+      "messageId": 4,
+      "protocolMessageID": "M-034Fw9O2VezfYpA3pXr56s",
+      "protocolMessageVersion": 1
+    },
+    {
+      "meta": {
+        "sentAt": 1788064782653
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "text": "Reply with exactly MODEC-NOFLAG",
+          "type": "text"
+        }
+      ],
+      "messageId": 5,
+      "protocolMessageID": "M-034FwAkzkZA1gVWsf1HuJR",
+      "protocolMessageVersion": 0
+    },
+    {
+      "meta": {
+        "openAIResponsePhase": "final_answer"
+      },
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "gpt-5.6-terra",
+        "features": [],
+        "timestamp": "2026-08-30T04:39:45.236Z",
+        "inputTokens": 0,
+        "outputTokens": 9,
+        "maxInputTokens": 272000,
+        "totalInputTokens": 18563,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 18563
+      },
+      "readAt": null,
+      "content": [
+        {
+          "text": "MODEC-NOFLAG",
+          "type": "text",
+          "finalTime": 1788064784889,
+          "startTime": 1788064784672,
+          "blockState": "complete"
+        }
+      ],
+      "messageId": 6,
+      "protocolMessageID": "M-034FwAlyTphL6KrwOsikF4",
+      "protocolMessageVersion": 1
+    }
+  ],
+  "agentMode": "low",
+  "creatorUserID": "SCRUBBED-USER-ID",
+  "pinned": false,
+  "multiplayerExpiresAt": null,
+  "updatedAt": "2026-08-30T04:39:52.112Z"
+}

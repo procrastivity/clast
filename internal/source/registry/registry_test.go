@@ -4,15 +4,23 @@ import (
 	"testing"
 
 	"github.com/procrastivity/clast/internal/clasterr"
+	"github.com/procrastivity/clast/internal/source"
 )
 
-func TestTableCarriesClaude(t *testing.T) {
-	if len(Names) != 1 || Names[0] != "claude" {
-		t.Fatalf("Names = %v, want [claude]", Names)
+func TestTableCarriesImplementedSources(t *testing.T) {
+	if len(Names) != 2 || Names[0] != "claude" || Names[1] != "amp" {
+		t.Fatalf("Names = %v, want [claude amp]", Names)
 	}
 	s, ok := Lookup("claude")
 	if !ok || s.Name() != "claude" {
 		t.Fatalf("Lookup(claude) = %v, %v", s, ok)
+	}
+	a, ok := Lookup("amp")
+	if !ok || a.Name() != "amp" {
+		t.Fatalf("Lookup(amp) = %v, %v", a, ok)
+	}
+	if a.Model() != source.Network {
+		t.Errorf("amp Model() = %q, want network — the sweep gate rides it", a.Model())
 	}
 	if _, ok := Lookup("devin"); ok {
 		t.Fatal("Lookup(devin) should report false until the source lands")
@@ -60,5 +68,18 @@ func TestLookupTranscriptReader(t *testing.T) {
 	}
 	if _, ok := LookupTranscriptReader("nope"); ok {
 		t.Error("unknown format found a reader")
+	}
+}
+
+// TestAllRowsImplementPresence pins the shared capture contract's
+// expectation: every registered source implements the OPTIONAL
+// source.Presence probe, so capture's explicit --harness path can tell
+// absent storage from present-but-empty. All is a static table — a
+// missing probe is a test-visible gap, not a runtime leak.
+func TestAllRowsImplementPresence(t *testing.T) {
+	for _, s := range All {
+		if _, ok := s.(source.Presence); !ok {
+			t.Errorf("source %q does not implement source.Presence", s.Name())
+		}
 	}
 }

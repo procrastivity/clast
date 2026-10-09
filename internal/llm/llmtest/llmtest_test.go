@@ -65,7 +65,7 @@ func TestStreamRequestedButNotConfiguredGetsJSON(t *testing.T) {
 	if !strings.Contains(body, `"content":"canned"`) {
 		t.Fatalf("%q lacks %q", body, `"content":"canned"`)
 	}
-	if !(s.Requests()[0].Stream) {
+	if !s.Requests()[0].Stream {
 		t.Fatal("want true: s.Requests()[0].Stream")
 	}
 }
@@ -92,7 +92,7 @@ func TestRequestsRecordsStream(t *testing.T) {
 	if reqs[0].Stream {
 		t.Fatal("want false: reqs[0].Stream")
 	}
-	if !(reqs[1].Stream) {
+	if !reqs[1].Stream {
 		t.Fatal("want true: reqs[1].Stream")
 	}
 }

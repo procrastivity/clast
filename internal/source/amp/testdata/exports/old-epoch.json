@@ -1,0 +1,124 @@
+{
+  "v": 6269,
+  "id": "T-019ca6da-0000-7000-8000-000000000000",
+  "env": {
+    "initial": {
+      "trees": [
+        {
+          "uri": "file:///Users/example/Code/oldproj",
+          "displayName": "oldproj"
+        }
+      ],
+      "platform": {
+        "os": "darwin",
+        "client": "Zed",
+        "osVersion": "24.5.0",
+        "clientType": "ide",
+        "webBrowser": false,
+        "clientVersion": "0.0.1770000000-g000000",
+        "installationID": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "cpuArchitecture": "arm64",
+        "deviceFingerprint": "SCRUBBED"
+      },
+      "tags": [
+        "model:claude-haiku-4-5-20251001"
+      ]
+    }
+  },
+  "meta": {
+    "createdOnServer": false,
+    "deleted": false,
+    "visibility": "private",
+    "status": "idle",
+    "traces": [
+      {
+        "id": "trace-01fixture",
+        "name": "turn",
+        "context": {},
+        "startTime": "2026-03-02T15:36:10.000Z",
+        "endTime": "2026-03-02T15:37:37.000Z"
+      }
+    ]
+  },
+  "title": "old-epoch fixture thread",
+  "created": 1772463200000,
+  "messages": [
+    {
+      "meta": {
+        "sentAt": 1772463205123
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: what does this project do?"
+        }
+      ],
+      "messageId": 0
+    },
+    {
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "claude-haiku-4-5-20251001",
+        "inputTokens": 0,
+        "outputTokens": 9,
+        "maxInputTokens": 200000,
+        "totalInputTokens": 4210
+      },
+      "readAt": null,
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: it indexes old-epoch exports."
+        }
+      ],
+      "messageId": 1
+    },
+    {
+      "meta": {
+        "sentAt": 1772463377111
+      },
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: thanks"
+        }
+      ],
+      "messageId": 2
+    },
+    {
+      "role": "assistant",
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "claude-haiku-4-5-20251001",
+        "inputTokens": 0,
+        "outputTokens": 2,
+        "maxInputTokens": 200000,
+        "totalInputTokens": 4220
+      },
+      "readAt": null,
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: welcome"
+        }
+      ],
+      "messageId": 3
+    }
+  ],
+  "nextMessageId": 4,
+  "creatorUserID": "SCRUBBED",
+  "pinned": false,
+  "archived": false,
+  "updatedAt": "2026-03-02T15:37:37.359Z"
+}

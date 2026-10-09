@@ -11,9 +11,11 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/registry"
 	"github.com/procrastivity/clast/internal/source"
@@ -27,8 +29,9 @@ const autoNoopReason = "auto:no-op"
 // Deps is Run's environment: everything the command layer resolves once.
 type Deps struct {
 	Root string
-	// Sources is the walk set — the full registry table, or one row when
-	// --harness filtered it (already validated by the command layer).
+	// Sources is the walk set — the bare sweep's predicate-filtered
+	// selection, or the one row --harness named (already validated and,
+	// on the explicit path, presence-probed by the command layer).
 	Sources []source.Source
 	// AutoDismissNoop is config capture.auto_dismiss_noop (M3).
 	AutoDismissNoop bool
@@ -50,18 +53,53 @@ type Captured struct {
 	ProjectBackfilled bool
 }
 
+// SourceFailure is one source's failure to enumerate at all — a
+// Discover-level error the sweep isolated and continued past. Run
+// collects them for the command layer to disclose: a sweep reports
+// each on stderr and in --json's "unavailable" rows while still
+// exiting 0 (V13: a source outage is never a failed run, but no
+// reported success may hide incomplete work); the explicit --harness
+// path instead maps its single source's failure to
+// capture.source-unavailable. Cancellation and store-write failures
+// never land here — they abort the run outright.
+type SourceFailure struct {
+	// Source is the failed source's registry name.
+	Source string
+	// Err is Discover's error, verbatim.
+	Err error
+}
+
 // Run performs one capture sweep. Diagnostics are accumulated, not
-// fatal (V13): a session that cannot be read is reported and skipped;
-// only store writes and the walk itself can fail the run.
-func Run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, error) {
+// fatal (V13): a session that cannot be read is reported and skipped,
+// and a source that cannot enumerate at all is a collected
+// SourceFailure, not an abort. The returned error is reserved for what
+// cannot be routed around — store writes, the journal walk itself, and
+// context cancellation — and is always classified internal.* (exit 4):
+// a fatal capture failure is an internal error, never the chassis's
+// catch-all usage exit.
+func Run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, []SourceFailure, error) {
+	captured, diags, failed, err := run(ctx, deps)
+	// An error already carrying a clasterr classification passes through
+	// untouched; anything else (journal/os errors, context teardown) is
+	// internal.capture.
+	var ce *clasterr.Error
+	if err != nil && !errors.As(err, &ce) {
+		err = clasterr.New("internal.capture", err.Error())
+	}
+	return captured, diags, failed, err
+}
+
+// run is the sweep body behind Run's classification boundary — it
+// returns raw errors; Run owns wrapping them as internal.capture.
+func run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, []SourceFailure, error) {
 	machine, err := journal.Hostname()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	items, walkDiags, err := journal.Walk(deps.Root)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	existing := make(map[journal.SessionKey]journal.WalkItem, len(items))
 	for _, item := range items {
@@ -70,28 +108,79 @@ func Run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, error
 
 	var captured []Captured
 	var diags []source.Diagnostic
+	var failed []SourceFailure
 	for _, wd := range walkDiags {
 		diags = append(diags, source.Diagnostic{Path: wd.Path, Err: wd.Err})
 	}
 	for _, src := range deps.Sources {
-		found, srcDiags, err := src.Discover(ctx)
-		if err != nil {
-			return captured, diags, err
+		// A canceled context aborts even for a source that ignores it —
+		// cancellation is fatal, never a per-source failure.
+		if err := ctx.Err(); err != nil {
+			return captured, diags, failed, err
 		}
+		// A source keeping journal-external scan progress keys it to
+		// this run's target before enumerating — one run, one journal
+		// root, so another target's checkpoint can never answer here.
+		if js, ok := src.(source.JournalScope); ok {
+			js.ScopeJournal(deps.Root)
+		}
+		found, srcDiags, err := src.Discover(ctx)
 		diags = append(diags, srcDiags...)
+		if err != nil {
+			// The same check on the error itself: a canceled run
+			// aborts rather than disclosing the remaining sources as
+			// "unavailable".
+			if isCancellation(err) {
+				return captured, diags, failed, err
+			}
+			// Could not enumerate at all — the uniform rule is
+			// Discover error = source-level failure, Diagnostic =
+			// items skipped. Record and continue: one broken source
+			// must not deny another source's valid capture.
+			failed = append(failed, SourceFailure{Source: src.Name(), Err: err})
+			continue
+		}
 
 		for _, d := range found {
+			if err := ctx.Err(); err != nil {
+				return captured, diags, failed, err
+			}
 			one, oneDiags, err := captureOne(ctx, deps, src, d, existing, machine)
 			diags = append(diags, oneDiags...)
 			if err != nil {
-				return captured, diags, err
+				return captured, diags, failed, err
 			}
 			if one != nil {
 				captured = append(captured, *one)
 			}
 		}
 	}
-	return captured, diags, nil
+	return captured, diags, failed, nil
+}
+
+// isCancellation reports whether err is context teardown — checked
+// before any source or session error is treated as continuable, so a
+// canceled run aborts rather than being swallowed into a per-source
+// failure or a per-item diagnostic.
+func isCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// unchangedVerdict answers the recapture check — "is d still the
+// revision prior's session.json recorded". A source implementing the
+// OPTIONAL source.Unchanged seam answers from its own evidence (amp
+// compares the enumerated updatedAt with the recorded last_active_at —
+// fetch-free, which is the point); every other source re-reads the
+// discovered file's fingerprint, M13's file-tail default.
+func unchangedVerdict(ctx context.Context, src source.Source, d source.Discovered, prior journal.Session) (bool, error) {
+	if u, ok := src.(source.Unchanged); ok {
+		return u.Unchanged(ctx, d, prior)
+	}
+	lines, sum, err := source.FingerprintFile(d.Path)
+	if err != nil {
+		return false, err
+	}
+	return lines == prior.Transcript.Lines && sum == prior.Transcript.SHA256, nil
 }
 
 // captureOne handles one discovered session end to end. A nil Captured
@@ -102,11 +191,14 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 
 	prior, recapture := existing[key]
 	if recapture {
-		lines, sum, err := source.FingerprintFile(d.Path)
+		unchanged, err := unchangedVerdict(ctx, src, d, prior.Session)
 		if err != nil {
+			if isCancellation(err) {
+				return nil, nil, err
+			}
 			return nil, []source.Diagnostic{{Path: d.Path, Err: err}}, nil
 		}
-		if lines == prior.Session.Transcript.Lines && sum == prior.Session.Transcript.SHA256 {
+		if unchanged {
 			if prior.Session.Project != nil {
 				return nil, nil, nil // unchanged — the silent common case (V13).
 			}
@@ -122,6 +214,9 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 	dir, corrDiags, err := src.Correlate(ctx, d)
 	diags = append(diags, corrDiags...)
 	if err != nil {
+		if isCancellation(err) {
+			return nil, diags, err
+		}
 		diags = append(diags, source.Diagnostic{Path: d.Path, Err: err})
 		return nil, diags, nil
 	}
@@ -136,8 +231,30 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 		// Deliberate discard: the capture already failed; the discard
 		// error would only shadow the diagnostic that matters.
 		_ = stage.Discard()
+		if isCancellation(err) {
+			return nil, diags, err
+		}
 		diags = append(diags, source.Diagnostic{Path: d.Path, Err: err})
 		return nil, diags, nil
+	}
+
+	// A recapture must never replace committed truth with a worse read:
+	// a source implementing the OPTIONAL Supersede seam vets the fresh
+	// capture against the committed session — a partial or stale read
+	// cannot overwrite a more complete committed capture merely because
+	// the source's metadata advanced. A refusal discards the staged
+	// artifacts (committed session.json and artifacts stand untouched),
+	// discloses the refusal as the per-item diagnostic, and leaves the
+	// id on the source's retry bookkeeping — amp's pending lane is
+	// pending-is-emitted, so the vetoed id is already owed again.
+	if recapture {
+		if sp, ok := src.(source.Supersede); ok {
+			if supersedes, why := sp.Supersedes(ctx, d, prior.Session, facts); !supersedes {
+				_ = stage.Discard()
+				diags = append(diags, source.Diagnostic{Path: d.Path, Err: errors.New(why)})
+				return nil, diags, nil
+			}
+		}
 	}
 
 	now := deps.Now()
@@ -163,6 +280,7 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 		SourcePath:   d.Path,
 		Counts:       facts.Counts,
 		Substantive:  facts.Substantive,
+		Incomplete:   facts.Incomplete,
 		Transcript:   facts.Transcript,
 	}
 	if dir != "" {
@@ -205,6 +323,9 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 func backfillProject(ctx context.Context, deps Deps, src source.Source, d source.Discovered, prior journal.WalkItem, key journal.SessionKey) (*Captured, []source.Diagnostic, error) {
 	dir, diags, err := src.Correlate(ctx, d)
 	if err != nil {
+		if isCancellation(err) {
+			return nil, diags, err
+		}
 		diags = append(diags, source.Diagnostic{Path: d.Path, Err: err})
 		return nil, diags, nil
 	}

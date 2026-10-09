@@ -1,0 +1,23 @@
+[
+  {
+    "id": "T-01f00000-0000-7000-8000-000000000001",
+    "title": "fixture thread 001",
+    "updated": "2026-10-08T23:00:00.037Z",
+    "tree": "/home/dev/Code/example",
+    "messageCount": 4
+  },
+  {
+    "id": "T-01f00000-0000-7000-8000-000000000002",
+    "title": "fixture thread 002",
+    "updated": "2026-10-08T11:00:00.074Z",
+    "tree": "/home/dev/Code/example",
+    "messageCount": 12
+  },
+  {
+    "id": "T-01f00000-0000-7000-8000-000000000003",
+    "title": "fixture thread 003 (pinned \u2014 no flag in list rows)",
+    "updated": "2026-10-08T02:00:00.111Z",
+    "tree": "/home/dev/Code/other",
+    "messageCount": 57
+  }
+]
