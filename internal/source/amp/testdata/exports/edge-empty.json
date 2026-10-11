@@ -1,0 +1,23 @@
+{
+  "v": 3,
+  "id": "T-01a0746b-4d17-75ba-8c23-3800bd2c7710",
+  "meta": {
+    "features": [],
+    "executorType": "local-client",
+    "deleted": false,
+    "createdOnServer": false,
+    "workspaceID": null,
+    "projectID": null,
+    "visibility": "private",
+    "sharedGroupIDs": [],
+    "agentMode": "medium",
+    "usesDtw": true,
+    "usesThreadActors": true
+  },
+  "created": 1788659584279,
+  "messages": [],
+  "agentMode": "medium",
+  "pinned": false,
+  "multiplayerExpiresAt": null,
+  "updatedAt": "2026-09-06T01:53:07.081Z"
+}

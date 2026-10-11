@@ -189,7 +189,11 @@ func TestTranscript_MissingTranscriptFileIsAnError(t *testing.T) {
 		mustParseTime(t, "2026-09-10T09:00:00-05:00"),
 	)
 	// No WithTranscript call: the copy was never written.
-	if _, err := os.Stat(journal.TranscriptPath(fx.Root(), "2026-09-10", key)); err == nil {
+	tp, err := journal.TranscriptPath(fx.Root(), "2026-09-10", key, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tp); err == nil {
 		t.Fatal("fixture unexpectedly has a transcript file")
 	}
 

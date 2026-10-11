@@ -118,6 +118,23 @@ func (r *Reporter) Status(label string) {
 	r.draw()
 }
 
+// Phase replaces the phase text — the middle slot of
+// "<frame> <label> · <phase> · <elapsed>" — without touching the label
+// or the elapsed count. It is the sink a source.PhaseFunc binds to, and
+// is safe on a nil Reporter.
+func (r *Reporter) Phase(phase string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopped {
+		return
+	}
+	r.phase = phase
+	r.draw()
+}
+
 // Observer returns an llm.Observer that updates the phase text. It is safe
 // to call from several goroutines.
 func (r *Reporter) Observer() llm.Observer {

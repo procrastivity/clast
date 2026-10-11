@@ -8,6 +8,12 @@ since: "-14d"              # the recent window: sessions default,
                            #   wake working set (V7/V17)
 capture:
   auto_dismiss_noop: true  # M3
+  exclude: []              # implemented source names a bare sweep skips
+                           #   (--harness <name> runs one regardless);
+                           #   capture.<name>.auto: true opts a network
+                           #   source into sweeps (default off)
+  # amp:                   # example: uncomment to join the amp
+  #   auto: true           #   (network) source to every bare sweep
 wake:
   auto_min_chars: 60
 llm:

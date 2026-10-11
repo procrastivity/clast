@@ -1,0 +1,93 @@
+{
+  "v": 14,
+  "id": "T-01a11278-0000-7000-8000-000000000000",
+  "meta": {
+    "features": [],
+    "executorType": "virtual",
+    "lastKnownAgentState": {
+      "state": "idle",
+      "messageID": "M-034Jzzzzzzzzzzzzzzzzzz02",
+      "updatedAt": "2026-10-02T10:14:00.000Z"
+    },
+    "deleted": false,
+    "createdOnServer": true,
+    "lastUserMessageAt": "2026-10-02T10:13:40.000Z",
+    "workspaceID": null,
+    "projectID": null,
+    "visibility": "private",
+    "sharedGroupIDs": [],
+    "agentMode": "puck",
+    "puckVariant": 3,
+    "usesDtw": true,
+    "usesThreadActors": true
+  },
+  "title": "virtual fixture thread",
+  "created": 1780668820000,
+  "messages": [
+    {
+      "role": "user",
+      "readAt": null,
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: summarise this page"
+        }
+      ],
+      "messageId": 1,
+      "userState": {
+        "timeZone": "UTC",
+        "currentlyVisibleFiles": [],
+        "puckContext": {
+          "currentURL": "https://example.com/docs"
+        }
+      },
+      "protocolMessageID": "M-034Jzzzzzzzzzzzzzzzzzz01",
+      "protocolMessageVersion": 0,
+      "meta": {
+        "sentAt": 1780668820123
+      },
+      "createdAt": "2026-10-02T10:13:40.123Z"
+    },
+    {
+      "role": "assistant",
+      "readAt": null,
+      "state": {
+        "type": "complete",
+        "stopReason": "end_turn"
+      },
+      "usage": {
+        "model": "gpt-5.6-sol",
+        "features": [],
+        "timestamp": "2026-10-02T10:13:58.000Z",
+        "inputTokens": 0,
+        "outputTokens": 12,
+        "maxInputTokens": 272000,
+        "totalInputTokens": 9000,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 9000
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "fixture: summary",
+          "finalTime": 1780668838000,
+          "startTime": 1780668836000,
+          "blockState": "complete"
+        }
+      ],
+      "messageId": 2,
+      "protocolMessageID": "M-034Jzzzzzzzzzzzzzzzzzz02",
+      "protocolMessageVersion": 1,
+      "meta": {
+        "openAIResponsePhase": "final_answer"
+      },
+      "createdAt": "2026-10-02T10:13:59.000Z"
+    }
+  ],
+  "agentMode": "puck",
+  "creatorUserID": "SCRUBBED",
+  "pinned": false,
+  "archived": true,
+  "multiplayerExpiresAt": null,
+  "updatedAt": "2026-10-02T10:14:00.000Z"
+}

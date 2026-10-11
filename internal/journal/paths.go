@@ -1,6 +1,9 @@
 package journal
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+)
 
 // SessionKey is a session's identity per M11: the (harness, native id)
 // pair. Native id formats are harness-local (claude uuid, codex uuidv7,
@@ -59,12 +62,37 @@ func EntryPath(root, shard string, key SessionKey) string {
 	return filepath.Join(SessionDir(root, shard, key), "entry.md")
 }
 
+// defaultTranscriptArtifact is the transcript copy's name inside a
+// session directory when session.json records no transcript.artifact —
+// every pre-amendment document and every file-tail source captures a
+// transcript.jsonl; the amendment is only ever additive. This file is
+// the only place that literal may appear (the seal test pins it).
+const defaultTranscriptArtifact = "transcript.jsonl"
+
 // TranscriptPath is the capture-owned, harness-native transcript copy
-// inside a session's directory (MODEL §4, M13). Per the M9 boundary this
-// package never parses it — it is opaque bytes, copied in and streamed
-// out by whatever verb shows turns.
-func TranscriptPath(root, shard string, key SessionKey) string {
-	return filepath.Join(SessionDir(root, shard, key), "transcript.jsonl")
+// inside a session's directory (MODEL §4, M13), resolved from the
+// artifact name the session's record carries —
+// TranscriptFingerprint.ArtifactName()'s result ("" is the default
+// too). Per the M9 boundary this package never parses it — it is opaque
+// bytes, copied in and streamed out by whatever verb shows turns. The
+// name must resolve inside the session directory: the store layer
+// validates what the record says rather than trusting a document to
+// name a path (the same rule stage.Write's path discipline keeps).
+func TranscriptPath(root, shard string, key SessionKey, artifact string) (string, error) {
+	return TranscriptPathByDir(SessionDir(root, shard, key), artifact)
+}
+
+// TranscriptPathByDir is TranscriptPath for a raw session directory —
+// the analyze transcript view's own situation, the same raw-dir split
+// SessionJSONPathByDir carries for Walk.
+func TranscriptPathByDir(dir, artifact string) (string, error) {
+	if artifact == "" {
+		artifact = defaultTranscriptArtifact
+	}
+	if !filepath.IsLocal(filepath.FromSlash(artifact)) {
+		return "", fmt.Errorf("journal: transcript artifact %q escapes the session directory", artifact)
+	}
+	return filepath.Join(dir, filepath.FromSlash(artifact)), nil
 }
 
 // ProjectDir returns a project's directory, projects/<slug>, under root.

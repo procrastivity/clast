@@ -41,6 +41,13 @@ const (
 	// Snapshot marks a harness that rewrites its document whole (cursor):
 	// capture replaces the copy wholesale, never assumes growth.
 	Snapshot StorageModel = "snapshot"
+	// Network marks a harness whose sessions live behind a network
+	// endpoint rather than in local files (amp): capture fetches rather
+	// than copies. The model doubles as the sweep gate — a network-model
+	// source is never in a bare capture sweep until its
+	// capture.<name>.auto opt-in is set (the shared capture-policy
+	// contract); every other model is local and sweeps unconditionally.
+	Network StorageModel = "network"
 )
 
 // Discovered is one live session enumerated by Discover: where it is,
@@ -51,10 +58,14 @@ type Discovered struct {
 	// NativeID is the harness's own session id (M11) — a uuid for
 	// claude. Format is harness-local; clast never parses it.
 	NativeID string
-	// Path is the session's primary on-disk artifact — for a file-tail
-	// source, the transcript file itself.
+	// Path is the session's primary source-native address — for a
+	// file-tail source, the transcript file itself; for a network
+	// source, the item's canonical URL (amp records
+	// https://ampcode.com/threads/<id> — it is never openable as a
+	// local path, which is exactly what Unchanged exists for).
 	Path string
-	// ModTime is Path's mtime, a cheap liveness hint for callers that
+	// ModTime is Path's last-change hint — a file's mtime, a network
+	// item's enumerated updatedAt — cheap liveness for callers that
 	// order or window discovery. Never identity, never a captured fact.
 	ModTime time.Time
 }
@@ -72,6 +83,15 @@ type Facts struct {
 	Counts       journal.SessionCounts
 	Substantive  bool
 	Transcript   journal.TranscriptFingerprint
+	// Incomplete marks a capture whose own completeness check could not
+	// prove the committed bytes cover the revision they record — a
+	// mid-turn prefix, a raced read past its retry bound. The snapshot
+	// is still faithful (it is what the source showed) and still
+	// committed; the flag carries the shortfall into session.json
+	// itself (session.incomplete) so it stays disclosed in the record
+	// rather than only in a transient capture-time diagnostic. Sources
+	// whose copy is whole by construction (a local file) never set it.
+	Incomplete bool
 }
 
 // Diagnostic is one unreadable or skipped thing a source met while
@@ -118,6 +138,78 @@ type Source interface {
 // it to the journal's own write primitive, so sources stay out of
 // journal path composition and tests can bind it to a scratch directory.
 type WriteArtifact func(relPath string, r io.Reader) error
+
+// Presence is an OPTIONAL interface a Source may also implement, in the
+// TranscriptRenderer/TranscriptReader mold. nil = storage present;
+// non-nil = unavailable — the error names the probed root/endpoint and
+// reason, used verbatim in the diagnostic. Cheap and side-effect-free:
+// no enumeration, no prompt, no fetch.
+//
+// Its one caller is capture's explicit --harness path, which asserts it
+// before Discover so an absent storage root is disclosed
+// (capture.source-unavailable) rather than silently exiting; sweeps
+// never probe — quiet absence is Discover's own contract there. A
+// source without the probe degrades to that same legacy behavior on the
+// explicit path (empty Discover = quiet exit 0), so the interface stays
+// strictly additive; every registered source is still expected to
+// implement it (pinned by a registry conformance test).
+type Presence interface {
+	Present(ctx context.Context) error
+}
+
+// Unchanged is an OPTIONAL interface a Source may also implement, in the
+// same mold: it answers the recapture check — "is the session already
+// captured at this revision" — from the source's own cheap evidence
+// instead of re-hashing bytes on disk. The default stays FingerprintFile
+// on d.Path: a file-tail source re-reads its live file. A source whose
+// Path is not openable locally (a network source's canonical URL —
+// hashing bytes would mean fetching, which defeats the check's point)
+// implements it so its recapture verdict stays free.
+//
+// prior is the session.json document the journal walk already read —
+// the recorded last_active_at and transcript fingerprint. A true answer
+// runs the same unchanged branch a fingerprint match runs: silent when
+// the prior resolved a project, the project-backfill retry otherwise.
+// Fetch-free expectation: implementations answer from evidence already
+// in hand (amp: the enumerated updatedAt against the recorded
+// last_active_at — the same revision field end to end); a source that
+// would need a fetch to decide says "changed" and lets Capture do the
+// real read.
+type Unchanged interface {
+	Unchanged(ctx context.Context, d Discovered, prior journal.Session) (bool, error)
+}
+
+// JournalScope is an OPTIONAL interface a Source may also implement, in
+// the same mold as Presence and Unchanged: the capture verb hands it
+// the run's resolved journal root once, before Discover, so a source
+// whose progress bookkeeping lives outside the journal (amp's
+// scan-state cache) can key that bookkeeping to the target — progress
+// banked against one journal must never answer for a different one.
+// Sources with no cross-run state need nothing and are never visited.
+type JournalScope interface {
+	ScopeJournal(root string)
+}
+
+// Supersede is an OPTIONAL interface a Source may also implement, in the
+// same mold as Unchanged: on a recapture it decides whether the
+// just-captured revision may replace the committed session — the veto
+// that keeps a partial or stale read from overwriting a more complete
+// committed capture merely because the source's metadata advanced. The
+// verb calls it after Capture produced facts and before the staged
+// artifacts commit: a false verdict discards the stage (the committed
+// session.json and artifacts stand untouched) and reports why as a
+// per-item diagnostic, leaving the id on whatever retry bookkeeping the
+// source keeps — a veto declines a write, it never declares the thread
+// done. A source without it keeps the default posture: a successful
+// Capture always replaces the committed session.
+type Supersede interface {
+	// Supersedes reports whether the capture of d that produced facts
+	// may replace prior (the committed session.json document). The
+	// verdict compares the fresh read's own revision evidence against
+	// what the journal already holds; why is disclosure text for the
+	// diagnostic when ok is false.
+	Supersedes(ctx context.Context, d Discovered, prior journal.Session, facts Facts) (ok bool, why string)
+}
 
 // Turn is one rendered conversation turn: who spoke, and what they said
 // (possibly capped — see TranscriptRenderer.RenderTranscript).

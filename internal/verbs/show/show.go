@@ -64,7 +64,10 @@ func Transcript(root string, item journal.WalkItem, maxChars int) ([]source.Turn
 		return nil, err
 	}
 
-	path := journal.TranscriptPath(root, item.Shard, item.Key)
+	path, err := journal.TranscriptPath(root, item.Shard, item.Key, item.Session.Transcript.ArtifactName())
+	if err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("show: opening %s: %w", path, err)

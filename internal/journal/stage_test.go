@@ -25,7 +25,11 @@ func TestSessionStageCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(TranscriptPath(root, "2026-09-01", key))
+	tpath, err := TranscriptPath(root, "2026-09-01", key, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(tpath)
 	if err != nil || string(data) != "{}\n" {
 		t.Fatalf("transcript: %q, %v", data, err)
 	}

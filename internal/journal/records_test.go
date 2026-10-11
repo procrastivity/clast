@@ -3,6 +3,7 @@ package journal
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 	"time"
@@ -147,6 +148,71 @@ func TestSession_NoProjectOmitsKey(t *testing.T) {
 	}
 	if _, present := m["project"]; present {
 		t.Errorf(`"project" key present with no project, want omitted`)
+	}
+}
+
+// TestSession_TranscriptArtifact pins the additive transcript.artifact
+// field (MODEL amendment): absent for the transcript.jsonl default —
+// pre-amendment documents and file-tail sources keep their exact byte
+// shape — and round-tripped verbatim when a source records another name
+// (amp's transcript.json). The path resolvers consume it, refusing a
+// name that would leave the session directory.
+func TestSession_TranscriptArtifact(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Harness: "amp", NativeID: "T-artifact"}
+
+	sess := Session{
+		Transcript: TranscriptFingerprint{Format: "amp-export", Lines: 4, SHA256: "s", Artifact: "transcript.json"},
+	}
+	if err := WriteSession(root, "2026-10-09", key, sess); err != nil {
+		t.Fatalf("WriteSession: %v", err)
+	}
+	got, ok, err := ReadSession(root, "2026-10-09", key)
+	if err != nil || !ok {
+		t.Fatalf("ReadSession: ok=%v err=%v", ok, err)
+	}
+	if got.Transcript.ArtifactName() != "transcript.json" {
+		t.Errorf("ArtifactName = %q, want transcript.json", got.Transcript.ArtifactName())
+	}
+	path, err := TranscriptPath(root, "2026-10-09", key, got.Transcript.ArtifactName())
+	if err != nil {
+		t.Fatalf("TranscriptPath: %v", err)
+	}
+	if want := filepath.Join(SessionDir(root, "2026-10-09", key), "transcript.json"); path != want {
+		t.Errorf("TranscriptPath = %q, want %q", path, want)
+	}
+
+	// The default: an empty artifact resolves transcript.jsonl, and the
+	// field stays out of the document entirely.
+	plain := TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "x"}
+	if plain.ArtifactName() != defaultTranscriptArtifact {
+		t.Errorf("empty ArtifactName = %q, want %q", plain.ArtifactName(), defaultTranscriptArtifact)
+	}
+	data, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := m["artifact"]; present {
+		t.Error(`"artifact" key present on the default, want omitted`)
+	}
+	path, err = TranscriptPath(root, "2026-10-09", key, "")
+	if err != nil {
+		t.Fatalf("TranscriptPath default: %v", err)
+	}
+	if want := filepath.Join(SessionDir(root, "2026-10-09", key), "transcript.jsonl"); path != want {
+		t.Errorf("TranscriptPath default = %q, want %q", path, want)
+	}
+
+	// A name that would leave the session directory is refused, not
+	// trusted.
+	for _, bad := range []string{"../session.json", "/abs/x", "a/../../b"} {
+		if _, err := TranscriptPath(root, "2026-10-09", key, bad); err == nil {
+			t.Errorf("TranscriptPath accepted %q", bad)
+		}
 	}
 }
 

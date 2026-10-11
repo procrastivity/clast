@@ -79,10 +79,20 @@ func (f *Fixture) writeEntry(shard string, key journal.SessionKey, title string)
 
 // writeTranscript writes data verbatim to the transcript copy — the store
 // package never parses it either way (M9), so the fixture is free to put
-// deliberately garbage bytes there for an M9 check.
+// deliberately garbage bytes there for an M9 check. The name comes from
+// the session's own recorded transcript.artifact, resolved through
+// ArtifactName — a fixture transcript lands wherever its session.json
+// says it lives.
 func (f *Fixture) writeTranscript(shard string, key journal.SessionKey, data []byte) {
 	f.t.Helper()
-	path := journal.TranscriptPath(f.root, shard, key)
+	sess, ok, err := journal.ReadSession(f.root, shard, key)
+	if err != nil || !ok {
+		f.t.Fatalf("fixture: transcript for missing session %s/%s: ok=%v err=%v", shard, key.DirName(), ok, err)
+	}
+	path, err := journal.TranscriptPath(f.root, shard, key, sess.Transcript.ArtifactName())
+	if err != nil {
+		f.t.Fatalf("fixture: transcript path for %s/%s: %v", shard, key.DirName(), err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		f.t.Fatalf("fixture: mkdir for transcript at %s/%s: %v", shard, key.DirName(), err)
 	}
