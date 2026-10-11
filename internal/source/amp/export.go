@@ -200,6 +200,7 @@ var exportRetryWaits = []time.Duration{3 * time.Second, 7 * time.Second}
 // JSON, id mismatch) is the error the retry loop classifies.
 func (s *Source) exportOnce(ctx context.Context, id string) ([]byte, *ExportDoc, error) {
 	op := "amp threads export " + id
+	source.ReportPhase(ctx, "export "+id)
 	res, err := s.cli(ctx, []string{"threads", "export", id}, s.exportBudget)
 	if err != nil {
 		if isErrKind(err, errCap) {
@@ -269,6 +270,9 @@ func (s *Source) acquireExport(ctx context.Context, d source.Discovered) (raw []
 	var lastErr error
 	for attempt := 0; attempt <= len(exportRetryWaits); attempt++ {
 		if attempt > 0 {
+			// The wait between attempts is the one stretch where no
+			// call is in flight — say so, or it reads as a stall.
+			source.ReportPhase(ctx, fmt.Sprintf("retrying export %s in %s", d.NativeID, exportRetryWaits[attempt-1]))
 			if err := s.wait(ctx, exportRetryWaits[attempt-1]); err != nil {
 				return nil, nil, "", err // caller ctx died while waiting — fatal upstream
 			}

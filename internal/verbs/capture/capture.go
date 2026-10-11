@@ -17,6 +17,7 @@ import (
 
 	"github.com/procrastivity/clast/internal/clasterr"
 	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/registry"
 	"github.com/procrastivity/clast/internal/source"
 )
@@ -112,6 +113,14 @@ func run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, []Sou
 	for _, wd := range walkDiags {
 		diags = append(diags, source.Diagnostic{Path: wd.Path, Err: wd.Err})
 	}
+	// rep is the run's status line — nil (no-op) when the command layer
+	// never installed one, so tests and non-terminal runs draw nothing.
+	// Sources report their in-flight calls through the phase slot
+	// (source.ReportPhase); the labels here mark the coarser shape of
+	// the sweep: which source is enumerating, then which item of the
+	// found set is being captured. A run that looks idle for minutes is
+	// almost always inside one of those calls, not stuck.
+	rep := progress.FromContext(ctx)
 	for _, src := range deps.Sources {
 		// A canceled context aborts even for a source that ignores it —
 		// cancellation is fatal, never a per-source failure.
@@ -124,6 +133,7 @@ func run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, []Sou
 		if js, ok := src.(source.JournalScope); ok {
 			js.ScopeJournal(deps.Root)
 		}
+		rep.Status("capturing " + src.Name())
 		found, srcDiags, err := src.Discover(ctx)
 		diags = append(diags, srcDiags...)
 		if err != nil {
@@ -141,10 +151,11 @@ func run(ctx context.Context, deps Deps) ([]Captured, []source.Diagnostic, []Sou
 			continue
 		}
 
-		for _, d := range found {
+		for i, d := range found {
 			if err := ctx.Err(); err != nil {
 				return captured, diags, failed, err
 			}
+			rep.Status(fmt.Sprintf("capturing %s · %d/%d", src.Name(), i+1, len(found)))
 			one, oneDiags, err := captureOne(ctx, deps, src, d, existing, machine)
 			diags = append(diags, oneDiags...)
 			if err != nil {

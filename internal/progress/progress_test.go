@@ -116,6 +116,7 @@ func TestNewEnabledOnCharDevice(t *testing.T) {
 func TestNilReceiver(t *testing.T) {
 	var r *Reporter
 	r.Status("x")
+	r.Phase("x")
 	r.Observer()(llm.Event{Phase: llm.PhaseStart})
 	r.Clear()
 	r.Stop()
@@ -222,6 +223,38 @@ func TestStatusKeepsElapsedResetsPhase(t *testing.T) {
 	r.Observer()(llm.Event{Phase: llm.PhaseDelta, Text: "q"})
 	if out := redraw(r, buf); !strings.Contains(out, "receiving · 1 chars") {
 		t.Errorf("char count not reset by Status: %q", out)
+	}
+}
+
+func TestPhaseKeepsLabelAndElapsed(t *testing.T) {
+	r, buf, clk := newTest(t)
+	r.Status("capturing amp")
+	clk.Advance(3 * time.Second)
+	buf.Reset()
+	r.Phase("export T-1") // Phase draws at once, like Status
+	out := buf.String()
+	if !strings.HasPrefix(out, "\r\x1b[K") || !strings.HasSuffix(out, " capturing amp · export T-1 · 3s") {
+		t.Fatalf("Phase draw: got %q", out)
+	}
+	r.Phase("export T-2")
+	clk.Advance(2 * time.Second)
+	if out := redraw(r, buf); !strings.HasSuffix(out, " capturing amp · export T-2 · 5s") {
+		t.Errorf("Phase update: got %q", out)
+	}
+	r.Status("capturing amp · 2/4") // a new Status clears the phase slot
+	if out := redraw(r, buf); strings.Contains(out, "export") || !strings.HasSuffix(out, " capturing amp · 2/4 · 5s") {
+		t.Errorf("Status after Phase: got %q", out)
+	}
+}
+
+func TestPhaseWithoutStatusDrawsNothing(t *testing.T) {
+	r, buf, _ := newTest(t)
+	r.Phase("export T-1") // no Status yet: nothing is on screen to update
+	if out := buf.String(); out != "" {
+		t.Errorf("Phase on an idle reporter wrote %q", out)
+	}
+	if out := redraw(r, buf); out != "" {
+		t.Errorf("draw after Phase-without-Status wrote %q", out)
 	}
 }
 

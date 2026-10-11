@@ -236,13 +236,14 @@ func (s *Source) enumerate(ctx context.Context, p scanParams) (found []source.Di
 	// the lane's whole dedup. A clean empty page proves the thread left
 	// the universe and drains the pending entry; a lookup whose own
 	// rows diagnosed keeps it pending rather than lose the retry.
-	for _, id := range p.IDs {
+	for i, id := range p.IDs {
 		if err := ctx.Err(); err != nil {
 			return nil, diags, out, err
 		}
 		if _, ok := sink[id]; ok {
 			continue
 		}
+		source.ReportPhase(ctx, fmt.Sprintf("pending %d/%d · %s", i+1, len(p.IDs), id))
 		before := len(sink)
 		idDiags, err := s.lookupID(ctx, id, sink)
 		diags = append(diags, idDiags...)
@@ -288,6 +289,7 @@ func (s *Source) scanWindow(ctx context.Context, w window, p predicates, sink ma
 		return nil, err
 	}
 	query := w.query(p)
+	source.ReportPhase(ctx, "search "+query)
 	res, err := s.cli(ctx, []string{"threads", "search", query, "-n", searchPageRows, "--json"}, s.searchBudget)
 	if err != nil {
 		return nil, err
@@ -421,6 +423,7 @@ func (s *Source) lookupID(ctx context.Context, id string, sink map[string]source
 // alone.
 func (s *Source) corroborate(ctx context.Context, sink map[string]source.Discovered, out *scanOutcome, minTime time.Time) ([]source.Diagnostic, error) {
 	const op = "amp threads list --include-archived --limit 500 --json"
+	source.ReportPhase(ctx, "threads list")
 	res, err := s.cli(ctx, []string{"threads", "list", "--include-archived", "--limit", "500", "--json"}, s.listBudget)
 	if err != nil {
 		if ctx.Err() != nil {

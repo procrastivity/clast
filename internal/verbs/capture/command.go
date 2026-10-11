@@ -14,6 +14,7 @@ import (
 	"github.com/procrastivity/clast/internal/config"
 	"github.com/procrastivity/clast/internal/iostreams"
 	"github.com/procrastivity/clast/internal/journal"
+	"github.com/procrastivity/clast/internal/progress"
 	"github.com/procrastivity/clast/internal/source"
 	sourceregistry "github.com/procrastivity/clast/internal/source/registry"
 	"github.com/procrastivity/clast/internal/surface"
@@ -31,7 +32,9 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			"An unchanged session captured before its project was init'ed retries resolution and, " +
 			"once the clone is registered, backfills session.json in place (one `backfilled` line). " +
 			"One line per session captured; nothing at all when there is nothing to do (exit 0, " +
-			"empty stdout), so hook and cron paths stay quiet.\n\n" +
+			"empty stdout), so hook and cron paths stay quiet. On a terminal, a spinner on " +
+			"stderr tracks the sweep — the source, the call in flight, and the elapsed time — " +
+			"so a slow run reads as working, not stuck.\n\n" +
 			"A bare run walks every implemented source that is not excluded (config " +
 			"capture.exclude) and is either local or opted in — capture.<name>.auto: true is the " +
 			"only way a network-resident source joins a sweep (off by default; inert on local " +
@@ -99,12 +102,27 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 				sources = sel
 			}
 
-			captured, diags, failed, err := Run(cmd.Context(), Deps{
+			// Status line on stderr while the sweep runs; nil (a no-op)
+			// when stderr is not a terminal or --json is set, so hook and
+			// cron paths stay byte-quiet. The reporter rides the context
+			// twice: progress.WithReporter for the sweep's own per-source
+			// and per-item labels, and source.WithPhaseFunc so a source
+			// can say which call is in flight (amp's windowed scans and
+			// per-thread exports are where a silent minute goes).
+			rep := progress.New(streams, flags)
+			defer rep.Stop()
+			ctx := progress.WithReporter(cmd.Context(), rep)
+			ctx = source.WithPhaseFunc(ctx, rep.Phase)
+
+			captured, diags, failed, err := Run(ctx, Deps{
 				Root:            root,
 				Sources:         sources,
 				AutoDismissNoop: autoDismiss,
 				Now:             time.Now,
 			})
+			// The line must be gone before anything prints — reportOutcome
+			// writes diagnostics to the same stream the line draws on.
+			rep.Stop()
 			if err := reportOutcome(streams, named, diags, failed, err); err != nil {
 				return err
 			}
