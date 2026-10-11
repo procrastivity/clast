@@ -52,7 +52,7 @@ func Command(streams *iostreams.Streams) *cobra.Command {
 			"exit 1, naming the source and the probed root — and absent storage, silent in a sweep, " +
 			"answers the same way when named. Store failures and cancellation abort as " +
 			"internal.capture (exit 4).\n\n" +
-			"Sources: claude, amp. Planned before 1.0: pi, devin.",
+			"Sources: claude, amp, devin. Planned before 1.0: pi.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cliflags.FromContext(cmd.Context())

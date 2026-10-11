@@ -8,8 +8,8 @@ import (
 )
 
 func TestTableCarriesImplementedSources(t *testing.T) {
-	if len(Names) != 2 || Names[0] != "claude" || Names[1] != "amp" {
-		t.Fatalf("Names = %v, want [claude amp]", Names)
+	if len(Names) != 3 || Names[0] != "claude" || Names[1] != "amp" || Names[2] != "devin" {
+		t.Fatalf("Names = %v, want [claude amp devin]", Names)
 	}
 	s, ok := Lookup("claude")
 	if !ok || s.Name() != "claude" {
@@ -22,8 +22,12 @@ func TestTableCarriesImplementedSources(t *testing.T) {
 	if a.Model() != source.Network {
 		t.Errorf("amp Model() = %q, want network — the sweep gate rides it", a.Model())
 	}
-	if _, ok := Lookup("devin"); ok {
-		t.Fatal("Lookup(devin) should report false until the source lands")
+	d, ok := Lookup("devin")
+	if !ok || d.Name() != "devin" {
+		t.Fatalf("Lookup(devin) = %v, %v", d, ok)
+	}
+	if d.Model() == source.Network {
+		t.Errorf("devin Model() = %q — a local model is the default-inclusion verdict", d.Model())
 	}
 }
 
