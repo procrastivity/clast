@@ -9,11 +9,12 @@ outcome/exit table. Pi is a local `source.FileTail` source modeled on
 `internal/source/claude`; `internal/source/amp` (network) and
 `internal/source/devin` (SQLite) are not models for it.
 
-Status: Stages 1–3 are done (qualification, contract, fixtures;
-discovery, capture and offline readers in `internal/source/pi`;
-recapture and recovery evidence). Step-10 registers pi in
-`registry.All` as a local source; step-11 (mixed-source and offline
-compatibility) and step-12 (dogfood and readiness) remain.
+Status: all four Stages are complete, pending seal: qualification,
+contract and fixtures (Stage 1); discovery, capture and offline readers
+in `internal/source/pi` (Stage 2); recapture and recovery evidence
+(Stage 3); registration, mixed-source and offline compatibility, and the
+live dogfood (Stage 4, steps 10 to 12). See "Dogfood and release
+readiness (step-12)" at the end of this file.
 
 ## Qualification evidence (step-01)
 
@@ -1178,8 +1179,10 @@ go build -o "$J/clast" ./cmd/clast
 CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi
 CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi   # 2nd run: expect 0 captured (fingerprint selectivity)
 CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing sessions
-# explicit-absent: expect capture.source-unavailable, exit 1
-PI_CODING_AGENT_DIR=/nonexistent CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi
+# explicit-absent: expect capture.source-unavailable, exit 1. Scope with a
+# temp HOME: PI_CODING_AGENT_DIR alone does NOT hide the real store (the
+# default ~/.pi/agent/sessions stays a candidate root; see step-12).
+HOME=$(mktemp -d) PI_CODING_AGENT_DIR= PI_CODING_AGENT_SESSION_DIR= CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi
 # bare sweep with the store absent: quiet for pi, exit 0
 HOME=$(mktemp -d) CLAUDE_CONFIG_DIR="$J/none" CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture
 ```
@@ -1243,3 +1246,139 @@ confirm; none was settled by evidence:
 6. **mtime source for the duplicate rule** is `os.Stat` on the path
    after symlink resolution; behavior on filesystems with coarse mtimes
    (ties) falls through to the path tiebreak.
+
+## Dogfood and release readiness (step-12)
+
+### Dogfood recipe, as run
+
+Run by the coordinator on 2026-10-13 with Pi 0.84.4 installed. The
+journal, config, cache and data dirs were temporary; the real `HOME`
+was used for reading only. Pi was never launched and nothing under
+`~/.pi` was written.
+
+```
+J=$(mktemp -d)
+CGO_ENABLED=0 go build -o "$J/clast" ./cmd/clast
+export CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" \
+       XDG_CACHE_HOME="$J/cache" XDG_DATA_HOME="$J/data"
+# before: sha256 + mtime of every file under ~/.pi/agent/sessions
+"$J/clast" plumbing capture --harness pi --json     # then again
+# after: repeat the snapshot and compare
+"$J/clast" plumbing stats --json
+"$J/clast" plumbing sessions --harness pi [--since all]
+"$J/clast" plumbing show pi-<id> --transcript --json
+HOME=$(mktemp -d) "$J/clast" plumbing show pi-<id> --transcript --json   # offline
+HOME=$(mktemp -d) "$J/clast" plumbing dismiss pi-<id> --reason dogfood
+# no store: temp HOME, PI_CODING_AGENT_DIR and PI_CODING_AGENT_SESSION_DIR blank
+HOME=$(mktemp -d) PI_CODING_AGENT_DIR= PI_CODING_AGENT_SESSION_DIR= "$J/clast" plumbing capture --harness pi
+HOME=$(mktemp -d) PI_CODING_AGENT_DIR= PI_CODING_AGENT_SESSION_DIR= "$J/clast" plumbing capture
+```
+
+### Dogfood results
+
+- `capture --harness pi --json`: exit 0, 31 captured, empty stderr,
+  about 0.48 s wall. Rerun: 0 captured, exit 0.
+- The sha256 + mtime snapshot of the Pi store was identical before and
+  after.
+- `stats --json`: `by_harness` pi 31, all captured, all projectless (the
+  temp journal has no project registry). Days span 2026-08-03 to
+  2026-09-14.
+- `sessions --harness pi` with the default `since` window shows 0;
+  `--since all` shows 31. Expected: the newest session is a month old.
+- `show pi-01a0a2aa-68c9-73d8-b984-ab5ef9090ce2 --transcript --json`:
+  4 turns, byte-identical with `HOME` at an empty temp dir (offline).
+  Offline `dismiss --reason dogfood`: exit 0.
+- No Pi store (empty temp `HOME`, `PI_*` blank): explicit
+  `--harness pi` exits 1 with `clast: plumbing capture: source "pi"
+  unavailable: open <home>/.pi/agent/sessions: no such file or
+  directory`. A bare sweep is quiet, exit 0.
+- `PI_CODING_AGENT_DIR` pointed at an empty dir does **not** hide the
+  real store. This is the intended contract (section 2 keeps the default
+  `~/.pi/agent/sessions` as a candidate root so retained history is
+  still captured when a relocation env var is set later). To scope a
+  dogfood, use a temp `HOME` and blank the `PI_*` variables, as the
+  e2e tests do.
+- Earlier live checks during the Matter: discovery 31/31 with 0
+  diagnostics; `capture.Run` totals user 79 / assistant 1261, matching
+  the step-01 jq survey; reader 1609 tool calls, 1608 paired, 1
+  unanswered, 0 orphans.
+
+### Supported format pins
+
+`pi-jsonl-v3` (transcript format string), session header `version`
+exactly 3. Evidence: Pi 0.83.0 history (fixture notes and the duo and
+terminal-multiplexers prior art) and the live 0.84.4 store (31 files, all
+header version 3). Any other header version is an item diagnostic and a
+skip (section 8). The header does not record the writer version (B1), so
+no behavior gates on the Pi version.
+
+### Fingerprint boundary
+
+`Transcript.SHA256` is the whole-byte sha256 of the copied file;
+`Lines` is the newline count (plus one for an unterminated final line).
+The sha256 is the verdict (section 6). **Triggers recapture:** appended
+lines, newline repair, any byte change including a same-size or
+same-line-count rewrite, truncate-then-regrow, a torn tail that is later
+completed. **Does not trigger recapture:** `touch` or mtime change with
+identical bytes, a fork being created (the parent is untouched), a
+change to clast's own fact rules (hash unchanged, section 1), and source
+deletion (the last capture stays).
+
+### Validation commands and results
+
+| Command | Result |
+|---|---|
+| `go test ./internal/source/... ./internal/verbs/... ./internal/journal/... ./internal/cli/... -count=1` | every package `ok`, no failures |
+| `go test ./... -count=1` | 42 packages `ok`, 0 FAIL |
+| `make check` | exit 0 (re-run by the coordinator: exit 0) |
+| `CGO_ENABLED=0 go build ./cmd/clast`, then `file` | `ELF 64-bit LSB executable, x86-64, statically linked` |
+| `make cross-compile`, then `file` | `dist/clast-darwin-arm64`: Mach-O 64-bit arm64; `dist/clast-linux-amd64`: ELF 64-bit x86-64, statically linked. `dist/` is gitignored. The darwin binary was not executed. |
+
+### Consolidated limitations
+
+Not repeated here: the Stage 3 list ("Remaining limitations" in
+"Recapture and recovery (Stage 3)", items 1 to 9) and the step-01
+B-list (B1 to B10, "Unsupported / missing evidence"). Added in step-12:
+
+1. The default `since` window hides sessions older than the window:
+   daily `sessions --harness pi` can show 0 for a store whose newest
+   session is a month old. Use `--since all`.
+2. `PI_CODING_AGENT_DIR` alone does not scope or hide the store (the
+   default root stays a candidate). Scope a dogfood with a temp `HOME`.
+3. amp is absent from the three-source CLI test
+   (`TestPlumbingCapture_ThreeLocalSourcesOffline`): the cli suite has
+   no amp stub; amp is covered by the in-process stub tests in
+   `internal/verbs/capture`.
+4. `TestBrief_EmptyState_NoLLMConfigNeeded_NoRequests` failed once in a
+   first full run ("stub captured 2 requests, want 0"). It reproduced
+   once in a 50x run and not again in 250+ isolated and 6 full-package
+   runs, on this branch and on main. The brief verb does not touch the
+   source registry, so it is recorded as an unrelated flake.
+5. The darwin binary was built and inspected with `file` only.
+6. Pi itself was never launched; all evidence is from retained files,
+   source reading and constructed fixtures.
+
+## Remaining approvals and follow-ups
+
+- The shared `stage.Commit` staging-dir leak (Stage 3 limitation 1) is a
+  found backlog entry, not fixed here.
+- A possible `capture.pi.roots` key for `--session-dir` and a project
+  `.pi/settings.json` `sessionDir` is deferred by the owner. Until then
+  such stores are reached only through the env overrides and the global
+  `settings.json`.
+- Requalify when Pi bumps the header version or ships the v4
+  `JsonlSessionRepo` into the sessions tree (B8).
+- No release, push, deploy or Linear status change is part of this
+  Matter.
+
+## Seal-condition checklist
+
+| Condition | Evidence |
+|---|---|
+| Explicit capture | `capture --harness pi --json` captured 31 of 31 live files, exit 0 (dogfood); `TestPlumbingCapture_PiExcludedButExplicit`, `PiExplicitUnavailable`, `PiUnenumerableDisclosed` |
+| Automatic (bare sweep) capture | `TestPlumbingCapture_PiLocalSweep`, `PiMixedSweep`, `ThreeLocalSourcesOffline`; config: `PiConfigValidation`; bare sweep with no store quiet, exit 0 (dogfood and `PiExplicitUnavailable`) |
+| Reliable recapture | rerun captured 0 (dogfood); `recapture_test.go`, `resilience_test.go`, `convergence_test.go`; second sweep a no-op in the e2e tests; scratch matrix, 600 iterations, no violation (Stage 3) |
+| Retained history without the executable | every e2e test runs with an empty PATH; the dogfood never launched Pi |
+| Offline journal consumption | dogfood `show --transcript --json` byte-identical with an empty `HOME`, offline `dismiss` exit 0; `PiDeletedStoreReaders` and `ThreeLocalSourcesOffline` (sessions, show, analyze, dismiss, curate with all storage deleted) |
+| Source untouched | store snapshot identical before and after the dogfood; the capture path only reads |
+| Limitations and format evidence recorded | sections "Format compatibility boundary", "Supported format pins", "Consolidated limitations", Stage 3 limitations, B-list |
