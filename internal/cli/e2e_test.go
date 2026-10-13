@@ -81,12 +81,16 @@ type result struct {
 // under a fresh temp dir, not an existing file — Splice treats a missing
 // settings.json as `{}` (SURFACE V32/C4.8), so tests that want to start
 // from an existing fixture write one at that same path themselves before
-// invoking the binary. Add each new harness's seam var to this list when
-// adding a target.
+// invoking the binary. XDG_DATA_HOME joins with devin-source/step-10:
+// the registered devin source reads $XDG_DATA_HOME/devin/cli/sessions.db
+// on every bare sweep, and this suite must never touch this host's real
+// retained store (CLAST_JOURNAL_DIR pins the journal location anyway,
+// so the clast journal_dir default it also feeds stays hermetic).
+// Add each new harness's seam var to this list when adding a target.
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	out := append(os.Environ(), env...)
-	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"} {
+	for _, name := range []string{"CLAST_CLAUDE_SKILLS_DIR", "CLAST_JOURNAL_DIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR"} {
 		set := false
 		for _, e := range env {
 			if strings.HasPrefix(e, name+"=") {
@@ -2407,11 +2411,13 @@ func TestPlumbingSessions_JSON_FiltersAndSorts(t *testing.T) {
 	fx := journaltest.New(t)
 	captured := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
 	curated := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
-	fx.Captured("2026-09-10", captured,
+	fx.Captured(
+		"2026-09-10", captured,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	)
-	fx.Curated("2026-09-11", curated,
+	fx.Curated(
+		"2026-09-11", curated,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
@@ -2477,7 +2483,8 @@ func TestPlumbingSessions_UnknownHarness_JSONEnvelope(t *testing.T) {
 func TestPlumbingShow_JSON_DefaultView(t *testing.T) {
 	fx := journaltest.New(t)
 	key := journal.SessionKey{Harness: "claude", NativeID: "curated-01"}
-	fx.Curated("2026-09-11", key,
+	fx.Curated(
+		"2026-09-11", key,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
@@ -2525,7 +2532,8 @@ func TestPlumbingShow_JSON_DefaultView(t *testing.T) {
 func TestPlumbingShow_Transcript_JSON(t *testing.T) {
 	fx := journaltest.New(t)
 	key := journal.SessionKey{Harness: "claude", NativeID: "with-transcript-01"}
-	fx.Captured("2026-09-10", key,
+	fx.Captured(
+		"2026-09-10", key,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	).WithTranscript("2026-09-10", key, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello from the transcript"}}`+"\n"))
@@ -2570,7 +2578,8 @@ func TestPlumbingShow_UnknownLocator_JSONEnvelope(t *testing.T) {
 func TestPlumbingShow_UnknownTranscriptFormat_JSONEnvelope(t *testing.T) {
 	fx := journaltest.New(t)
 	key := journal.SessionKey{Harness: "codex", NativeID: "unrendered-01"}
-	fx.Captured("2026-09-10", key,
+	fx.Captured(
+		"2026-09-10", key,
 		journal.TranscriptFingerprint{Format: "nonexistent-format", Lines: 1, SHA256: "a"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	).WithTranscript("2026-09-10", key, []byte("whatever"))
@@ -2679,11 +2688,13 @@ func TestPlumbingStats_JSON_CountsFourAxes(t *testing.T) {
 	fx := journaltest.New(t)
 	a := journal.SessionKey{Harness: "claude", NativeID: "a"}
 	b := journal.SessionKey{Harness: "codex", NativeID: "b"}
-	fx.Captured("2026-09-10", a,
+	fx.Captured(
+		"2026-09-10", a,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "a"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	)
-	fx.Dismissed("2026-09-11", b,
+	fx.Dismissed(
+		"2026-09-11", b,
 		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 1, SHA256: "b"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 9, 0, 5, 0, time.UTC),
@@ -2862,7 +2873,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 	// curated rather than replacing it, so the one session meant to
 	// survive every filter must itself be both curated AND stale.
 	target := journal.SessionKey{Harness: "claude", NativeID: "target-01"}
-	fx.CuratedStale("2026-09-11", target,
+	fx.CuratedStale(
+		"2026-09-11", target,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "target-grown"},
 		journal.TranscriptStamp{Lines: 3, SHA256: "target-at-curation"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
@@ -2873,7 +2885,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 
 	// Differs on state (dismissed, not curated).
 	wrongState := journal.SessionKey{Harness: "claude", NativeID: "wrong-state-01"}
-	fx.Dismissed("2026-09-11", wrongState,
+	fx.Dismissed(
+		"2026-09-11", wrongState,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "ws"},
 		time.Date(2026, 9, 11, 9, 30, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 9, 30, 5, 0, time.UTC),
@@ -2886,7 +2899,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 	// replaced --state curated instead of composing with it (V17/M7)
 	// would go undetected, since it would still return exactly {target}.
 	freshCurated := journal.SessionKey{Harness: "claude", NativeID: "fresh-curated-01"}
-	fx.Curated("2026-09-11", freshCurated,
+	fx.Curated(
+		"2026-09-11", freshCurated,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "fresh"},
 		time.Date(2026, 9, 11, 9, 20, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 20, 0, 0, time.UTC),
@@ -2896,7 +2910,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 
 	// Differs on harness (codex, not claude).
 	wrongHarness := journal.SessionKey{Harness: "codex", NativeID: "wrong-harness-01"}
-	fx.Curated("2026-09-11", wrongHarness,
+	fx.Curated(
+		"2026-09-11", wrongHarness,
 		journal.TranscriptFingerprint{Format: "codex-jsonl", Lines: 10, SHA256: "wh"},
 		time.Date(2026, 9, 11, 9, 15, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 15, 0, 0, time.UTC),
@@ -2906,7 +2921,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 
 	// Differs on project alone.
 	wrongProject := journal.SessionKey{Harness: "claude", NativeID: "wrong-project-01"}
-	fx.CuratedStale("2026-09-11", wrongProject,
+	fx.CuratedStale(
+		"2026-09-11", wrongProject,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wp-grown"},
 		journal.TranscriptStamp{Lines: 3, SHA256: "wp-at-curation"},
 		time.Date(2026, 9, 11, 9, 25, 0, 0, time.UTC),
@@ -2917,7 +2933,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 
 	// Differs on machine alone.
 	wrongMachine := journal.SessionKey{Harness: "claude", NativeID: "wrong-machine-01"}
-	fx.CuratedStale("2026-09-11", wrongMachine,
+	fx.CuratedStale(
+		"2026-09-11", wrongMachine,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wm-grown"},
 		journal.TranscriptStamp{Lines: 3, SHA256: "wm-at-curation"},
 		time.Date(2026, 9, 11, 9, 35, 0, 0, time.UTC),
@@ -2928,7 +2945,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 
 	// Differs on day (09-10, not 09-11).
 	wrongDay := journal.SessionKey{Harness: "claude", NativeID: "wrong-day-01"}
-	fx.Curated("2026-09-10", wrongDay,
+	fx.Curated(
+		"2026-09-10", wrongDay,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "wd"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC),
@@ -2937,7 +2955,8 @@ func TestSeal_FiltersComposeAcrossEveryAxis(t *testing.T) {
 		WithMachine("2026-09-10", wrongDay, "framework")
 
 	env := []string{"CLAST_JOURNAL_DIR=" + fx.Root()}
-	r := run(t, env, "plumbing", "sessions",
+	r := run(
+		t, env, "plumbing", "sessions",
 		"--state", "curated",
 		"--stale",
 		"--harness", "claude",
@@ -2972,7 +2991,8 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 	fx := journaltest.New(t)
 
 	stale := journal.SessionKey{Harness: "claude", NativeID: "stale-only-01"}
-	fx.CuratedStale("2026-09-11", stale,
+	fx.CuratedStale(
+		"2026-09-11", stale,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "grown"},
 		journal.TranscriptStamp{Lines: 3, SHA256: "at-curation"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
@@ -2981,7 +3001,8 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 	)
 
 	fresh := journal.SessionKey{Harness: "claude", NativeID: "fresh-only-01"}
-	fx.Curated("2026-09-11", fresh,
+	fx.Curated(
+		"2026-09-11", fresh,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "fresh"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
@@ -2989,7 +3010,8 @@ func TestSeal_StaleAloneFiltersCorrectly(t *testing.T) {
 	)
 
 	captured := journal.SessionKey{Harness: "claude", NativeID: "captured-only-01"}
-	fx.Captured("2026-09-11", captured,
+	fx.Captured(
+		"2026-09-11", captured,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 1, SHA256: "cap"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 	)
@@ -4319,12 +4341,14 @@ func TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet(t *testing.T) {
 
 	// Project "alpha": most recent qualifying session (alpha-stale) at
 	// 2026-09-12T09:00, so alpha's group must sort before beta's.
-	fx.Captured("2026-09-10", alphaOld,
+	fx.Captured(
+		"2026-09-10", alphaOld,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a-old"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	).WithProject("2026-09-10", alphaOld, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
 
-	fx.CuratedStale("2026-09-12", alphaStale,
+	fx.CuratedStale(
+		"2026-09-12", alphaStale,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 20, SHA256: "grown"},
 		journal.TranscriptStamp{Lines: 10, SHA256: "original"},
 		time.Date(2026, 9, 12, 9, 0, 0, 0, time.UTC),
@@ -4332,14 +4356,16 @@ func TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet(t *testing.T) {
 		"framework", "alpha's stale entry",
 	).WithProject("2026-09-12", alphaStale, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
 
-	fx.Curated("2026-09-11", alphaFresh,
+	fx.Curated(
+		"2026-09-11", alphaFresh,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 10, SHA256: "b"},
 		time.Date(2026, 9, 11, 9, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC),
 		"framework", "alpha's fresh entry",
 	).WithProject("2026-09-11", alphaFresh, journal.SessionProject{ID: "p-alpha", Slug: "alpha", Clone: "c", Label: "alpha", Path: "/alpha"})
 
-	fx.Dismissed("2026-09-11", alphaDismissed,
+	fx.Dismissed(
+		"2026-09-11", alphaDismissed,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "c"},
 		time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC),
 		time.Date(2026, 9, 11, 8, 30, 0, 0, time.UTC),
@@ -4348,14 +4374,16 @@ func TestPlumbingWake_JSON_GroupsProjectsAndFiltersWorkingSet(t *testing.T) {
 
 	// Project "beta": most recent (only) qualifying session at
 	// 2026-09-11T08:00 — earlier than alpha's, so beta sorts after alpha.
-	fx.Captured("2026-09-11", betaOnly,
+	fx.Captured(
+		"2026-09-11", betaOnly,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "d"},
 		time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC),
 	).WithProject("2026-09-11", betaOnly, journal.SessionProject{ID: "p-beta", Slug: "beta", Clone: "c", Label: "beta", Path: "/beta"})
 
 	// No project at all: its own bucket, ordered by its own recency —
 	// earliest of all here, so it sorts last.
-	fx.Captured("2026-09-09", unprojected,
+	fx.Captured(
+		"2026-09-09", unprojected,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "e"},
 		time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
 	)
@@ -4435,7 +4463,8 @@ func TestPlumbingWake_Human_NoSessions(t *testing.T) {
 func TestPlumbingWake_Human_GroupsUnderProjectHeadings(t *testing.T) {
 	fx := journaltest.New(t)
 	key := journal.SessionKey{Harness: "claude", NativeID: "captured-01"}
-	fx.Captured("2026-09-10", key,
+	fx.Captured(
+		"2026-09-10", key,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "a"},
 		time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
 	).WithProject("2026-09-10", key, journal.SessionProject{ID: "p-clast", Slug: "clast", Clone: "c", Label: "clast", Path: "/clast"})
@@ -5043,7 +5072,8 @@ func TestSeal_DocumentTrioComposesAcrossCuration(t *testing.T) {
 	key := journal.SessionKey{Harness: "claude", NativeID: "trio-01"}
 	const shard = "2026-09-05"
 	startedAt := time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)
-	fx.Captured(shard, key,
+	fx.Captured(
+		shard, key,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "trio"},
 		startedAt,
 	).WithProject(shard, key, journal.SessionProject{ID: "p-clast", Slug: "clast", Clone: "c1", Label: "dev", Path: "/dev"})
@@ -5970,7 +6000,8 @@ func TestWake_Interactive_StaleDismissRefused_SkipsAndContinues_ThroughTopLevelV
 	// stale = curated && transcript != transcript_at_curation) — so this
 	// row already carries an entry.md, exactly the shape dismiss.Run
 	// refuses.
-	fx.CuratedStale(staleShard, staleKey,
+	fx.CuratedStale(
+		staleShard, staleKey,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "grown"},
 		journal.TranscriptStamp{Lines: 1, SHA256: "original"},
 		now.Add(-3*time.Hour), now.Add(-2*time.Hour), "framework", "old title before the session grew",
@@ -6041,7 +6072,8 @@ func TestWake_Auto_StaleSession_ReCurates_ThroughTopLevelVerb(t *testing.T) {
 	shard := now.Add(-3 * time.Hour).Format("2006-01-02")
 	// Curated against a shorter transcript than what's on disk now (M7:
 	// stale = curated && transcript != transcript_at_curation).
-	fx.CuratedStale(shard, key,
+	fx.CuratedStale(
+		shard, key,
 		journal.TranscriptFingerprint{Format: "claude-jsonl", Lines: 5, SHA256: "grown"},
 		journal.TranscriptStamp{Lines: 1, SHA256: "original"},
 		now.Add(-3*time.Hour), now.Add(-2*time.Hour), "framework", "old title before the session grew",

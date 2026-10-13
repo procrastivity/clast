@@ -584,12 +584,15 @@ func TestRunStoreWriteFailureIsInternal(t *testing.T) {
 }
 
 func TestNamedSourceValidation(t *testing.T) {
-	if _, err := namedSource("devin"); err == nil {
+	if _, err := namedSource("pi"); err == nil {
 		t.Fatal("unknown harness accepted")
 	}
 	src, err := namedSource("claude")
 	if err != nil || src.Name() != "claude" {
 		t.Fatalf("claude resolve: %v %v", src, err)
+	}
+	if d, err := namedSource("devin"); err != nil || d.Name() != "devin" {
+		t.Fatalf("devin resolve: %v %v", d, err)
 	}
 }
 
@@ -951,7 +954,8 @@ func TestCommandExclusionLeavesReadersIntact(t *testing.T) {
 		t.Fatalf("excluded sweep: stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
 
-	if len(sourceregistry.All) != 2 || sourceregistry.Names[0] != "claude" || sourceregistry.Names[1] != "amp" {
+	if len(sourceregistry.All) != 3 || sourceregistry.Names[0] != "claude" ||
+		sourceregistry.Names[1] != "amp" || sourceregistry.Names[2] != "devin" {
 		t.Errorf("registry table changed under exclusion: %v", sourceregistry.Names)
 	}
 	if _, ok := sourceregistry.Lookup("claude"); !ok {
@@ -962,6 +966,9 @@ func TestCommandExclusionLeavesReadersIntact(t *testing.T) {
 	}
 	if _, ok := sourceregistry.LookupTranscriptReader("claude-jsonl"); !ok {
 		t.Error("LookupTranscriptReader(claude-jsonl) failed after exclusion")
+	}
+	if _, ok := sourceregistry.LookupTranscriptReader("devin-export-v1"); !ok {
+		t.Error("LookupTranscriptReader(devin-export-v1) failed after exclusion")
 	}
 	items, _, err := journal.Walk(journalDir)
 	if err != nil || len(items) != 2 {

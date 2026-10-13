@@ -30,6 +30,9 @@ repos:
         entry: shellcheck
         language: system
         types: [shell]
+        # vendor/ is upstream's bytes verbatim (go mod vendor output) —
+        # linting vendored scripts flags code we neither own nor ship.
+        exclude: '^vendor/'
 
       - id: gofumpt
         name: gofumpt -l
