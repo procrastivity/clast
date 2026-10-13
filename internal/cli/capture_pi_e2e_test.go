@@ -358,3 +358,158 @@ func TestPlumbingCapture_PiUnknownHarnessListsPi(t *testing.T) {
 		t.Errorf("unknown-harness message %q should name the implemented set", r.stderr)
 	}
 }
+
+// TestPlumbingCapture_ThreeLocalSourcesOffline (pi-source/step-11): one
+// bare sweep over claude, devin and pi fixtures captures each with its
+// own transcript format; a second sweep is a no-op; and once every
+// source's storage is deleted the journal alone serves sessions, show,
+// analyze and the state verbs, with the renderer resolved per format.
+// amp is left out: its e2e coverage drives an in-process stub CLI
+// (internal/verbs/capture), and the cli suite has no amp stub to reuse.
+func TestPlumbingCapture_ThreeLocalSourcesOffline(t *testing.T) {
+	piHomeDir := piHome(t, piBasic)
+	devinData := devinDataHome(t, "basic.sql")
+	claudeHome := writeClaudeHome(t)
+	journalDir := t.TempDir()
+	env := []string{
+		"CLAST_JOURNAL_DIR=" + journalDir,
+		"XDG_CONFIG_HOME=" + t.TempDir(),
+		"XDG_DATA_HOME=" + devinData,
+		"CLAUDE_CONFIG_DIR=" + claudeHome,
+		"HOME=" + piHomeDir,
+		"PATH=" + t.TempDir(),
+	}
+	const (
+		claudeDir = "claude-aaaaaaaa-1111-4111-8111-111111111111"
+		devinDir  = "devin-quiet-meadow"
+		piDir     = "pi-" + piBasic
+	)
+
+	r := run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || r.stderr != "" {
+		t.Fatalf("three-source sweep: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	for _, d := range []string{claudeDir, devinDir, piDir} {
+		if !strings.Contains(r.stdout, "captured "+d) {
+			t.Errorf("sweep stdout missing %q: %q", d, r.stdout)
+		}
+	}
+
+	// session.json records the right harness and transcript format.
+	wantFormat := map[string]string{claudeDir: "claude-jsonl", devinDir: "devin-export-v1", piDir: "pi-jsonl-v3"}
+	wantHarness := map[string]string{claudeDir: "claude", devinDir: "devin", piDir: "pi"}
+	seen := map[string]bool{}
+	err := filepath.WalkDir(journalDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "session.json" {
+			return err
+		}
+		dir := filepath.Base(filepath.Dir(p))
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		var sj struct {
+			Harness    string `json:"harness"`
+			Transcript struct {
+				Format string `json:"format"`
+			} `json:"transcript"`
+		}
+		if err := json.Unmarshal(b, &sj); err != nil {
+			return err
+		}
+		if sj.Harness != wantHarness[dir] || sj.Transcript.Format != wantFormat[dir] {
+			t.Errorf("%s session.json: harness=%q format=%q, want %q/%q",
+				dir, sj.Harness, sj.Transcript.Format, wantHarness[dir], wantFormat[dir])
+		}
+		seen[dir] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("session.json found for %v, want all three sources", seen)
+	}
+
+	r = run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || r.stdout != "" || r.stderr != "" {
+		t.Fatalf("second sweep: exit=%d stdout=%q stderr=%q, want quiet 0", r.exitCode, r.stdout, r.stderr)
+	}
+
+	// Delete every source's storage.
+	for _, p := range []string{filepath.Join(piHomeDir, ".pi"), filepath.Join(devinData, "devin"), claudeHome} {
+		if err := os.RemoveAll(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r = run(t, env, "plumbing", "capture")
+	if r.exitCode != 0 || r.stdout != "" || r.stderr != "" {
+		t.Fatalf("sweep with all storage gone: exit=%d stdout=%q stderr=%q, want quiet 0", r.exitCode, r.stdout, r.stderr)
+	}
+
+	r = run(t, env, "plumbing", "sessions", "--since", "all")
+	if r.exitCode != 0 {
+		t.Fatalf("sessions: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	for _, d := range []string{"aaaaaaaa", "quiet-meadow", piBasic} {
+		if !strings.Contains(r.stdout, d) {
+			t.Errorf("sessions (all harnesses) missing %q: %q", d, r.stdout)
+		}
+	}
+	for h, id := range map[string]string{"claude": "aaaaaaaa", "devin": "quiet-meadow", "pi": piBasic} {
+		r = run(t, env, "plumbing", "sessions", "--since", "all", "--harness", h)
+		if r.exitCode != 0 || !strings.Contains(r.stdout, id) {
+			t.Errorf("sessions --harness %s: exit=%d stdout=%q", h, r.exitCode, r.stdout)
+		}
+		for other, oid := range map[string]string{"claude": "aaaaaaaa", "devin": "quiet-meadow", "pi": piBasic} {
+			if other != h && strings.Contains(r.stdout, oid) {
+				t.Errorf("sessions --harness %s leaked %s: %q", h, other, r.stdout)
+			}
+		}
+	}
+
+	// show --transcript renders per format from the journal copy.
+	for _, d := range []string{claudeDir, devinDir, piDir} {
+		r = run(t, env, "plumbing", "show", d, "--transcript")
+		if r.exitCode != 0 || r.stdout == "" {
+			t.Errorf("show --transcript %s: exit=%d stdout=%q stderr=%q", d, r.exitCode, r.stdout, r.stderr)
+		}
+	}
+	if r = run(t, env, "plumbing", "show", piDir, "--transcript"); !strings.Contains(r.stdout, "FIXTURE-OK") {
+		t.Errorf("pi transcript = %q, want FIXTURE-OK", r.stdout)
+	}
+
+	// analyze reads each source's structured transcript.
+	for day, id := range map[string]string{"2026-09-01": "aaaaaaaa", "2026-10-10": "quiet-meadow", "2026-01-10": piBasic[:8]} {
+		out := filepath.Join(t.TempDir(), "analyze.html")
+		r = run(t, env, "analyze", day, "--since", "-1d", "--out", out)
+		page, rerr := os.ReadFile(out)
+		if r.exitCode != 0 || rerr != nil || !strings.Contains(string(page), id) {
+			t.Errorf("analyze %s: exit=%d stderr=%q readErr=%v hasID=%v", day, r.exitCode, r.stderr, rerr, strings.Contains(string(page), id))
+		}
+	}
+
+	// State verbs work on a pi session with no storage: dismiss, then
+	// curate (which revives from dismissed).
+	r = run(t, env, "plumbing", "dismiss", piDir, "--reason", "offline")
+	if r.exitCode != 0 {
+		t.Fatalf("dismiss pi: exit=%d stderr=%q", r.exitCode, r.stderr)
+	}
+	r = run(t, env, "plumbing", "sessions", "--since", "all", "--harness", "pi", "--state", "dismissed")
+	if r.exitCode != 0 || !strings.Contains(r.stdout, piBasic) {
+		t.Errorf("dismissed pi session not listed: exit=%d stdout=%q", r.exitCode, r.stdout)
+	}
+	r = runWithStdin(t, env, wellFormedEntryDoc("pi offline"), "plumbing", "curate", piDir)
+	if r.exitCode != 0 {
+		t.Fatalf("curate pi: exit=%d stdout=%q stderr=%q", r.exitCode, r.stdout, r.stderr)
+	}
+	r = run(t, env, "plumbing", "sessions", "--since", "all", "--harness", "pi", "--state", "curated")
+	if r.exitCode != 0 || !strings.Contains(r.stdout, piBasic) {
+		t.Errorf("curated pi session not listed: exit=%d stdout=%q", r.exitCode, r.stdout)
+	}
+	r = run(t, env, "plumbing", "show", piDir, "--transcript")
+	if r.exitCode != 0 || !strings.Contains(r.stdout, "FIXTURE-OK") {
+		t.Errorf("pi transcript after curation: exit=%d stdout=%q", r.exitCode, r.stdout)
+	}
+}
