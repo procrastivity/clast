@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"errors"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/source"
 )
@@ -23,7 +25,7 @@ func TestCorrelateFixtures(t *testing.T) {
 	want["015"] = "" // relative cwd
 	want["016"] = other
 
-	s := NewAt(filepath.Join(base, "percwd"))
+	s := pi.NewAt(filepath.Join(base, "percwd"))
 	found, _, err := s.Discover(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +43,7 @@ func TestCorrelateFixtures(t *testing.T) {
 		}
 	}
 
-	flat := NewAt(filepath.Join(base, "flat"))
+	flat := pi.NewAt(filepath.Join(base, "flat"))
 	ff, _, _ := flat.Discover(t.Context())
 	cwds := map[string]string{}
 	for _, d := range ff {
@@ -63,7 +65,7 @@ func pad3(i int) string {
 
 func TestCorrelateFailures(t *testing.T) {
 	root := t.TempDir()
-	s := NewAt(root)
+	s := pi.NewAt(root)
 
 	t.Run("missing file is an item error", func(t *testing.T) {
 		_, _, err := s.Correlate(t.Context(), source.Discovered{Path: filepath.Join(root, "gone.jsonl")})
@@ -110,7 +112,7 @@ func TestReadHeader(t *testing.T) {
 		name    string
 		in      string
 		wantID  string
-		wantErr string // substring; "silent" for errSilentSkip
+		wantErr string // substring; "silent" for ErrSilentSkip
 	}{
 		{"valid", `{"type":"session","version":3,"id":"abc-1.2_x"}` + "\n", "abc-1.2_x", ""},
 		{"version float", `{"type":"session","version":3.0,"id":"a"}` + "\n", "", "unsupported session version 3.0"},
@@ -131,10 +133,10 @@ func TestReadHeader(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h, err := readHeader(strings.NewReader(tc.in))
+			h, err := pi.ReadHeader(strings.NewReader(tc.in))
 			switch {
 			case tc.wantErr == "silent":
-				if !errors.Is(err, errSilentSkip) {
+				if !errors.Is(err, pi.ErrSilentSkip) {
 					t.Errorf("err = %v, want silent skip", err)
 				}
 			case tc.wantErr != "":
@@ -148,7 +150,7 @@ func TestReadHeader(t *testing.T) {
 			}
 		})
 	}
-	h, err := readHeader(strings.NewReader(`{"type":"session","version":3,"id":"a","timestamp":"2026-01-10T10:00:00.000Z","cwd":"/x"}` + "\n"))
+	h, err := pi.ReadHeader(strings.NewReader(`{"type":"session","version":3,"id":"a","timestamp":"2026-01-10T10:00:00.000Z","cwd":"/x"}` + "\n"))
 	if err != nil || h.Timestamp.Format("2006-01-02T15:04:05.000Z07:00") != "2026-01-10T10:00:00.000Z" || h.CWD != "/x" {
 		t.Errorf("h=%+v err=%v", h, err)
 	}

@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"fmt"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/source"
 )
@@ -61,7 +63,7 @@ func skipIfRoot(t *testing.T) {
 	}
 }
 
-func discover(t *testing.T, s *Source) ([]source.Discovered, []source.Diagnostic, error) {
+func discover(t *testing.T, s *pi.Source) ([]source.Discovered, []source.Diagnostic, error) {
 	t.Helper()
 	return s.Discover(t.Context())
 }
@@ -158,8 +160,8 @@ func copyTree(t *testing.T, src, dst string) {
 }
 
 // envOf builds an injectable Env over a map and a home directory.
-func envOf(home string, vars map[string]string) Env {
-	return Env{
+func envOf(home string, vars map[string]string) pi.Env {
+	return pi.Env{
 		Getenv:      func(k string) string { return vars[k] },
 		UserHomeDir: func() (string, error) { return home, nil },
 	}

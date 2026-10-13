@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/source"
@@ -92,7 +94,7 @@ func mustTime(t *testing.T, s string) time.Time {
 // headerID reads the header id of a source file via the shared reader.
 func headerID(t *testing.T, path string) string {
 	t.Helper()
-	h, err := readHeaderFile(path)
+	h, err := pi.ReadHeaderFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +116,7 @@ func TestCaptureFixtureManifest(t *testing.T) {
 			}
 			d := source.Discovered{NativeID: headerID(t, path), Path: path}
 			var mw memWrite
-			facts, diags, err := NewAt(base).Capture(t.Context(), d, mw.write)
+			facts, diags, err := pi.NewAt(base).Capture(t.Context(), d, mw.write)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -159,7 +161,7 @@ func capturing(t *testing.T, id, content string) (source.Facts, []source.Diagnos
 	p := filepath.Join(t.TempDir(), "x.jsonl")
 	writeFile(t, p, content)
 	var mw memWrite
-	f, d, err := NewAt("x").Capture(t.Context(), source.Discovered{NativeID: id, Path: p}, mw.write)
+	f, d, err := pi.NewAt("x").Capture(t.Context(), source.Discovered{NativeID: id, Path: p}, mw.write)
 	return f, d, mw.got, err
 }
 
@@ -276,7 +278,7 @@ func TestCaptureRules(t *testing.T) {
 		}
 	})
 	t.Run("line over 16 MiB is a bad line; copy stays whole", func(t *testing.T) {
-		big := `{"type":"custom","id":"big","parentId":"a","pad":"` + strings.Repeat("x", maxLineSize) + `"}` + "\n"
+		big := `{"type":"custom","id":"big","parentId":"a","pad":"` + strings.Repeat("x", pi.MaxLineSize) + `"}` + "\n"
 		in := hdr + msg("a", "", ts(1), "user", "") + big + msg("b", "big", ts(2), "assistant", content1)
 		f, d, got, err := capturing(t, "s1", in)
 		if err != nil || string(got["transcript.jsonl"]) != in {
@@ -306,7 +308,7 @@ func TestCaptureHeaderFailuresAreItemErrors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var mw memWrite
-			_, _, err := NewAt(base).Capture(t.Context(), source.Discovered{NativeID: tc.id, Path: filepath.Join(base, tc.file)}, mw.write)
+			_, _, err := pi.NewAt(base).Capture(t.Context(), source.Discovered{NativeID: tc.id, Path: filepath.Join(base, tc.file)}, mw.write)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
@@ -319,7 +321,7 @@ func TestCaptureHeaderFailuresAreItemErrors(t *testing.T) {
 		}
 	})
 	t.Run("missing file", func(t *testing.T) {
-		_, _, err := NewAt(base).Capture(t.Context(), source.Discovered{NativeID: "a", Path: filepath.Join(t.TempDir(), "gone")}, (&memWrite{}).write)
+		_, _, err := pi.NewAt(base).Capture(t.Context(), source.Discovered{NativeID: "a", Path: filepath.Join(t.TempDir(), "gone")}, (&memWrite{}).write)
 		if !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("err = %v", err)
 		}
@@ -333,7 +335,7 @@ func TestCaptureWriteAndCancellation(t *testing.T) {
 
 	t.Run("write error propagates", func(t *testing.T) {
 		boom := errors.New("boom")
-		_, _, err := NewAt(base).Capture(t.Context(), d, func(string, io.Reader) error { return boom })
+		_, _, err := pi.NewAt(base).Capture(t.Context(), d, func(string, io.Reader) error { return boom })
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v", err)
 		}
@@ -342,14 +344,14 @@ func TestCaptureWriteAndCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		called := false
-		_, _, err := NewAt(base).Capture(ctx, d, func(string, io.Reader) error { called = true; return nil })
+		_, _, err := pi.NewAt(base).Capture(ctx, d, func(string, io.Reader) error { called = true; return nil })
 		if !errors.Is(err, context.Canceled) || called {
 			t.Errorf("err=%v called=%v", err, called)
 		}
 	})
 	t.Run("canceled mid-copy is a bare cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
-		_, _, err := NewAt(base).Capture(ctx, d, func(_ string, r io.Reader) error {
+		_, _, err := pi.NewAt(base).Capture(ctx, d, func(_ string, r io.Reader) error {
 			buf := make([]byte, 16)
 			if _, err := r.Read(buf); err != nil {
 				return err
@@ -370,7 +372,7 @@ func TestCaptureDoesNotWriteSource(t *testing.T) {
 	for _, tc := range manifest() {
 		m, _ := filepath.Glob(filepath.Join(base, tc.glob))
 		var mw memWrite
-		if _, _, err := NewAt(base).Capture(t.Context(), source.Discovered{NativeID: headerID(t, m[0]), Path: m[0]}, mw.write); err != nil {
+		if _, _, err := pi.NewAt(base).Capture(t.Context(), source.Discovered{NativeID: headerID(t, m[0]), Path: m[0]}, mw.write); err != nil {
 			t.Fatal(err)
 		}
 	}

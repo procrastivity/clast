@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"fmt"

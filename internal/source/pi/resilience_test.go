@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/procrastivity/clast/internal/source/pi"
+
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/source"
 	"github.com/procrastivity/clast/internal/verbs/capture"
@@ -21,7 +23,7 @@ import (
 // interpose on the stage's write seam. Everything else is the real
 // source.
 type hookSource struct {
-	*Source
+	*pi.Source
 	before func(d source.Discovered)
 	wrap   func(source.WriteArtifact) source.WriteArtifact
 }
@@ -42,15 +44,15 @@ func (r *rig) run(ctx context.Context) ([]capture.Captured, []source.Diagnostic,
 }
 
 func (r *rig) hook(h hookSource) {
-	h.Source = NewAt(r.root)
+	h.Source = pi.NewAt(r.root)
 	r.deps.Sources = []source.Source{h}
 }
 
-func (r *rig) plain() { r.deps.Sources = []source.Source{NewAt(r.root)} }
+func (r *rig) plain() { r.deps.Sources = []source.Source{pi.NewAt(r.root)} }
 
 func (r *rig) turnsOf(id string) int {
 	r.t.Helper()
-	turns, err := NewAt(r.root).RenderTranscript(bytes.NewReader(r.artifact(id)), 1<<20)
+	turns, err := pi.NewAt(r.root).RenderTranscript(bytes.NewReader(r.artifact(id)), 1<<20)
 	if err != nil {
 		r.t.Fatalf("committed artifact not readable: %v", err)
 	}

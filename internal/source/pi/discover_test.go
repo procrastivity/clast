@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 )
 
 func TestDiscoverFixtureRoots(t *testing.T) {
@@ -85,7 +87,7 @@ func TestDiscoverFixtureRoots(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.root, func(t *testing.T) {
 			before := snapshot(t, filepath.Join(base, tc.root))
-			found, diags, err := discover(t, NewAt(filepath.Join(base, tc.root)))
+			found, diags, err := discover(t, pi.NewAt(filepath.Join(base, tc.root)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +118,7 @@ func TestDiscoverFixtureRoots(t *testing.T) {
 }
 
 func TestDiscoverHeaderIDWinsOverFilename(t *testing.T) {
-	found, _, err := discover(t, NewAt(filepath.Join(fixtureRoots(t), "diagnosed")))
+	found, _, err := discover(t, pi.NewAt(filepath.Join(fixtureRoots(t), "diagnosed")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +151,7 @@ func TestDiscoverDuplicateIDs(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			found, diags, err := discover(t, NewAt(root))
+			found, diags, err := discover(t, pi.NewAt(root))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +176,7 @@ func TestDiscoverDuplicateIDs(t *testing.T) {
 
 func TestDiscoverAbsentEmptyUnreadableRoot(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
-		s := NewAt(filepath.Join(t.TempDir(), "nope"))
+		s := pi.NewAt(filepath.Join(t.TempDir(), "nope"))
 		found, diags, err := discover(t, s)
 		if found != nil || diags != nil || err != nil {
 			t.Fatalf("got %v %v %v, want nil nil nil", found, diags, err)
@@ -184,7 +186,7 @@ func TestDiscoverAbsentEmptyUnreadableRoot(t *testing.T) {
 		}
 	})
 	t.Run("empty", func(t *testing.T) {
-		s := NewAt(t.TempDir())
+		s := pi.NewAt(t.TempDir())
 		found, diags, err := discover(t, s)
 		if len(found) != 0 || len(diags) != 0 || err != nil {
 			t.Fatalf("got %v %v %v", found, diags, err)
@@ -201,7 +203,7 @@ func TestDiscoverAbsentEmptyUnreadableRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
-		s := NewAt(root)
+		s := pi.NewAt(root)
 		found, _, err := discover(t, s)
 		if err == nil || !errors.Is(err, fs.ErrPermission) || found != nil {
 			t.Fatalf("Discover = %v, %v; want permission error", found, err)
@@ -217,10 +219,10 @@ func TestDiscoverAbsentEmptyUnreadableRoot(t *testing.T) {
 	t.Run("root is a file", func(t *testing.T) {
 		f := filepath.Join(t.TempDir(), "file")
 		writeFile(t, f, "x")
-		if _, _, err := discover(t, NewAt(f)); err == nil {
+		if _, _, err := discover(t, pi.NewAt(f)); err == nil {
 			t.Error("Discover on a non-directory root: want error")
 		}
-		if err := NewAt(f).Present(t.Context()); err == nil {
+		if err := pi.NewAt(f).Present(t.Context()); err == nil {
 			t.Error("Present on a non-directory root: want error")
 		}
 	})
@@ -236,7 +238,7 @@ func TestDiscoverUnreadableSubdirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(bad, 0o755) })
-	found, diags, err := discover(t, NewAt(root))
+	found, diags, err := discover(t, pi.NewAt(root))
 	if err != nil {
 		t.Fatalf("an unreadable subdirectory must not fail the source: %v", err)
 	}
@@ -255,7 +257,7 @@ func TestDiscoverUnreadableFile(t *testing.T) {
 	if err := os.Chmod(p, 0); err != nil {
 		t.Fatal(err)
 	}
-	found, diags, err := discover(t, NewAt(root))
+	found, diags, err := discover(t, pi.NewAt(root))
 	if err != nil || len(found) != 0 {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
@@ -274,7 +276,7 @@ func TestDiscoverHeaderLineBound(t *testing.T) {
 	t.Run("exactly 1 MiB is accepted", func(t *testing.T) {
 		root := t.TempDir()
 		writeFile(t, filepath.Join(root, "x_"+idPrefix+"000000000001.jsonl"), mk(1<<20))
-		found, diags, err := discover(t, NewAt(root))
+		found, diags, err := discover(t, pi.NewAt(root))
 		if err != nil || len(found) != 1 || len(diags) != 0 {
 			t.Fatalf("found=%v diags=%q err=%v", found, diagStrings(diags), err)
 		}
@@ -283,7 +285,7 @@ func TestDiscoverHeaderLineBound(t *testing.T) {
 		root := t.TempDir()
 		p := filepath.Join(root, "x_"+idPrefix+"000000000001.jsonl")
 		writeFile(t, p, mk(1<<20+1))
-		found, diags, err := discover(t, NewAt(root))
+		found, diags, err := discover(t, pi.NewAt(root))
 		if err != nil || len(found) != 0 {
 			t.Fatalf("found=%v err=%v", found, err)
 		}
@@ -294,7 +296,7 @@ func TestDiscoverHeaderLineBound(t *testing.T) {
 	t.Run("over 1 MiB with no newline is a diagnostic not silence", func(t *testing.T) {
 		root := t.TempDir()
 		writeFile(t, filepath.Join(root, "x_"+idPrefix+"000000000001.jsonl"), strings.TrimSuffix(mk(1<<20+5), "\n"))
-		_, diags, _ := discover(t, NewAt(root))
+		_, diags, _ := discover(t, pi.NewAt(root))
 		if len(diags) != 1 {
 			t.Errorf("diags = %q", diagStrings(diags))
 		}
@@ -309,7 +311,7 @@ func TestDiscoverSilentShapes(t *testing.T) {
 	// Unterminated but complete header is a real header.
 	writeFile(t, filepath.Join(dir, "c_"+idPrefix+"000000000007.jsonl"),
 		`{"type":"session","version":3,"id":"`+idPrefix+`000000000007","timestamp":"2026-05-01T10:00:00.000Z"}`)
-	found, diags, err := discover(t, NewAt(root))
+	found, diags, err := discover(t, pi.NewAt(root))
 	if err != nil || len(diags) != 0 || len(found) != 1 || found[0].NativeID != idPrefix+"000000000007" {
 		t.Fatalf("found=%v diags=%q err=%v", found, diagStrings(diags), err)
 	}
@@ -338,7 +340,7 @@ func TestDiscoverSymlinks(t *testing.T) {
 	// Dangling non-.jsonl symlink: silent.
 	must(t, os.Symlink(filepath.Join(outside, "gone"), filepath.Join(root, "dangling-dir")))
 
-	found, diags, err := discover(t, NewAt(root))
+	found, diags, err := discover(t, pi.NewAt(root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +363,7 @@ func TestDiscoverSymlinks(t *testing.T) {
 func TestDiscoverCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	s := NewAt(filepath.Join(fixtureRoots(t), "percwd"))
+	s := pi.NewAt(filepath.Join(fixtureRoots(t), "percwd"))
 	found, diags, err := s.Discover(ctx)
 	if !errors.Is(err, context.Canceled) || found != nil || diags != nil {
 		t.Fatalf("Discover = %v %v %v, want context.Canceled", found, diags, err)
@@ -375,7 +377,7 @@ func TestDiscoverMakesNoWrites(t *testing.T) {
 	base := fixtureRoots(t)
 	before := snapshot(t, base)
 	for _, r := range []string{"percwd", "flat", "rejected", "diagnosed", "duplicate", "walkshape"} {
-		s := NewAt(filepath.Join(base, r))
+		s := pi.NewAt(filepath.Join(base, r))
 		found, _, err := s.Discover(t.Context())
 		if err != nil {
 			t.Fatal(err)

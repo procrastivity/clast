@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"errors"
@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 )
 
 func newHome(t *testing.T) string {
@@ -15,7 +17,7 @@ func newHome(t *testing.T) string {
 	return t.TempDir()
 }
 
-func idsAt(t *testing.T, s *Source) ([]string, []string) {
+func idsAt(t *testing.T, s *pi.Source) ([]string, []string) {
 	t.Helper()
 	found, diags, err := discover(t, s)
 	if err != nil {
@@ -30,7 +32,7 @@ func TestRootResolution(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		home := newHome(t)
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0001"))
-		got, diags := idsAt(t, NewWithEnv(envOf(home, nil)))
+		got, diags := idsAt(t, pi.NewWithEnv(envOf(home, nil)))
 		if !reflect.DeepEqual(got, []string{sid("0001")}) || len(diags) != 0 {
 			t.Errorf("got %v %q", got, diags)
 		}
@@ -43,7 +45,7 @@ func TestRootResolution(t *testing.T) {
 		writeSession(t, setDir, sid("0002"))
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0003"))
 		writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{"sessionDir":"`+setDir+`"}`)
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": envDir}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": envDir}))
 		got, diags := idsAt(t, s)
 		if !reflect.DeepEqual(got, []string{sid("0001"), sid("0003")}) || len(diags) != 0 {
 			t.Errorf("got %v %q", got, diags)
@@ -56,7 +58,7 @@ func TestRootResolution(t *testing.T) {
 		writeSession(t, setDir, sid("0002"))
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0003"))
 		writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{"sessionDir":"`+setDir+`","other":1}`)
-		got, diags := idsAt(t, NewWithEnv(envOf(home, nil)))
+		got, diags := idsAt(t, pi.NewWithEnv(envOf(home, nil)))
 		if !reflect.DeepEqual(got, []string{sid("0002"), sid("0003")}) || len(diags) != 0 {
 			t.Errorf("got %v %q", got, diags)
 		}
@@ -71,7 +73,7 @@ func TestRootResolution(t *testing.T) {
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0003"))
 		// A settings file in the default agent dir must be ignored now.
 		writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{"sessionDir":"/nonexistent/ignored"}`)
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_DIR": agent}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_DIR": agent}))
 		got, _ := idsAt(t, s)
 		if !reflect.DeepEqual(got, []string{sid("0001"), sid("0003")}) {
 			t.Errorf("got %v", got)
@@ -87,7 +89,7 @@ func TestRootResolution(t *testing.T) {
 	t.Run("tilde expansion", func(t *testing.T) {
 		home := newHome(t)
 		writeSession(t, filepath.Join(home, "tilde"), sid("0001"))
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": "~/tilde"}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": "~/tilde"}))
 		got, diags := idsAt(t, s)
 		if !reflect.DeepEqual(got, []string{sid("0001")}) || len(diags) != 0 {
 			t.Errorf("got %v %q", got, diags)
@@ -101,7 +103,7 @@ func TestRootResolution(t *testing.T) {
 		link := filepath.Join(home, "link")
 		must(t, os.Symlink(def, link))
 		for _, v := range []string{def, def + "/", link} {
-			s := NewWithEnv(envOf(home, map[string]string{
+			s := pi.NewWithEnv(envOf(home, map[string]string{
 				"PI_CODING_AGENT_SESSION_DIR": v,
 				"PI_CODING_AGENT_DIR":         filepath.Join(home, ".pi", "agent"),
 			}))
@@ -132,7 +134,7 @@ func TestRelativeOverridesAreDiagnosed(t *testing.T) {
 			if tc.write != nil {
 				tc.write(home)
 			}
-			found, diags, err := discover(t, NewWithEnv(envOf(home, tc.vars)))
+			found, diags, err := discover(t, pi.NewWithEnv(envOf(home, tc.vars)))
 			if err != nil || len(found) != 1 {
 				t.Fatalf("found=%v err=%v: the default root must still apply", found, err)
 			}
@@ -148,7 +150,7 @@ func TestSettingsProblemsAreDiagnosed(t *testing.T) {
 		home := newHome(t)
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0001"))
 		writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{not json`)
-		found, diags, err := discover(t, NewWithEnv(envOf(home, nil)))
+		found, diags, err := discover(t, pi.NewWithEnv(envOf(home, nil)))
 		if err != nil || len(found) != 1 || len(diags) != 1 || !strings.Contains(diags[0].Err.Error(), "malformed settings.json") {
 			t.Errorf("found=%v diags=%q err=%v", found, diagStrings(diags), err)
 		}
@@ -160,7 +162,7 @@ func TestSettingsProblemsAreDiagnosed(t *testing.T) {
 		p := filepath.Join(home, ".pi", "agent", "settings.json")
 		writeFile(t, p, `{}`)
 		must(t, os.Chmod(p, 0))
-		found, diags, err := discover(t, NewWithEnv(envOf(home, nil)))
+		found, diags, err := discover(t, pi.NewWithEnv(envOf(home, nil)))
 		if err != nil || len(found) != 1 || len(diags) != 1 || !errors.Is(diags[0].Err, fs.ErrPermission) {
 			t.Errorf("found=%v diags=%q err=%v", found, diagStrings(diags), err)
 		}
@@ -168,7 +170,7 @@ func TestSettingsProblemsAreDiagnosed(t *testing.T) {
 	t.Run("absent settings and non-string sessionDir are quiet or diagnosed, never fatal", func(t *testing.T) {
 		home := newHome(t)
 		writeFile(t, filepath.Join(home, ".pi", "agent", "settings.json"), `{"sessionDir":5}`)
-		_, diags, err := discover(t, NewWithEnv(envOf(home, nil)))
+		_, diags, err := discover(t, pi.NewWithEnv(envOf(home, nil)))
 		if err != nil || len(diags) != 1 {
 			t.Errorf("diags=%q err=%v", diagStrings(diags), err)
 		}
@@ -178,7 +180,7 @@ func TestSettingsProblemsAreDiagnosed(t *testing.T) {
 func TestEnvDrivenAbsenceAndPresence(t *testing.T) {
 	t.Run("all roots absent", func(t *testing.T) {
 		home := newHome(t)
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_DIR": filepath.Join(home, "nope")}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_DIR": filepath.Join(home, "nope")}))
 		found, diags, err := discover(t, s)
 		if found != nil || diags != nil || err != nil {
 			t.Fatalf("got %v %v %v", found, diags, err)
@@ -195,7 +197,7 @@ func TestEnvDrivenAbsenceAndPresence(t *testing.T) {
 	t.Run("one historical root is enough for Present", func(t *testing.T) {
 		home := newHome(t)
 		must(t, os.MkdirAll(filepath.Join(home, ".pi", "agent", "sessions"), 0o755))
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": filepath.Join(home, "gone")}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": filepath.Join(home, "gone")}))
 		if err := s.Present(t.Context()); err != nil {
 			t.Errorf("Present = %v", err)
 		}
@@ -208,7 +210,7 @@ func TestEnvDrivenAbsenceAndPresence(t *testing.T) {
 		writeSession(t, filepath.Join(home, ".pi", "agent", "sessions", "--x--"), sid("0001"))
 		must(t, os.Chmod(bad, 0))
 		t.Cleanup(func() { _ = os.Chmod(bad, 0o755) })
-		s := NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": bad}))
+		s := pi.NewWithEnv(envOf(home, map[string]string{"PI_CODING_AGENT_SESSION_DIR": bad}))
 		found, diags, err := discover(t, s)
 		if err != nil || len(found) != 1 || len(diags) != 1 || diags[0].Path != bad {
 			t.Errorf("found=%v diags=%q err=%v", found, diagStrings(diags), err)
@@ -220,21 +222,21 @@ func TestEnvDrivenAbsenceAndPresence(t *testing.T) {
 	t.Run("home unresolvable but absolute override works", func(t *testing.T) {
 		d := t.TempDir()
 		writeSession(t, d, sid("0001"))
-		env := Env{
+		env := pi.Env{
 			Getenv:      func(k string) string { return map[string]string{"PI_CODING_AGENT_SESSION_DIR": d}[k] },
 			UserHomeDir: func() (string, error) { return "", errors.New("no home") },
 		}
-		got, diags := idsAt(t, NewWithEnv(env))
+		got, diags := idsAt(t, pi.NewWithEnv(env))
 		if !reflect.DeepEqual(got, []string{sid("0001")}) || len(diags) != 1 {
 			t.Errorf("got %v %q", got, diags)
 		}
 	})
 	t.Run("nothing resolvable is an error", func(t *testing.T) {
-		env := Env{
+		env := pi.Env{
 			Getenv:      func(string) string { return "" },
 			UserHomeDir: func() (string, error) { return "", errors.New("no home") },
 		}
-		s := NewWithEnv(env)
+		s := pi.NewWithEnv(env)
 		if _, _, err := discover(t, s); err == nil {
 			t.Error("Discover: want error")
 		}
@@ -248,14 +250,14 @@ func TestNewAtIgnoresEnvironment(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", t.TempDir())
 	root := t.TempDir()
 	writeSession(t, filepath.Join(root, "--x--"), sid("0001"))
-	got, diags := idsAt(t, NewAt(root))
+	got, diags := idsAt(t, pi.NewAt(root))
 	if !reflect.DeepEqual(got, []string{sid("0001")}) || len(diags) != 0 {
 		t.Errorf("got %v %q", got, diags)
 	}
 }
 
 func TestIdentity(t *testing.T) {
-	s := NewAt("x")
+	s := pi.NewAt("x")
 	if s.Name() != "pi" || s.Model() != "file-tail" {
 		t.Errorf("Name=%q Model=%q", s.Name(), s.Model())
 	}

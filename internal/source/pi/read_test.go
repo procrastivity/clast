@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/source"
@@ -157,7 +159,7 @@ func TestReadAndRenderFixtures(t *testing.T) {
 			turns:  nil,
 		},
 	}
-	s := New()
+	s := pi.New()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			evs, err := s.ReadTranscript(fixtureReader(t, tc.glob))
@@ -179,7 +181,7 @@ func TestReadAndRenderFixtures(t *testing.T) {
 }
 
 func TestReaderTimesAndFormats(t *testing.T) {
-	s := New()
+	s := pi.New()
 	if !reflect.DeepEqual(s.TranscriptFormats(), []string{"pi-jsonl-v3"}) {
 		t.Errorf("formats = %v", s.TranscriptFormats())
 	}
@@ -195,7 +197,7 @@ func TestReaderTimesAndFormats(t *testing.T) {
 
 func TestRenderCapsRunes(t *testing.T) {
 	in := hdr + `{"type":"message","id":"a","parentId":null,"timestamp":"2026-05-01T10:00:01.000Z","message":{"role":"user","content":"héllo wörld"}}` + "\n"
-	turns, err := New().RenderTranscript(strings.NewReader(in), 4)
+	turns, err := pi.New().RenderTranscript(strings.NewReader(in), 4)
 	if err != nil || len(turns) != 1 || turns[0].Text != "héll" {
 		t.Errorf("turns=%v err=%v", turns, err)
 	}
@@ -217,7 +219,7 @@ func TestReadSyntheticToolPairing(t *testing.T) {
 		line("r1b", "r0", `{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{"type":"text","text":"dup"}]}`) +
 		line("b", "r1b", `{"role":"bashExecution","command":"ls"}`) +
 		line("x", "b", `{"role":"mystery","content":"m"}`)
-	evs, err := New().ReadTranscript(strings.NewReader(in))
+	evs, err := pi.New().ReadTranscript(strings.NewReader(in))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +237,7 @@ func TestReadSyntheticToolPairing(t *testing.T) {
 		t.Errorf("events:\n got %q\nwant %q", got, want)
 	}
 	// The renderer shows prose only: the user text, nothing else.
-	turns, _ := New().RenderTranscript(strings.NewReader(in), 0)
+	turns, _ := pi.New().RenderTranscript(strings.NewReader(in), 0)
 	if got := turnStrings(turns); !reflect.DeepEqual(got, []string{"user: hi"}) {
 		t.Errorf("turns = %q", got)
 	}
@@ -257,7 +259,7 @@ func TestReadMetaEntryTypes(t *testing.T) {
 		e("5", "4", `"type":"custom_message","customType":"ext","content":"cm","display":true`) +
 		e("6", "5", `"type":"label","targetId":"1","label":"lb"`) +
 		e("7", "6", `"type":"future_thing"`)
-	evs, err := New().ReadTranscript(strings.NewReader(in))
+	evs, err := pi.New().ReadTranscript(strings.NewReader(in))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,26 +273,26 @@ func TestReadMetaEntryTypes(t *testing.T) {
 }
 
 func TestReadTolerance(t *testing.T) {
-	big := `{"type":"custom","id":"big","parentId":null,"pad":"` + strings.Repeat("x", maxLineSize) + `"}` + "\n"
+	big := `{"type":"custom","id":"big","parentId":null,"pad":"` + strings.Repeat("x", pi.MaxLineSize) + `"}` + "\n"
 	u := `{"type":"message","id":"a","parentId":null,"timestamp":"2026-05-01T10:00:00.000Z","message":{"role":"user","content":"q"}}` + "\n"
 	// An oversize line does not stop the read; it is just not an entry.
-	evs, err := New().ReadTranscript(strings.NewReader(hdr + big + u))
+	evs, err := pi.New().ReadTranscript(strings.NewReader(hdr + big + u))
 	if err != nil || len(evs) != 1 || evs[0].Text != "q" {
 		t.Errorf("oversize: %v %v", compact(evs), err)
 	}
 	// Torn tail, blank lines, junk, later header lines.
-	evs, err = New().ReadTranscript(strings.NewReader(hdr + "\n junk\n" + u + hdr + `{"type":"message","id":"b","pa`))
+	evs, err = pi.New().ReadTranscript(strings.NewReader(hdr + "\n junk\n" + u + hdr + `{"type":"message","id":"b","pa`))
 	if err != nil || len(evs) != 1 {
 		t.Errorf("tolerance: %v %v", compact(evs), err)
 	}
 	// Valid unterminated final line is read.
-	evs, _ = New().ReadTranscript(strings.NewReader(hdr + strings.TrimSuffix(u, "\n")))
+	evs, _ = pi.New().ReadTranscript(strings.NewReader(hdr + strings.TrimSuffix(u, "\n")))
 	if len(evs) != 1 {
 		t.Errorf("unterminated valid tail: %v", compact(evs))
 	}
 	// Empty and header-only inputs.
 	for _, in := range []string{"", hdr} {
-		if evs, err := New().ReadTranscript(strings.NewReader(in)); err != nil || len(evs) != 0 {
+		if evs, err := pi.New().ReadTranscript(strings.NewReader(in)); err != nil || len(evs) != 0 {
 			t.Errorf("%q: %v %v", in, evs, err)
 		}
 	}
@@ -305,7 +307,7 @@ func TestOfflineEndToEnd(t *testing.T) {
 	srcRoot := filepath.Join(t.TempDir(), "percwd")
 	copyTree(t, filepath.Join(fixtureRoots(t), "percwd"), srcRoot)
 	journalRoot := t.TempDir()
-	s := NewAt(srcRoot)
+	s := pi.NewAt(srcRoot)
 	captured, _, failed, err := capture.Run(t.Context(), capture.Deps{
 		Root: journalRoot, Sources: []source.Source{s},
 		Now: func() time.Time { return time.Unix(1792000000, 0).UTC() },

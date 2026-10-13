@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/source"
@@ -53,7 +55,7 @@ func TestCaptureEndToEnd(t *testing.T) {
 	journalRoot := t.TempDir()
 	deps := capture.Deps{
 		Root:    journalRoot,
-		Sources: []source.Source{NewAt(srcRoot)},
+		Sources: []source.Source{pi.NewAt(srcRoot)},
 		Now:     func() time.Time { return time.Unix(1792000000, 0).UTC() },
 	}
 	srcBefore := snapshot(t, srcRoot)

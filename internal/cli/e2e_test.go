@@ -86,6 +86,10 @@ type result struct {
 // on every bare sweep, and this suite must never touch this host's real
 // retained store (CLAST_JOURNAL_DIR pins the journal location anyway,
 // so the clast journal_dir default it also feeds stays hermetic).
+// HOME joins with pi-source/step-10: the registered pi source reads
+// ~/.pi/agent/sessions (and the PI_CODING_AGENT_* overrides) on every
+// bare sweep, so an unset HOME defaults to a fresh temp dir and the Pi
+// overrides default to empty — this host's real Pi store is never read.
 // Add each new harness's seam var to this list when adding a target.
 func hermeticEnv(t *testing.T, env []string) []string {
 	t.Helper()
@@ -102,6 +106,14 @@ func hermeticEnv(t *testing.T, env []string) []string {
 			out = append(out, name+"="+t.TempDir())
 		}
 	}
+	if !envHas(env, "HOME") {
+		out = append(out, "HOME="+t.TempDir())
+	}
+	for _, name := range []string{"PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"} {
+		if !envHas(env, name) {
+			out = append(out, name+"=")
+		}
+	}
 	settingsSet := false
 	for _, e := range env {
 		if strings.HasPrefix(e, "CLAST_CLAUDE_SETTINGS_PATH=") {
@@ -113,6 +125,15 @@ func hermeticEnv(t *testing.T, env []string) []string {
 		out = append(out, "CLAST_CLAUDE_SETTINGS_PATH="+filepath.Join(t.TempDir(), "settings.json"))
 	}
 	return out
+}
+
+func envHas(env []string, name string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func run(t *testing.T, env []string, args ...string) result {

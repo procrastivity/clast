@@ -584,7 +584,7 @@ func TestRunStoreWriteFailureIsInternal(t *testing.T) {
 }
 
 func TestNamedSourceValidation(t *testing.T) {
-	if _, err := namedSource("pi"); err == nil {
+	if _, err := namedSource("hermes"); err == nil {
 		t.Fatal("unknown harness accepted")
 	}
 	src, err := namedSource("claude")
@@ -702,12 +702,12 @@ func TestCapturePolicyConfig(t *testing.T) {
 
 	// An unimplemented name in either position errors, naming the value
 	// and the implemented set.
-	if _, _, err := capturePolicy(config.Config{"capture": config.Config{"exclude": []any{"pi"}}}); err == nil ||
-		!strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "claude") {
+	if _, _, err := capturePolicy(config.Config{"capture": config.Config{"exclude": []any{"hermes"}}}); err == nil ||
+		!strings.Contains(err.Error(), "hermes") || !strings.Contains(err.Error(), "claude") {
 		t.Errorf("unimplemented exclude name: %v", err)
 	}
-	if _, _, err := capturePolicy(config.Config{"capture": config.Config{"pi": config.Config{"auto": true}}}); err == nil ||
-		!strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "claude") {
+	if _, _, err := capturePolicy(config.Config{"capture": config.Config{"hermes": config.Config{"auto": true}}}); err == nil ||
+		!strings.Contains(err.Error(), "hermes") || !strings.Contains(err.Error(), "claude") {
 		t.Errorf("unimplemented auto source: %v", err)
 	}
 	// …while the implemented network source parses in both.
@@ -779,6 +779,11 @@ func envSeams(t *testing.T, claudeHome string) (journalDir, configHome string) {
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeHome)
+	// The registered pi source resolves ~/.pi/agent/sessions on every
+	// sweep; keep it off this host's real store.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
 	return journalDir, configHome
 }
 
@@ -877,11 +882,11 @@ func TestCommandExplicitBeatsExclusion(t *testing.T) {
 
 func TestCommandUnknownNameInExcludeIsValidationConfig(t *testing.T) {
 	_, configHome := envSeams(t, writeHome(t))
-	writeConfig(t, configHome, "capture:\n  exclude: [pi]\n")
+	writeConfig(t, configHome, "capture:\n  exclude: [hermes]\n")
 
 	_, _, err := runCommand(t)
 	ce := assertClasterr(t, err, "validation.config")
-	if !strings.Contains(ce.Message, "pi") || !strings.Contains(ce.Message, "claude") {
+	if !strings.Contains(ce.Message, "hermes") || !strings.Contains(ce.Message, "claude") {
 		t.Errorf("message %q should name the value and the implemented set", ce.Message)
 	}
 }
@@ -892,7 +897,7 @@ func TestCommandMalformedCaptureConfigIsValidationConfig(t *testing.T) {
 		"non-mapping capture section": "capture: yes\n",
 		"mistyped auto_dismiss_noop":  "capture:\n  auto_dismiss_noop: yes\n",
 		"exclude not a list":          "capture:\n  exclude: claude\n",
-		"unknown auto source":         "capture:\n  pi:\n    auto: true\n",
+		"unknown auto source":         "capture:\n  hermes:\n    auto: true\n",
 		"unparseable config":          "capture:\n\texclude: [claude]\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -954,8 +959,9 @@ func TestCommandExclusionLeavesReadersIntact(t *testing.T) {
 		t.Fatalf("excluded sweep: stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
 
-	if len(sourceregistry.All) != 3 || sourceregistry.Names[0] != "claude" ||
-		sourceregistry.Names[1] != "amp" || sourceregistry.Names[2] != "devin" {
+	if len(sourceregistry.All) != 4 || sourceregistry.Names[0] != "claude" ||
+		sourceregistry.Names[1] != "amp" || sourceregistry.Names[2] != "devin" ||
+		sourceregistry.Names[3] != "pi" {
 		t.Errorf("registry table changed under exclusion: %v", sourceregistry.Names)
 	}
 	if _, ok := sourceregistry.Lookup("claude"); !ok {

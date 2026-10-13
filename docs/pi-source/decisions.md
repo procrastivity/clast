@@ -9,9 +9,11 @@ outcome/exit table. Pi is a local `source.FileTail` source modeled on
 `internal/source/claude`; `internal/source/amp` (network) and
 `internal/source/devin` (SQLite) are not models for it.
 
-Status: step-01 (qualification), step-02 (contract) and step-03 (fixtures,
-format boundary, validation recipes) done; step-04 (discovery and
-correlation) is next; no production Go exists yet.
+Status: Stages 1–3 are done (qualification, contract, fixtures;
+discovery, capture and offline readers in `internal/source/pi`;
+recapture and recovery evidence). Step-10 registers pi in
+`registry.All` as a local source; step-11 (mixed-source and offline
+compatibility) and step-12 (dogfood and readiness) remain.
 
 ## Qualification evidence (step-01)
 

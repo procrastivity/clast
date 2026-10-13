@@ -5,8 +5,9 @@
 //
 // The files hold the three duties: root resolution, the walk, the shared
 // header reader and Correlate (discover*.go, roots.go, header.go,
-// correlate.go), and Capture (capture.go, scan.go). Pi is deliberately
-// not in the production registry yet (Stage 4).
+// correlate.go), and Capture (capture.go, scan.go). Pi is a local
+// source in the production registry: bare sweeps include it unless
+// capture.exclude names it, and it takes no capture.pi.auto key.
 package pi
 
 import (

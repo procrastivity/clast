@@ -1,4 +1,4 @@
-package pi
+package pi_test
 
 import (
 	"bytes"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/procrastivity/clast/internal/source/pi"
 
 	"github.com/procrastivity/clast/internal/journal"
 	"github.com/procrastivity/clast/internal/source"
@@ -32,7 +34,7 @@ func newRig(t *testing.T, autoDismiss bool) *rig {
 	r.dir = filepath.Join(r.root, "--home-user-Code-demo--")
 	r.deps = capture.Deps{
 		Root:            r.jr,
-		Sources:         []source.Source{NewAt(r.root)},
+		Sources:         []source.Source{pi.NewAt(r.root)},
 		AutoDismissNoop: autoDismiss,
 		Now:             func() time.Time { r.n++; return time.Unix(1792000000+int64(r.n), 0).UTC() },
 	}
