@@ -3,15 +3,13 @@
 // posture (M13). The contract this package implements is
 // docs/pi-source/decisions.md ("Contract (step-02)").
 //
-// This file set holds the discovery and correlation duties (step-04):
-// root resolution, the walk, the shared header reader, and Correlate.
-// Capture belongs to step-05 and is a stub here. Pi is deliberately not
-// in the production registry yet (Stage 4).
+// The files hold the three duties: root resolution, the walk, the shared
+// header reader and Correlate (discover*.go, roots.go, header.go,
+// correlate.go), and Capture (capture.go, scan.go). Pi is deliberately
+// not in the production registry yet (Stage 4).
 package pi
 
 import (
-	"context"
-	"errors"
 	"os"
 
 	"github.com/procrastivity/clast/internal/source"
@@ -77,12 +75,6 @@ func (s *Source) Name() string { return Name }
 
 // Model implements source.Source: pi is file-tail (M13).
 func (s *Source) Model() source.StorageModel { return source.FileTail }
-
-// Capture implements source.Source. STUB: step-05 owns artifact copying
-// and facts; until then every call is an error and writes nothing.
-func (s *Source) Capture(_ context.Context, d source.Discovered, _ source.WriteArtifact) (source.Facts, []source.Diagnostic, error) {
-	return source.Facts{}, nil, errors.New("pi: capture not implemented (pi-source step-05): " + d.Path)
-}
 
 var (
 	_ source.Source   = (*Source)(nil)

@@ -371,13 +371,6 @@ func TestDiscoverCanceledContext(t *testing.T) {
 	}
 }
 
-func TestCaptureIsStubbed(t *testing.T) {
-	_, _, err := NewAt(t.TempDir()).Capture(t.Context(), found0(), nil)
-	if err == nil {
-		t.Fatal("Capture stub must return an error until step-05")
-	}
-}
-
 func TestDiscoverMakesNoWrites(t *testing.T) {
 	base := fixtureRoots(t)
 	before := snapshot(t, base)
