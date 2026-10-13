@@ -164,9 +164,7 @@ func (c *scan) handle(terminated bool) {
 		return
 	}
 	r := rec{}
-	if len(e.ParentID) > 0 {
-		r.hasParent = json.Unmarshal(e.ParentID, &r.parent) == nil && r.parent != ""
-	}
+	r.parent, r.hasParent = parentOf(e.ParentID)
 	if e.Type == "message" && e.Message != nil {
 		switch e.Message.Role {
 		case "user":
@@ -234,16 +232,17 @@ func (c *scan) result() scanResult {
 	if !c.haveLeaf {
 		return r
 	}
-	seen := map[string]bool{}
-	cur := c.leaf
-	for {
-		rc, ok := c.byID[cur]
-		if !ok || seen[cur] {
-			r.brokenAt = cur
-			r.user, r.assistant, r.substantive = c.wholeUser, c.wholeAsst, c.wholeSubst
-			return r
-		}
-		seen[cur] = true
+	path, broken := walkLeaf(c.leaf, func(id string) (string, bool, bool) {
+		rc, ok := c.byID[id]
+		return rc.parent, rc.hasParent, ok
+	})
+	if broken != "" {
+		r.brokenAt = broken
+		r.user, r.assistant, r.substantive = c.wholeUser, c.wholeAsst, c.wholeSubst
+		return r
+	}
+	for _, id := range path {
+		rc := c.byID[id]
 		if rc.user {
 			r.user++
 		}
@@ -253,14 +252,43 @@ func (c *scan) result() scanResult {
 		if rc.substantive {
 			r.substantive = true
 		}
-		if !rc.hasParent {
-			return r
+	}
+	return r
+}
+
+// walkLeaf follows parentId from leaf to a root (contract section 5),
+// shared by capture's counts and the offline readers so they can never
+// disagree about which entries are the conversation. lookup reports an
+// id's parent, whether it has one, and whether the id exists. The path
+// is returned leaf first. A missing parent or a cycle returns the
+// offending id as broken (and the walked prefix is not meaningful).
+func walkLeaf(leaf string, lookup func(id string) (parent string, hasParent, ok bool)) (path []string, broken string) {
+	seen := map[string]bool{}
+	for cur := leaf; ; {
+		parent, hasParent, ok := lookup(cur)
+		if !ok || seen[cur] {
+			return nil, cur
 		}
-		cur = rc.parent
+		seen[cur] = true
+		path = append(path, cur)
+		if !hasParent {
+			return path, ""
+		}
+		cur = parent
 	}
 }
 
 func nonEmptyArray(raw json.RawMessage) bool {
 	var a []json.RawMessage
 	return json.Unmarshal(raw, &a) == nil && len(a) > 0
+}
+
+// parentOf decodes parentId: a non-empty string is a parent; absent,
+// null, empty or any other type means a root.
+func parentOf(raw json.RawMessage) (string, bool) {
+	var p string
+	if len(raw) == 0 || json.Unmarshal(raw, &p) != nil || p == "" {
+		return "", false
+	}
+	return p, true
 }
