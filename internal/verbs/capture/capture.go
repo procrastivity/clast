@@ -278,6 +278,10 @@ func captureOne(ctx context.Context, deps Deps, src source.Source, d source.Disc
 		shard = startedAt.Local().Format("2006-01-02")
 	}
 	if err := stage.Commit(shard, key); err != nil {
+		// Deliberate discard: the commit already failed, so a stray
+		// .capture-* staging directory must not survive it — the discard
+		// error would only shadow the commit error that matters.
+		_ = stage.Discard()
 		return nil, diags, err
 	}
 
