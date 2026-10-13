@@ -583,6 +583,43 @@ func TestRunStoreWriteFailureIsInternal(t *testing.T) {
 	}
 }
 
+func TestRunDiscardsStagingDirWhenCommitFails(t *testing.T) {
+	root := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC) }
+	src := stubStagingSource{stubSource: stubSource{name: "fake"}}
+
+	// Predict the commit target: the stub returns zero StartedAt, so the
+	// shard derives from Deps.Now (pinned above), and the key is the
+	// stub's (harness, native id) pair.
+	shard := now().Local().Format("2006-01-02")
+	key := journal.SessionKey{Harness: "fake", NativeID: "staged-1"}
+
+	// A directory squatting on the transcript's landing path forces
+	// os.Rename inside stage.Commit to fail — the failure this test
+	// exists to exercise.
+	dest := journal.SessionDir(root, shard, key)
+	if err := os.MkdirAll(filepath.Join(dest, "transcript.jsonl"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, _, err := Run(context.Background(), Deps{
+		Root:    root,
+		Sources: []source.Source{src},
+		Now:     now,
+	})
+	_ = assertClasterr(t, err, "internal.capture")
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".capture-") {
+			t.Errorf("staging directory %s survived a failed commit", e.Name())
+		}
+	}
+}
+
 func TestNamedSourceValidation(t *testing.T) {
 	if _, err := namedSource("pi"); err == nil {
 		t.Fatal("unknown harness accepted")
@@ -651,6 +688,25 @@ func (s stubCancelCorrelateSource) Discover(context.Context) ([]source.Discovere
 
 func (s stubCancelCorrelateSource) Correlate(context.Context, source.Discovered) (string, []source.Diagnostic, error) {
 	return "", nil, fmt.Errorf("correlate: %w", context.Canceled)
+}
+
+// stubStagingSource enumerates one session whose Capture stages a single
+// transcript artifact and returns zero Facts.StartedAt — the shard then
+// derives from Deps.Now, which tests pin — so a test can predict the
+// commit target and force a commit failure there.
+type stubStagingSource struct {
+	stubSource
+}
+
+func (s stubStagingSource) Discover(context.Context) ([]source.Discovered, []source.Diagnostic, error) {
+	return []source.Discovered{{NativeID: "staged-1", Path: "/nowhere/staged-1"}}, nil, nil
+}
+
+func (s stubStagingSource) Capture(_ context.Context, _ source.Discovered, write source.WriteArtifact) (source.Facts, []source.Diagnostic, error) {
+	if err := write("transcript.jsonl", strings.NewReader("{}\n")); err != nil {
+		return source.Facts{}, nil, err
+	}
+	return source.Facts{}, nil, nil
 }
 
 func TestSelectSweep(t *testing.T) {
