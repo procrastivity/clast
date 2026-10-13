@@ -9,7 +9,7 @@ outcome/exit table. Pi is a local `source.FileTail` source modeled on
 `internal/source/claude`; `internal/source/amp` (network) and
 `internal/source/devin` (SQLite) are not models for it.
 
-Status: step-01 (qualification) done; contract (step-02) not started.
+Status: step-01 (qualification) and step-02 (contract) done; implementation not started.
 
 ## Qualification evidence (step-01)
 
@@ -459,8 +459,500 @@ content was copied anywhere; only key names, counts, and ids were read.
 
 ## Contract (step-02)
 
-TODO: step-02 decides the discovery set, native-id and correlation rules,
-the single-pass tee facts (counts, `StartedAt`/`LastActiveAt`, branch,
-`Substantive`), the fingerprint format name, torn-tail and shrink
-handling, unknown-version policy, and the fixture matrix; it must answer
-B1-B10 above rather than assume them.
+The calls below are what the Go package `internal/source/pi` must do.
+They use only the existing seams (`source.Source`, `Presence`,
+optionally `TranscriptRenderer` / `TranscriptReader`) and the existing
+capture verb. Evidence tags (S1-S10, B1-B10) refer to the step-01
+section above. "Item diagnostic" means a `source.Diagnostic`: stderr,
+never changes the exit. "Source failure" means `Discover` returns an
+error: sweep discloses it and exits 0, explicit `--harness pi` exits 1
+`capture.source-unavailable` (shared policy; not re-decided here).
+
+### 0. Position in the shared policy
+
+Pi is `source.FileTail` and local. It joins a bare sweep unless listed
+in `capture.exclude`; `capture --harness pi` captures it regardless of
+exclusion; there is no `capture.pi.auto` setting. Absent storage is a
+quiet `(nil, nil, nil)` from `Discover` on sweeps; `Present` makes the
+explicit path disclose it. Registry name `pi`, so the journal directory
+is `pi-<native-id>` (M11).
+
+### 1. Artifact name, format string, version gate
+
+- **Artifact:** `transcript.jsonl`, the journal default. Pi's file is
+  already JSONL, so `TranscriptFingerprint.Artifact` stays empty (claude
+  precedent; devin and amp needed a non-default name, Pi does not). The
+  bytes are the Pi file, unchanged, including the header line and any
+  torn tail. No sidecars exist (S1: nothing else lives in the tree).
+- **`transcript.format`: `pi-jsonl-v3`.** The number is the Pi header
+  `version` the parser was qualified against (S2), not the Pi release.
+  It is stamped only when the header says `3`.
+- **Version gate (Discover, re-checked by Capture).** Supported set is
+  exactly `{3}`.
+  - `version` 1 or 2: Pi migrates these in place on its next open
+    (step-01 "Append vs rewrite"), and no sample of either exists (B2).
+    Not captured; item diagnostic
+    `pi: <path>: unsupported session version N (supported: 3)`.
+    The session converges by itself: once Pi opens and migrates it, the
+    file is v3 and the next sweep captures it.
+  - `version` missing or not an integer: Pi itself treats this as v1
+    (`session-manager.js:77`); same outcome and diagnostic text
+    (`version missing`).
+  - `version` > 3 (v4 harness files, B8): not captured; same diagnostic.
+    This is the named "incompatible format" outcome; it is never a
+    silent parse and never a whole-source failure, because other files
+    are still valid.
+  - Dropping a file this way loses nothing: the original stays in
+    `~/.pi`, and no path deletes journal history. Supporting another
+    version is a new Matter with its own qualification and format string
+    (`pi-jsonl-v4`).
+- A future decision to change fact rules does not retrigger recapture
+  (hash unchanged); same limit as claude. Not addressed here.
+
+### 2. Discovery
+
+**Roots clast can honor without running Pi.** clast sees only its own
+process environment and the files on disk.
+
+| Relocator (step-01) | Honored? | Rule |
+|---|---|---|
+| `--session-dir` flag | No | clast never sees Pi's argv. Named limit |
+| env `PI_CODING_AGENT_SESSION_DIR` | Yes | `~` expanded; must be absolute after expansion |
+| `sessionDir` in global `<agentDir>/settings.json` | Yes | same path rule |
+| `sessionDir` in project `.pi/settings.json` | No | needs the cwd of a Pi run; unbounded. Named limit |
+| env `PI_CODING_AGENT_DIR` | Yes | moves `<agentDir>` (and so the settings file and default root) |
+
+- `agentDir` = `PI_CODING_AGENT_DIR` (expanded) if set, else
+  `~/.pi/agent`.
+- **Effective root** follows Pi's precedence minus the flag: env
+  session dir, else global settings `sessionDir`, else
+  `<agentDir>/sessions` (S1).
+- **Candidate roots, in order:** effective root, `<agentDir>/sessions`,
+  `~/.pi/agent/sessions`, de-duplicated by cleaned path (best-effort
+  `EvalSymlinks`). The extra two are history: a user who later set an
+  override still has older sessions in the default tree. A relative
+  override (env or settings) cannot be resolved because Pi resolves it
+  against the cwd of the Pi process (`utils/paths.js:82-86`); it is
+  ignored with an item diagnostic and the next candidates still apply. An
+  unreadable or malformed `settings.json` is an item diagnostic and is
+  treated as "no `sessionDir`". An env/settings difference between the
+  user's shell and a hook/cron environment is a known limit (B6);
+  the extra candidates soften it.
+- **Fixture seam:** `NewAt(root)` replaces the whole candidate list with
+  one root, like `claude.NewAt`.
+
+**Walk shape (S1).** For each candidate root that exists: read its
+entries. `*.jsonl` files directly in the root (flat layout) and
+`*.jsonl` files one level down in each subdirectory (per-cwd layout)
+are candidates. Symlinked directories and files are followed (`os.Stat`;
+Pi follows directory symlinks in `listAll`). No deeper recursion, no
+cwd filtering (all cwds in a flat root are captured; Correlate binds
+each by header). Non-regular files, directories named `*.jsonl`, and
+other suffixes are ignored without comment.
+
+**File selection (Discover reads only the first line, at most 1 MiB,
+Pi's own header scan cap).** The first line must be a JSON object with
+`type=="session"`, a string `id` matching Pi's id rule
+`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$`, and `version==3`
+(section 1). The id rule is a security boundary, not politeness: the id
+becomes a journal directory name (`pi-<id>`, `journal/paths.go:22`),
+and a hand-edited or imported header could carry `../`.
+The header must be the first line. Pi would also accept junk lines
+before the header (it skips unparseable lines when searching); clast is
+stricter on purpose, since Pi never writes that shape (S9).
+
+Outcome per candidate file:
+
+| State | Outcome |
+|---|---|
+| zero bytes | skipped silently (transient between create and first write; Pi may also initialize it) |
+| first line unterminated and not valid JSON, no newline anywhere in the file | skipped silently (header being written) |
+| first line unparseable (newline-terminated), or JSON but not `type=="session"`, or `id` missing or not a string | item diagnostic, skipped |
+| `id` fails the id rule | item diagnostic, skipped |
+| header line longer than 1 MiB | item diagnostic, skipped |
+| `version` != 3 | item diagnostic (section 1), skipped |
+| open or stat error | item diagnostic, skipped |
+| valid header, no entries (header-only) | discovered and captured (section 7) |
+
+**Absent / empty / unreadable root.**
+- Every candidate root missing: `Discover` returns `(nil, nil, nil)`.
+  `Present` returns the error for the effective root (the
+  `os.PathError` naming path and reason, verbatim, as claude does).
+- A candidate root exists but is empty: present, no sessions, quiet.
+- A candidate root exists but cannot be enumerated: if at least one
+  other root enumerated, this is an item diagnostic; if none did,
+  `Discover` returns that error (source failure). A subdirectory that
+  cannot be read is always an item diagnostic (claude precedent).
+- `Present` returns nil iff at least one candidate root is a readable
+  directory.
+
+`Discovered` = `{NativeID: header id, Path: file path, ModTime: file
+mtime}`. `ModTime` is a liveness hint only; it is never compared for
+freshness (section 6).
+
+### 3. Session identity, duplicates, forks
+
+- **Native id = header `id`** (S2). Pi opens a file by its header id
+  (`sessionId = header.id`, `session-manager.js` `_setSessionFile`), not
+  by the filename, so the header is Pi's own authority. M11: no uuid
+  assumption anywhere; ids may be any string passing the id rule
+  (`--session-id`, step-01 "File name").
+- **Filename is a cross-check only.** Filename is split at the first
+  `_` into `<ts>_<id>`. If the id part differs from the header id, or
+  the name has no `_`, the header id wins and an item diagnostic
+  `pi: <path>: filename id X does not match header id Y` is emitted;
+  the file is still captured. Header-vs-filename timestamp is not checked.
+- **Duplicate header ids across files (B7).** Normal Pi operation never
+  produces two files with one header id, but `importFromJsonl` copies a
+  file with its original header (step-01 "Resume behavior"). The journal
+  key is `(pi, id)`, so two files cannot both be captured. Rule: within
+  one `Discover`, among files sharing a header id, the one with the
+  newest `ModTime` is returned (ties: lexicographically smallest path);
+  each other file gets an item diagnostic
+  `pi: <path>: duplicate session id X, using <winner>`. The result is
+  deterministic for a given disk state. Known cost: if both copies grow,
+  the winner can change and the committed transcript is replaced by the
+  other copy's divergent content (the default recapture posture). No
+  evidence says this occurs (B7); the diagnostic makes it visible.
+  Whole-file dedupe never looks at entry ids.
+- **Forks are separate sessions.** A fork has its own header id (S6),
+  so it is its own journal session with its own counts and its own
+  transcript copy, including the copied history. `parentSession` is not
+  a `Facts` field and no shared model has a slot for it; it stays
+  readable in the captured header line. Nothing resolves it to a parent
+  session key.
+- **Cross-session fork dedup is out of scope**, per M14 and
+  `SOURCES.md` §4 item 1: clast keys content on entry id when a
+  feature counts or diffs inside a transcript; deduping copied history
+  across a fork family is a consumer (wake) concern. Capture never
+  subtracts, hides, or links parent history.
+
+### 4. Correlation and timestamps
+
+- **`Correlate`** reads only the header line: `cwd` if it is a
+  non-empty absolute path, else `""` (projectless, still captured; M17
+  empty-means-no-fact). It is passed through lexically as Pi wrote it:
+  no `EvalSymlinks`, no slug decoding (the slug is lossy; S1/B10). The
+  registry then resolves it with `ResolveCurrentClone`, exactly as for
+  claude. A session run through a symlinked path that the registry holds
+  as a realpath stays projectless; that is B10 and is not fixed here.
+  Forks carry the target cwd in their own header (`forkFrom` writes
+  `resolvedTargetCwd`), so a cross-project `--fork` correlates to the
+  project where it now lives. An unreadable file is an item diagnostic
+  (the verb skips that item).
+- **`StartedAt` = header `timestamp`** (ISO-8601, parsed
+  `RFC3339Nano`). It is the birth of this session file. It also drives
+  the day shard (verb: `facts.StartedAt` local date).
+- **`LastActiveAt` = the latest of the header timestamp and every
+  parseable entry `timestamp`** (ISO, every entry type counts, as
+  bookkeeping counts for claude). Entry ISO `timestamp` is used, not
+  `message.timestamp` (unix ms): the ISO field exists on all entry types,
+  the ms field only on messages (S10). Unparseable timestamps are
+  skipped; an unparseable header timestamp leaves `StartedAt` zero and
+  the verb falls back to capture time for the shard.
+  `LastActiveAt` takes the max over **all** entries, not only the leaf
+  path: it is "when did this file last move", and an abandoned branch is
+  still activity.
+- The header term in the max is load-bearing: copied fork history
+  carries older entry timestamps than the fork's own header (live fork:
+  first entry 44 s before the header, S6), so without it a fresh fork
+  would have `LastActiveAt < StartedAt`.
+
+### 5. Facts
+
+`Facts.Branch` is `""`: Pi records no git branch (S2, S3). Pi's
+conversation branch (tree leaf) is not a git fact.
+
+**Counts are leaf-path counts (the active branch), not whole-file.**
+Definition: the leaf is the last non-header line that parsed as an entry
+with a string `id` (exactly Pi's `_buildIndex`, S7). Walk `parentId`
+from the leaf to a `null` parent, with last-occurrence-wins for a
+duplicate id (Pi's `byId` map) and a visited set against cycles.
+Over that path:
+- `Counts.User` = entries with `type=="message"` and
+  `message.role=="user"`.
+- `Counts.Assistant` = entries with `type=="message"` and
+  `message.role=="assistant"` (each is one model response; same unit as
+  claude's assistant entries).
+- Nothing else counts: `toolResult` (own role), `bashExecution`,
+  `custom_message`, `custom`, `label`, `compaction`, `branch_summary`,
+  `model_change`, `thinking_level_change`, `session_info`, unknown
+  types. Later `type=="session"` lines (Pi's own comments mention a
+  past duplicate-header bug) are ignored and never become the leaf.
+- Entries injected by an extension through `sendUserMessage` are stored
+  as ordinary `user` messages (note 18 §5) and count as user. Pi's format
+  cannot tell them apart. Named limit.
+
+Why the leaf path and not the whole file (the step-01 divergence):
+1. It is Pi's own definition of "the conversation" (`buildSessionContext`
+   walks leaf to root) and matches the devin precedent (on-chain only).
+   A count over every line includes alternatives the user abandoned.
+2. The leaf is the last line, so the leaf path is a pure function of the
+   file bytes (S7). Together with the whole-file sha256 (section 6) the
+   fact cannot go stale relative to the fingerprint: any leaf move
+   appends a line.
+3. Live cost is nil: all 31 live files are linear and both definitions
+   agree on every file (validated, see "Validation" below), so the choice
+   only bites once `/tree` branching or `--fork` copies of branched
+   files appear (B3).
+
+Fallback: if the walk meets a missing parent id or a cycle before a
+`null` parent (damaged file, or an oversize line dropped from the scan),
+fall back to whole-file counts and emit one item diagnostic
+`pi: <path>: leaf path broken at <id>; counts are whole-file`.
+Over-counting damaged files is safer than silently under-counting.
+Memory: one small record per entry (id, parent id, role, substantive
+flag), no message bodies, so facts never materialize prompt text (M10).
+Line size bound: 16 MiB, as claude (`maxLineSize`); a longer line is
+bad-line counted (and therefore may break the chain, which triggers the
+fallback above).
+
+**`Substantive`** = the leaf path contains at least one `assistant`
+message with a non-empty `content` array and `stopReason != "error"`.
+Not `Counts.Assistant >= 1` (claude's rule) because Pi creates the file
+only at the first assistant message (S8), so nearly every Pi file has
+one, and live files include assistant messages with `stopReason`
+`error`/`aborted` and zero content blocks (5 of 1261). A session whose
+only reply is a provider error did nothing and should auto-dismiss as a
+no-op. `aborted` with content counts (the user saw partial work).
+Live: 31/31 files substantive under both rules.
+
+**Facts the format cannot know or that stay unqualified:**
+- The Pi version that wrote the file (B1): no `Facts` field, and no
+  behavior may depend on it; gate only on header `version`.
+- Model and provider: present in `model_change` and assistant messages
+  but `Facts` has no field and none is added; they remain in the
+  artifact for readers.
+- Cost, token totals (B9): not extracted.
+- Tool-call and tool-result counts: derivable (S4) but
+  `journal.SessionCounts` has only `User` and `Assistant`; not added
+  (section 9).
+- Session display name (`session_info`), labels, compaction state: stay
+  in the artifact.
+
+### 6. Freshness and fingerprint
+
+`TranscriptFingerprint{Format: "pi-jsonl-v3", Lines, SHA256}` is
+computed in the single-pass tee over exactly the bytes written, like
+claude: `SHA256` over all bytes; `Lines` = newline bytes plus one for a
+non-empty unterminated final line (identical to
+`source.FingerprintFile`, so a capture's own fingerprint and a later
+default `Unchanged` verdict compare like for like).
+
+**The `FingerprintFile` default suffices; `Unchanged` is not
+implemented.** The verb's default compares `lines` and `sha256` of the
+live file with the prior record. Walking the Pi-specific write
+behaviors (step-01):
+
+| Event | Effect on bytes | Default verdict |
+|---|---|---|
+| resume / new turn (S5, S8) | appended lines | changed (both fields) |
+| newline repair on open (`appendFileSync "\n"`) | +1 byte, same line count | changed (sha256) |
+| truncate then regrow to the same line count | different bytes | changed (sha256); `lines` alone would say unchanged |
+| pre-v3 in-place rewrite (B2) | whole file rewritten | changed; see below |
+| `touch` / mtime change with identical bytes | none | unchanged (mtime is never evidence) |
+| `/tree` leaf move | in memory only; the next append is the new leaf, so bytes change then (S7) | changed once the next line lands |
+| fork created (S6) | new file only; parent untouched | parent unchanged |
+
+What `Unchanged` (the default) compares: the live file's whole-byte
+sha256 and line count against `prior.Transcript`. The sha256 is the
+verdict; `Lines` is a cheap early field. Why that is the right unit:
+every fact in section 5 is a pure function of the file bytes, so equal
+bytes imply equal facts. No timestamp, size, mtime, or `ModTime`
+shortcut is claimed.
+
+The pre-v3 rewrite cannot overwrite a committed capture, because v1/v2
+files are never captured (section 1): a rewrite that completes yields a
+new v3 file that is then captured as a first capture or as a changed
+recapture of a v3 prefix. A reader that catches the rewrite midway sees a
+header already stamped v3 (Pi migrates in memory first) followed by a
+prefix of the entries; that prefix is committed and the finished rewrite
+changes the bytes, so the next sweep replaces it. Convergent, no
+veto needed.
+
+`Supersede` is not implemented, for the devin reason: a v3 file does
+not legitimately shrink, a torn read is a prefix of the file that
+converges at the next sweep, and a veto would need prior bytes to prove
+"worse". `JournalScope` is not needed (no cross-run state).
+
+### 7. Malformed input
+
+The copy is always verbatim and total: Capture never edits, trims, or
+drops bytes. What varies is what the facts see and what is disclosed.
+
+| Input | Copy | Facts | Outcome class |
+|---|---|---|---|
+| Unparseable line mid-file (including a glued two-object line from the pre-0.84.3 newline defect, and an oversize line) | kept | skipped, counted | one aggregated item diagnostic per capture: `pi: <path>: N unparseable line(s) skipped (first at line L)`; capture succeeds |
+| Entry line that is JSON but has no string `id` | kept | skipped, counted as unparseable | same diagnostic |
+| **Torn tail**: final line unterminated and not valid JSON | kept, including the partial line | partial line excluded from facts and from the bad-line count | no diagnostic, no `Incomplete`: transient on a live file. Counted in `Lines` (FingerprintFile semantics) |
+| Unterminated final line that is valid JSON | kept | included (Pi's loader parses it too, S9) | none |
+| Header-only file (valid header, nothing else) | kept | counts 0, `Substantive` false, `StartedAt` = header timestamp | captured; the verb's no-op auto-dismissal applies |
+| Zero-byte file | not captured | | skipped at Discover (section 2); if it empties between Discover and Capture, header check fails: item diagnostic |
+| First line not a header, or version != 3 at Capture time (file changed after Discover) | staged copy discarded | | `Capture` returns an error: item diagnostic, committed capture stands (verb behavior) |
+| Header `id` at Capture differs from `d.NativeID` (file replaced) | discarded | | `Capture` error: item diagnostic |
+| Read error mid-copy | discarded | | `Capture` error: item diagnostic |
+| Context cancelled | | | fatal, never folded into a diagnostic (shared policy) |
+
+Why the torn tail stays in the copy (not truncated at the last
+newline): the default `Unchanged` re-hashes the live file; a copy that
+dropped the partial bytes would never match, so a stalled torn tail
+(crashed Pi) would be re-captured on every sweep. A verbatim copy is a
+fixpoint. It also keeps the "artifact == source bytes" promise (M13).
+Why not an error: a live Pi session is the main case, and it would be
+uncapturable whenever a write is in flight. Why not `Incomplete`: the
+flag means the source's own check could not prove the bytes cover the
+revision recorded; here the recorded revision is exactly the bytes
+copied, and `Facts.Incomplete` is documented as never set for whole
+local-file copies. When Pi later repairs the tail (`\n` appended, or the
+write completes) the bytes change and the next sweep recaptures.
+
+A bad line that sits permanently mid-file (the stalled torn tail after
+Pi appended `\n`) is disclosed on each capture of that file, not on
+each sweep: unchanged sessions are skipped before any parse.
+
+### 8. Failure boundaries
+
+| Condition | Bare sweep | Explicit `--harness pi` |
+|---|---|---|
+| No candidate root exists | quiet, nothing captured | `Present` error: `capture.source-unavailable`, exit 1 |
+| Root exists, empty | quiet | exit 0, nothing captured |
+| Root exists, none enumerable | source failure line on stderr, other sources run, exit 0 | `capture.source-unavailable`, exit 1 |
+| One root unreadable, another fine | item diagnostic | item diagnostic |
+| Subdirectory unreadable | item diagnostic | item diagnostic |
+| `settings.json` unreadable or malformed; relative override | item diagnostic, fall back to other roots | same |
+| Zero-byte or header-in-flight file | skipped silently | skipped silently |
+| Bad or missing header, bad id, oversize header | item diagnostic, skipped | same |
+| Unsupported `version` (1, 2, missing, 4+) | item diagnostic, skipped | same (exit 0) |
+| Duplicate header id | item diagnostic for each loser | same |
+| Filename id disagrees with header | item diagnostic, captured | same |
+| Bad lines mid-file; broken leaf path | captured, item diagnostic | same |
+| Torn tail | captured, silent | same |
+| Capture-time open/read/header failure | item diagnostic, committed capture stands | same |
+| Journal store write failure, cancellation | fatal, exit 4 (`internal.capture`) | same |
+
+No Pi condition is a whole-source failure except "roots exist and none
+can be enumerated". Explicit and sweep differ only at the root level,
+exactly as for claude.
+
+### 9. Shared model and seam amendments
+
+**None needed.** Specifically:
+- `source.Source` / `Facts` / `Discovered`: used as is. No new `Facts`
+  field (no model, provider, cost, tool counts, parent session).
+- `journal.TranscriptFingerprint` / `SessionCounts`: unchanged; default
+  artifact name; only the format string `pi-jsonl-v3` is new.
+- Optional seams: `Presence` implemented (required by the registry
+  conformance test); `Unchanged`, `Supersede`, `JournalScope` not
+  implemented, with reasons above. `TranscriptRenderer` /
+  `TranscriptReader` are optional and out of scope for capture; if
+  added later they declare `pi-jsonl-v3` and must follow the leaf path
+  for turns and pair `toolCall.id` with `toolResult.toolCallId` (S4).
+- Registry: one mechanical row in `registry.All` (not an amendment).
+  No change to `capture.exclude` validation beyond the new name
+  becoming implemented.
+- MODEL §7/M13 and SOURCES §3 need documentation touch-ups only:
+  SOURCES §3's `pi` row should name the four relocators and the
+  flat-versus-per-cwd layouts (surprise 1), and the "DAG" wording is
+  right for the format but the active conversation is the leaf path.
+
+### Asymmetric examples
+
+Synthetic, placeholder text only (`T`). `u`/`a` are ids; each line is
+abbreviated to `type/role id<-parent`. All were run through a throwaway
+implementation of this contract in the scratch directory
+(`contract.py`); outputs below are its results.
+
+1. **Fork counted separately, shared ids kept.** Parent file P (header
+   id `AAAA`, ts day 1): `u1<-null`, `a1<-u1`, `u2<-a1`, `a2<-u2`.
+   Fork F (header id `BBBB`, ts day 2, `parentSession`=P): the same four
+   lines byte-identical, then `u3<-a2`, `a3<-u3`.
+   Chosen: two sessions, `pi-AAAA` {user 2, assistant 2} and `pi-BBBB`
+   {user 3, assistant 3}, F's shard is day 2, `StartedAt` day 2.
+   Plausible-wrong: de-duplicating F's copied entries against P at
+   capture would give F {1,1}, and which file "owns" shared ids would
+   depend on sweep order (nondeterministic); taking `StartedAt` from F's
+   first entry would file F under day 1 and show a fork as days old.
+2. **Fresh fork, no new entries.** F header ts 10:00 day 2; copied
+   entries end at 09:00 day 1. Chosen: `StartedAt = LastActiveAt =
+   10:00 day 2`. Plausible-wrong (max of entries only): `LastActiveAt`
+   09:00 day 1, before `StartedAt`. Counts are the copied history's
+   (fixture: user 1, assistant 1).
+3. **Branch inside one file.** Lines: `u1<-null`, `a1<-u1`, `u2<-a1`,
+   `a2<-u2`, `u3<-a1`, `a3<-u3` (user went back to `a1` and re-asked).
+   Chosen (leaf `a3`, path `u1,a1,u3,a3`): user 2, assistant 2.
+   Plausible-wrong (whole file): user 3, assistant 3. Script output:
+   `user=2 asst=2 wholeU=3 wholeA=3`. `LastActiveAt` is `a3`'s time
+   under both; had the abandoned branch ended later it would count.
+4. **Torn tail.** Header, `u1<-null`, `a1<-u1`, then the bytes
+   `{"type":"message","id":"c3","parentId":"a1","timest` with no newline.
+   Chosen: the artifact holds all those bytes; `Lines`=4 (3 newline
+   lines + the unterminated one, equal to `FingerprintFile`), counts
+   {user 1, assistant 1}, no diagnostic, `Incomplete` false. After Pi
+   finishes the write, the sha256 changes and the next sweep recaptures
+   with counts +1. Plausible-wrong A: copy only up to the last newline
+   (`Lines`=3): every later default `Unchanged` check re-hashes the full
+   live file, never matches, and a crashed session is re-captured forever.
+   Plausible-wrong B: fail the capture on the partial line: a live
+   session is uncapturable whenever a write is in flight.
+5. **Truncate and regrow to the same line count.** Captured file has 5
+   lines (sha S1). Later the file again has 5 lines with different
+   bytes (rewrite, or a replaced file; sha S2). Chosen: changed,
+   recapture (sha256 decides). Plausible-wrong: compare `Lines` or size
+   or mtime: unchanged, stale transcript stays curated against changed
+   content. Converse: a `touch` with identical bytes is unchanged and
+   writes nothing.
+6. **Error-only session.** Header, `u1<-null`, `a9<-u1` with
+   `stopReason:"error"`, `content:[]`. Chosen: user 1, assistant 1,
+   `Substantive` false, auto-dismissed. Plausible-wrong (claude's
+   `assistant >= 1`): substantive true, a provider-failure-only session
+   surfaces in wake. Script output: `subst=False`.
+7. **Unsupported version.** Header `{"type":"session","version":4,...}`
+   (or no `version`). Chosen: skipped with
+   `unsupported session version 4 (supported: 3)`; nothing in the
+   journal. Plausible-wrong: copy it and stamp `pi-jsonl-v3`, which
+   mislabels an unqualified format (B2, B8).
+8. **Duplicate header id.** Files in two dirs both with header id
+   `AAAA`, mtimes 10:00 and 12:00. Chosen: the 12:00 file is `pi-AAAA`;
+   the 10:00 path gets a `duplicate session id AAAA, using <path>`
+   diagnostic. Plausible-wrong: capture both under one key and thrash
+   the committed copy every sweep (each looks "changed" against the
+   other's fingerprint).
+9. **Hostile id.** Header `"id":"../../x"`: fails the id rule, skipped
+   with a diagnostic. Plausible-wrong: use it as the native id and
+   write outside the session directory.
+10. **Header-only file.** Valid v3 header, no entries: captured,
+    counts 0, `Substantive` false, `StartedAt` = header time,
+    auto-dismissed as a no-op. Plausible-wrong: skip it (hides a real
+    session start) or treat it as unsupported.
+
+### Validation done in this step
+
+- Throwaway rule implementation `contract.py` (scratch, not in repo)
+  over all 31 live files: leaf-path counts equal whole-file counts for
+  31/31, no broken leaf paths, `Substantive` identical under both rules
+  for 31/31. So the live store cannot distinguish the chosen rules; only
+  the synthetic cases above do (examples 3, 4, 6), which are constructed
+  and not Pi evidence.
+- Seams read: `source.go`, `fingerprint.go`, `claude/{capture,correlate,
+  claude}.go`, `verbs/capture/capture.go` (`unchangedVerdict`,
+  `captureOne`), `journal/{paths,records,walk}.go`. Facts found there
+  that the contract depends on: the journal key is `(harness, native
+  id)` and the id becomes a directory name; the default `Unchanged` is
+  `FingerprintFile` on `d.Path`; a `Capture` error discards the stage
+  and keeps the committed capture; `Facts.Incomplete` is for non-whole
+  reads only.
+
+### Open questions (need a human)
+
+1. **Should clast gain a config key for extra Pi roots** (for
+   `--session-dir` and project-level `sessionDir`, which it cannot see)?
+   The contract honors three of the four relocators plus two history
+   roots. A key such as `capture.pi.roots` would be new config surface;
+   not added here.
+2. **Duplicate-id winner rule** (newest mtime) is a judgment call
+   without evidence (B7). Alternative: skip all duplicates and disclose,
+   which avoids replacing content but captures nothing for that id.
+3. **Leaf-path counts** differ from claude's whole-transcript counts the
+   moment a branched file appears. If wake wants cross-harness
+   comparability, whole-file would be the alternative; the cost is
+   counting abandoned branches.
