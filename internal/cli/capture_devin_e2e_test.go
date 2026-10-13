@@ -209,7 +209,7 @@ func TestPlumbingCapture_DevinFailedSourceDisclosed(t *testing.T) {
 // validation error: a bad name names the implemented set, devin now in it.
 func TestPlumbingCapture_UnknownHarnessListsDevin(t *testing.T) {
 	env := devinEnv(t, t.TempDir())
-	r := run(t, env, "plumbing", "capture", "--harness", "pi", "--json")
+	r := run(t, env, "plumbing", "capture", "--harness", "nope", "--json")
 	if r.exitCode != 2 && r.exitCode != 1 {
 		t.Fatalf("unknown harness: exit=%d stderr=%q", r.exitCode, r.stderr)
 	}

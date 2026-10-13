@@ -1,0 +1,2 @@
+{"type":"session","id":"01900000-0000-7000-8000-000000000032","timestamp":"2026-03-01T11:00:00.000Z","cwd":"/home/user/Code/demo"}
+{"type":"message","timestamp":"2026-03-01T11:00:01.000Z","message":{"role":"user","content":"FIXTURE-OK"}}

@@ -8,8 +8,8 @@ import (
 )
 
 func TestTableCarriesImplementedSources(t *testing.T) {
-	if len(Names) != 3 || Names[0] != "claude" || Names[1] != "amp" || Names[2] != "devin" {
-		t.Fatalf("Names = %v, want [claude amp devin]", Names)
+	if len(Names) != 4 || Names[0] != "claude" || Names[1] != "amp" || Names[2] != "devin" || Names[3] != "pi" {
+		t.Fatalf("Names = %v, want [claude amp devin pi]", Names)
 	}
 	s, ok := Lookup("claude")
 	if !ok || s.Name() != "claude" {
@@ -28,6 +28,19 @@ func TestTableCarriesImplementedSources(t *testing.T) {
 	}
 	if d.Model() == source.Network {
 		t.Errorf("devin Model() = %q — a local model is the default-inclusion verdict", d.Model())
+	}
+	p, ok := Lookup("pi")
+	if !ok || p.Name() != "pi" {
+		t.Fatalf("Lookup(pi) = %v, %v", p, ok)
+	}
+	if p.Model() != source.FileTail {
+		t.Errorf("pi Model() = %q, want file-tail — a local model is the default-inclusion verdict", p.Model())
+	}
+	if _, ok := LookupTranscriptRenderer("pi-jsonl-v3"); !ok {
+		t.Error("no renderer for pi-jsonl-v3")
+	}
+	if _, ok := LookupTranscriptReader("pi-jsonl-v3"); !ok {
+		t.Error("no reader for pi-jsonl-v3")
 	}
 }
 

@@ -54,8 +54,13 @@ anything new or grown — silently: nothing on stdout when there is
 nothing to do. The Claude Code SessionStart hook runs it in the
 background on every session start, so it also fits a cron line.
 
-Two sources exist today. **claude** reads local files and always joins
-a sweep. **amp** fetches Amp threads over the network through the `amp`
+Four sources exist today. **claude**, **devin** and **pi** are local:
+they read files already on disk (pi: the session JSONL under
+`~/.pi/agent/sessions`, or wherever Pi's `PI_CODING_AGENT_SESSION_DIR`,
+`PI_CODING_AGENT_DIR` or `settings.json` point), need no executable on
+PATH, and join every sweep automatically; `capture.exclude: [pi]` skips
+one, and `--harness pi` captures it for that run even when excluded.
+They take no `auto` key. **amp** fetches Amp threads over the network through the `amp`
 CLI's own subprocess surface, so it is opt-in: installing amp or being
 logged in is never authorization by itself.
 

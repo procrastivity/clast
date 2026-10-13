@@ -17,6 +17,7 @@ import (
 	"github.com/procrastivity/clast/internal/source/amp"
 	"github.com/procrastivity/clast/internal/source/claude"
 	"github.com/procrastivity/clast/internal/source/devin"
+	"github.com/procrastivity/clast/internal/source/pi"
 )
 
 // All lists every implemented source, in the order help text and the
@@ -24,12 +25,16 @@ import (
 // network-model row (source.Network — the declaration alone keeps it
 // out of bare sweeps until capture.amp.auto opts in); devin joins as
 // the sqlite-export row (M13) — a local model, so bare sweeps include
-// it unless capture.exclude says otherwise, and it needs no auto key.
-// pi joins when it lands (MODEL §9), behind the same interface.
+// it unless capture.exclude says otherwise, and it needs no auto key;
+// pi joins as the local file-tail row (MODEL §9) on the same terms as
+// devin — default-included, excludable, overridable by --harness, no
+// auto key — and, like claude, answers from retained files with no pi
+// executable involved.
 var All = []source.Source{
 	claude.New(),
 	amp.New(),
 	devin.New(),
+	pi.New(),
 }
 
 // Names lists every source name in All's order — validation errors and
