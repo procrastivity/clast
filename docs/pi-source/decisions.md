@@ -9,7 +9,9 @@ outcome/exit table. Pi is a local `source.FileTail` source modeled on
 `internal/source/claude`; `internal/source/amp` (network) and
 `internal/source/devin` (SQLite) are not models for it.
 
-Status: step-01 (qualification) and step-02 (contract) done; implementation not started.
+Status: step-01 (qualification), step-02 (contract) and step-03 (fixtures,
+format boundary, validation recipes) done; step-04 (discovery and
+correlation) is next; no production Go exists yet.
 
 ## Qualification evidence (step-01)
 
@@ -942,17 +944,226 @@ implementation of this contract in the scratch directory
   and keeps the committed capture; `Facts.Incomplete` is for non-whole
   reads only.
 
-### Open questions (need a human)
+### Settled calls (owner, 2026-10-13)
 
-1. **Should clast gain a config key for extra Pi roots** (for
-   `--session-dir` and project-level `sessionDir`, which it cannot see)?
-   The contract honors three of the four relocators plus two history
-   roots. A key such as `capture.pi.roots` would be new config surface;
-   not added here.
-2. **Duplicate-id winner rule** (newest mtime) is a judgment call
-   without evidence (B7). Alternative: skip all duplicates and disclose,
-   which avoids replacing content but captures nothing for that id.
-3. **Leaf-path counts** differ from claude's whole-transcript counts the
-   moment a branched file appears. If wake wants cross-harness
-   comparability, whole-file would be the alternative; the cost is
-   counting abandoned branches.
+The three questions raised at the end of step-02 are closed:
+
+1. **No `capture.pi.roots` config key now.** The roots clast cannot see
+   (the `--session-dir` flag, project-level `.pi/settings.json`) are a
+   **named limitation**, to be revisited on demand. Until then a Pi
+   install using only those relocators is not discovered; the doc and
+   any user-facing text must say so rather than imply full coverage.
+2. **Duplicate header ids: newest `ModTime` wins** (tie: smallest
+   path), every loser gets a diagnostic (section 3). Final.
+3. **Counts are leaf-path counts** (section 5), with the whole-file
+   fallback only for a broken path. Final; whole-file comparability with
+   claude is not a goal.
+
+### Pinned details the step-02 text left implicit
+
+- **Blank lines.** A line that is empty or only whitespace is neither a
+  bad line nor an entry (Pi skips it too). It still counts as a line in
+  `Lines` (newline bytes).
+- **Line numbers in diagnostics** are 1-based physical lines in the file
+  (the header is line 1), blank lines included. `first at line L` uses
+  that numbering (fixtures `bad-lines`: 6, `broken-chain`: 5).
+- **What parses as an entry for the leaf walk:** a JSON object on its
+  own line, not on line 1, `type != "session"`, with a string `id`. A
+  later `type:"session"` line is ignored (never the leaf, not counted
+  bad). `parentId` absent, `null`, or a string; any other type is
+  treated as `null`.
+- **Id length.** The id rule has no length cap (Pi has none). A name too
+  long for the filesystem fails at stage/commit, which is an item
+  diagnostic through the verb, not a Discover rule.
+- **No decoding of message text** anywhere in discovery or facts
+  (M10). Correlation reads only line 1.
+
+## Format compatibility boundary
+
+**Supported: `pi-jsonl-v3`** = a file whose first line is a
+`type:"session"` header with integer `version` exactly 3 and a string
+`id` passing the Pi id rule, followed by zero or more newline-framed
+JSON entry lines. Evidence base: Pi 0.83.0 (prior art) and 0.84.4
+(installed source plus 31 retained files); the header version did not
+move between them. Entry shapes read by the contract: `type`, `id`,
+`parentId`, `timestamp`, and for `message` entries `message.role`,
+`message.content` (array emptiness only) and `message.stopReason`. Every
+other field, and every unknown entry type, is carried verbatim and
+ignored by facts. Optional additions seen in 0.84-era data
+(`diagnostics`, `details`, `usage` variants) do not matter.
+
+**Not supported (each is a named outcome, not a default):**
+
+| Input | Outcome | Basis |
+|---|---|---|
+| header `version` 1, 2, missing, or non-integer | skipped, `unsupported session version` diagnostic | B2 |
+| header `version` 4 or higher (v4 harness files) | same | B8 |
+| header not on line 1; file starting with a non-header line | skipped, diagnostic | step-02 section 2 |
+| header line over 1 MiB | skipped, diagnostic | Pi's own scan cap |
+| id failing `^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$` | skipped, diagnostic | journal path safety |
+| `--session-dir` and project-level `sessionDir` stores | not discovered | settled call 1 |
+| per-file writer version, cost/tokens, tool-call counts, model/provider, parent linkage as facts | not extracted | B1, B9, section 9 |
+| `/fork` or `/clone` files, `/tree` files, `custom*`/`label`/`branch_summary`/`bashExecution` entries | captured verbatim, counted by the generic rules; shapes are source-evidence only | B3, B4 |
+| duplicate header ids across files | one winner captured, others diagnosed | B7 |
+| Windows path forms, non-Unix cwd encodings | out of scope | not qualified |
+
+Anything else Pi adds later inside a v3 file is carried and ignored. A
+v3 header with a different meaning would be undetectable; B1 means the
+format version is the only gate.
+
+## Fixtures
+
+`internal/source/pi/testdata/` (README.md is the manifest; the table
+there gives per-fixture provenance, scrub transformation, and expected
+`StartedAt`, `LastActiveAt`, `Lines`, `User`, `Assistant`,
+`Substantive`, diagnostics). 36 fixture files in six discovery roots
+under `roots/`: `percwd` (16 capturable sessions in four per-cwd
+directories), `flat`, `rejected`, `diagnosed`, `duplicate`, `walkshape`.
+All text is placeholder, none was copied from a live or prior-art file;
+every fixture is labelled `constructed`,
+`constructed-from-live-shape`, or `constructed-from-prior-art-shape`,
+and none is Pi evidence. The generator and checker were throwaway
+scratch scripts; the committed files are the artifact. Hand edits must
+keep the README table in step with the bytes (Lines in particular).
+
+Fixture-to-contract map:
+
+| Contract point | Fixture(s) |
+|---|---|
+| basic counts, tool pairing | `basic` |
+| resume appends, LastActiveAt later than StartedAt by days | `resume` |
+| fork: own session, shared ids, StartedAt from header | `fork-parent`, `fork-child` |
+| fresh fork: LastActiveAt = header time | `fork-fresh` |
+| leaf path vs whole file | `branch` |
+| torn tail verbatim, silent | `torn-tail` |
+| valid unterminated last line counted | `unterminated-valid` |
+| bad lines aggregated | `bad-lines` |
+| broken chain fallback | `broken-chain` |
+| header-only, not substantive | `header-only` |
+| error-only vs aborted-with-content | `error-only`, `aborted-partial` |
+| Correlate empty | `no-cwd`, `relative-cwd` |
+| version gate | `version-2`, `version-4`, `version-missing` |
+| id rule | `hostile-dotdot`, `hostile-trailing-dot` |
+| header-in-flight, zero byte, no header, junk before header | `header-inflight`, `zero-byte`, `no-header`, `junk-before-header` |
+| filename vs header id | `filename-id-mismatch`, `filename-no-underscore` |
+| duplicate header id | `dup-original`, `dup-import-copy` (test sets mtimes) |
+| flat vs per-cwd walk, depth limit, suffix filter | `flat-a/b`, `percwd`, `walkshape` |
+
+### Fixture validation (step-03)
+
+A throwaway implementation of the step-02 rules (`contract` header
+classification plus fact extraction) was run over every file under
+`roots/`: 36/36 outcomes match the README manifest (capture, silent
+skip, diagnosed skip, ignored); for the 23 files that reach Capture,
+`StartedAt`, `LastActiveAt`, `User`, `Assistant`, `Substantive`,
+`bad`/first-bad line, broken-path flag, torn flag, id, and Correlate
+value match; `Lines` matches an independent `awk 'END{print NR}'` count
+for all of them; whole-file role counts match `jq` for the files with
+no branch or bad lines; the branch fixture shows leaf 2/2 vs whole 3/3;
+the fork child's copied lines are byte-identical to its parent (hash
+equal). The scrub check found only `FIXTURE-OK` / `FIXTURE-ERROR` as
+text values. Ignore check (global gitignore): see below.
+
+Ignore check: `git status --porcelain --untracked-files=all
+internal/source/pi` lists all 37 files (36 fixtures + README) as `??`,
+`git check-ignore -v --no-index` over every one prints nothing (exit 1),
+and `git add -n internal/source/pi` lists 37. Directory names beginning
+with `--` add normally. Keep file names off the user's global patterns
+(`*.com`, `*.sql`, `*.log`, archives, `.DS_Store`): a future fixture
+named like a domain or a log would vanish silently, so re-run the
+check after adding any.
+
+## Validation recipes
+
+Run from the repo root; step-04 and later steps use these verbatim.
+
+```
+go test ./internal/source/pi/...           # targeted, fast loop
+go test ./...                               # full suite
+make check                                  # lint + test (the gate)
+CGO_ENABLED=0 go build ./cmd/clast          # static-binary promise
+make cross-compile                          # darwin/arm64 + linux/amd64
+git status --porcelain --untracked-files=all internal/source/pi
+git check-ignore -v --no-index $(git ls-files --others --cached internal/source/pi)   # must print nothing
+```
+
+Registry conformance: `go test ./internal/source/registry/...` must
+pass with the new row (it pins `Presence` on every row).
+
+**Read-only dogfood recipe (after capture lands; step-04 only needs the
+discovery/correlation part).** Never point at a real journal and never
+launch Pi:
+
+```
+J=$(mktemp -d)
+go build -o "$J/clast" ./cmd/clast
+# discovery + correlation only (step-04): enumerate against the real store
+#   via a throwaway test or the plumbing sessions verb once capture exists
+CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi
+CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi   # 2nd run: expect 0 captured (fingerprint selectivity)
+CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing sessions
+# explicit-absent: expect capture.source-unavailable, exit 1
+PI_CODING_AGENT_DIR=/nonexistent CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture --harness pi
+# bare sweep with the store absent: quiet for pi, exit 0
+HOME=$(mktemp -d) CLAUDE_CONFIG_DIR="$J/none" CLAST_JOURNAL_DIR="$J/journal" XDG_CONFIG_HOME="$J/cfg" "$J/clast" plumbing capture
+```
+
+Checks: the store under `~/.pi` is byte-unchanged afterwards (compare a
+`find ~/.pi/agent/sessions -type f -exec sha256sum {} +` taken before and
+after); the journal copy of a retained file equals its source byte for
+byte; no stderr diagnostics beyond the ones the fixtures predict for the
+live shape (the 31 retained files predict none); a second sweep captures
+only files that grew. `capture` and `sessions` spellings follow the
+current CLI; confirm with `clast plumbing --help` before scripting.
+
+## Handoff to step-04 (discovery and correlation)
+
+Scope: package `internal/source/pi` with `Name`, `Model`
+(`source.FileTail`), `New`/`NewAt(root)`, `Present`, `Discover`,
+`Correlate`, the shared header reader, and the registry row. `Capture`
+is a later step but the header reader, the id rule and the version gate
+are shared with it, so write them once.
+
+Everything needed is in this document; do not re-open these:
+
+- Names and strings: registry name `pi`; format `pi-jsonl-v3`; artifact
+  `transcript.jsonl` (section 1).
+- Roots and walk (section 2); candidate order; `NewAt` replaces the list;
+  relative overrides rejected with a diagnostic.
+- Header rules and the outcome table (section 2); id rule; version gate
+  (section 1); header read bound 1 MiB.
+- Identity (section 3): header id; filename cross-check diagnostic;
+  duplicate winner rule; forks are separate sessions.
+- Correlate (section 4): header line only; absolute `cwd` or `""`.
+- Failure classes (section 8). Presence semantics (section 2).
+- The fixtures and their expected outcomes (README manifest).
+
+A discovery test per root in `roots/` is the natural first test set:
+`percwd` yields the sessions listed, `flat` two, `rejected` zero (with
+the diagnostics listed), `diagnosed` two (with diagnostics), `duplicate`
+one (after `Chtimes`), `walkshape` one.
+
+### Unresolved essential assumptions
+
+None blocks step-04, but each is an assumption someone may need to
+confirm; none was settled by evidence:
+
+1. **Registry correlation of a lexical cwd.** `registry.ResolveCurrentClone`
+   is assumed to accept the header cwd exactly as claude's `cwd` field is
+   accepted (no trailing-slash or symlink normalization by the source).
+   Not exercised against symlinked checkouts (B10).
+2. **Environment visibility.** Whether `PI_CODING_AGENT_*` is set in the
+   environment of clast hook/cron runs is unknown (B6). The default
+   history roots mitigate it.
+3. **Pi version drift inside v3.** B1: nothing records the writer
+   version; the gate is the header version only. A later Pi that changes
+   v3 semantics silently would be miscounted until noticed.
+4. **Entry-id uniqueness inside a file** is assumed (0 duplicates in 31
+   files); the walk's last-wins rule covers it without proof.
+5. **Header rule strictness.** Requiring the header on line 1 is stricter
+   than Pi (which skips junk before it). Assumed harmless because Pi
+   never writes that shape; a hand-edited file would be skipped with a
+   diagnostic.
+6. **mtime source for the duplicate rule** is `os.Stat` on the path
+   after symlink resolution; behavior on filesystems with coarse mtimes
+   (ties) falls through to the path tiebreak.
