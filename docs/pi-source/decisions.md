@@ -636,8 +636,11 @@ freshness (section 6).
   empty-means-no-fact). It is passed through lexically as Pi wrote it:
   no `EvalSymlinks`, no slug decoding (the slug is lossy; S1/B10). The
   registry then resolves it with `ResolveCurrentClone`, exactly as for
-  claude. A session run through a symlinked path that the registry holds
-  as a realpath stays projectless; that is B10 and is not fixed here.
+  claude. A session run through a symlinked path still resolves to the
+  registered checkout, because the registry matches on git's resolved
+  common-dir; `Project.Path` keeps the literal header cwd. A cwd that is
+  no longer a git checkout stays projectless (B10; Stage 3 evidence,
+  `TestConvergenceSymlinkedCwd`).
   Forks carry the target cwd in their own header (`forkFrom` writes
   `resolvedTargetCwd`), so a cross-project `--fork` correlates to the
   project where it now lives. An unreadable file is an item diagnostic
@@ -977,6 +980,77 @@ The three questions raised at the end of step-02 are closed:
   diagnostic through the verb, not a Discover rule.
 - **No decoding of message text** anywhere in discovery or facts
   (M10). Correlation reads only line 1.
+
+## Recapture and recovery (Stage 3)
+
+Proven through the public `capture.Run` path over fixture-root copies
+and a temporary journal (tests in `internal/source/pi`):
+
+- **Freshness and fork isolation** (`recapture_test.go`): unchanged
+  sessions and a source `touch` cause no journal churn; resume-append,
+  newline repair, shrink, same-line-count rewrite (also same-size) and
+  truncate-then-regrow all recapture to the new bytes; a torn tail that
+  is later completed converges; forks are separate sessions and a
+  parent or child growing never touches the other; a header-only
+  session that grows retracts capture's own `auto:no-op` dismissal and
+  keeps a user's dismissal.
+- **Malformed input and failed reads** (`resilience_test.go`): bad
+  lines, a torn tail and a broken leaf chain recapture verbatim with the
+  contract's diagnostics and whole-file fallback counts (never zeros);
+  a corrupt header, version 4, or a replaced file leaves the prior
+  capture byte- and mtime-identical and readable; unreadable and
+  vanished sources, a refused stage write, a refused commit and a
+  mid-copy cancellation leave prior captures intact and the next
+  healthy sweep repairs them; no checkpoint or extra state file exists
+  in the Pi root or the journal.
+- **Project and curation** (`convergence_test.go`): an unchanged
+  session gains its project by backfill when the clone is registered
+  later, with the artifact untouched; sessions without an absolute cwd
+  never gain a project; a dismissal, a curated entry and its
+  `curation.json` survive append, rewrite and malformed-tail
+  recapture, and the curated session reports stale.
+- **Matrix evidence (scratch, not kept).** A randomized sequence of
+  append, newline repair or unrepair, truncate, same-line-count
+  rewrite, torn tail, bad line, fork, chmod 000, vanish and restore, and
+  touch over up to 10 sessions: seeds 1 to 8, 75 iterations each (600
+  total), with 1 to 3 mutations plus an optional damaged-state sweep per
+  iteration. After each healthy sweep: artifact equals source, session
+  facts equal a fresh `Capture` of the source, a rerun is a no-op,
+  no stray files exist, and sessions not mutated that iteration are
+  byte- and mtime-identical. Result: no violation.
+
+Remaining limitations:
+
+1. A failed `stage.Commit` in the capture verb leaves its
+   `.capture-*` staging directory in the journal root (the verb does not
+   call `Discard` on that path). Shared code, logged in the backlog; no
+   data is lost and the next sweep repairs the session.
+2. Cancellation reaches the caller as a classified `internal.capture`
+   error carrying the message "context canceled";
+   `errors.Is(err, context.Canceled)` is false after `Run`. Shared
+   behavior.
+3. Symlinked cwd (B10): observed behavior differs from the sentence in
+   section 4 ("stays projectless"). The registry matches on git's
+   absolute common-dir, which git resolves, so a header cwd that is a
+   symlink to a registered checkout resolves to that project, and
+   `Project.Path` keeps the literal header cwd. A checkout moved or
+   removed since the session, or a cwd that is not a git checkout,
+   still gives no project. Section 4 now states this observed behavior.
+4. A header-id change before a sweep is a different session (its own
+   key, with the filename-id diagnostic); the old key keeps its last
+   capture and is never merged or deleted.
+5. Source deletion never deletes journal history; a vanished or
+   unreadable file keeps its last capture until it is readable again.
+6. A session whose file is permanently malformed is disclosed once per
+   capture, not per sweep (unchanged sessions skip the parse).
+7. A fact-rule change does not retrigger recapture (hash unchanged), as
+   in section 1.
+8. Two files sharing a header id (B7): if both grow, the winner can
+   change and the stored copy is replaced by the other file's content.
+9. Commit and `session.json` write are two steps; a crash between them
+   leaves a new artifact with an old `session.json`. The fingerprint in
+   the old record no longer matches the source, so the next sweep
+   recaptures. This is reasoned from the verb, not tested.
 
 ## Format compatibility boundary
 
