@@ -31,11 +31,16 @@ installer verifies the binary against `SHA256SUMS` from the same release
 before it writes the destination. That check does not authenticate the
 installer script itself.
 
-Or install the binary with Nix:
+Or install the same release binary with Nix:
 
 ```sh
-nix profile install github:procrastivity/clast
+nix profile install github:procrastivity/clast/stable
 ```
+
+`stable` holds a generated flake that installs the latest release's
+prebuilt binary (Linux amd64, macOS arm64), so Nix compiles nothing. Only
+`contrib/promote-stable` moves it, after a release from `main`. To build
+from source instead, use `github:procrastivity/clast/vX.Y.Z`.
 
 Then, as a separate step, project clast into your agent harnesses:
 
