@@ -37,10 +37,12 @@ Or install the same release binary with Nix:
 nix profile install github:procrastivity/clast/stable
 ```
 
-`stable` holds a generated flake that installs the latest release's
-prebuilt binary (Linux amd64, macOS arm64), so Nix compiles nothing. Only
-`contrib/promote-stable` moves it, after a release from `main`. To build
-from source instead, use `github:procrastivity/clast/vX.Y.Z`.
+`stable` names the latest release. To pin one release, use its
+`bin-vX.Y.Z` tag, for example
+`nix profile install github:procrastivity/clast/bin-v0.1.0`. Both hold a
+generated flake that installs the release's prebuilt binary (Linux amd64,
+macOS arm64), so Nix compiles nothing. `contrib/promote-stable` writes
+them after each release. The `vX.Y.Z` tags and `main` build from source.
 
 Then, as a separate step, project clast into your agent harnesses:
 
